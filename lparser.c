@@ -5983,6 +5983,60 @@ static void asmstat (LexState *ls, int line) {
       continue;
     }
     
+    /*
+    ** jmpx 伪指令: jmpx @label - 跳转到标签（自动计算相对偏移）
+    ** 解决后向跳转时 @label 返回绝对 PC 的问题
+    ** 参数：
+    **   @label - 目标标签
+    ** 功能：
+    **   自动计算从当前 PC 到目标标签的相对偏移，生成正确的 JMP 指令
+    */
+    if (strcmp(opname, "jmpx") == 0 || strcmp(opname, "JMPX") == 0) {
+      int target_pc;
+      int current_pc;
+      int offset;
+      TString *label = NULL;
+      
+      luaX_next(ls);  /* 跳过 'jmpx' */
+      
+      /* 必须是 @label 格式 */
+      if (ls->t.token != TK_OR) {
+        luaK_semerror(ls, "jmpx requires @label argument");
+      }
+      luaX_next(ls);  /* 跳过 '@' (TK_OR) */
+      
+      check(ls, TK_NAME);
+      label = ls->t.seminfo.ts;
+      
+      /* 查找标签 */
+      int labelIdx = asm_findlabel(&ctx, label);
+      if (labelIdx >= 0 && ctx.labels[labelIdx].pc >= 0) {
+        /* 后向引用：标签已定义，直接计算偏移 */
+        target_pc = ctx.labels[labelIdx].pc;
+        current_pc = fs->pc;
+        offset = target_pc - (current_pc + 1);  /* 相对于下一条指令的偏移 */
+        
+        /* 生成 JMP 指令 */
+        Instruction jmp_inst = CREATE_sJ(OP_JMP, offset + OFFSET_sJ, 0);
+        luaK_code(fs, jmp_inst);
+        luaK_fixline(fs, line);
+      }
+      else {
+        /* 前向引用：标签未定义，需要后续修补 */
+        int instpc = fs->pc;
+        Instruction jmp_inst = CREATE_sJ(OP_JMP, OFFSET_sJ, 0);  /* 临时偏移为0 */
+        luaK_code(fs, jmp_inst);
+        luaK_fixline(fs, line);
+        
+        /* 添加到待修补列表 */
+        asm_addpending(ls, &ctx, label, instpc, ls->linenumber, 1);
+      }
+      
+      luaX_next(ls);  /* 跳过标签名 */
+      testnext(ls, ';');
+      continue;
+    }
+    
     /* align 伪指令: align N - 用NOP对齐到N条指令边界 */
     if (strcmp(opname, "align") == 0) {
       int align_val;

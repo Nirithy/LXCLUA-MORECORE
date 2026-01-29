@@ -40,7 +40,7 @@ CORE_O= lapi.o lcode.o lctype.o ldebug.o ldo.o ldump.o lfunc.o lgc.o llex.o lmem
 LIB_O= lauxlib.o lbaselib.o lcorolib.o ldblib.o liolib.o lmathlib.o loadlib.o loslib.o lstrlib.o ltablib.o lutf8lib.o linit.o json_parser.o lboolib.o lbitlib.o lptrlib.o ludatalib.o lvmlib.o lclass.o ltranslator.o lsmgrlib.o logtable.o sha256.o
 BASE_O= $(CORE_O) $(LIB_O) $(MYOBJS)
 
-LUA_T=	lua
+LUA_T=	lxclua
 LUA_O=	lua.o
 
 LUAC_T=	luac
@@ -83,8 +83,8 @@ test:
 
 clean:
 	$(RM) $(ALL_T) $(ALL_O)
-	$(RM) lua.exe luac.exe lbcdump.exe lua55.dll
-	$(RM) *.o *.a *.dll
+	$(RM) lxclua.exe luac.exe lbcdump.exe lua55.dll
+	$(RM) *.o *.a *.dll *.js *.wasm
 
 depend:
 	@$(CC) $(CFLAGS) -MM l*.c
@@ -146,10 +146,10 @@ Darwin macos macosx:
 	$(MAKE) $(ALL) SYSCFLAGS="-DLUA_USE_MACOSX -DLUA_USE_READLINE" SYSLIBS="-lreadline"
 
 mingw:
-	TMPDIR=. TMP=. TEMP=. $(MAKE) "LUA_A=lua55.dll" "LUA_T=lua.exe" \
+	TMPDIR=. TMP=. TEMP=. $(MAKE) "LUA_A=lua55.dll" "LUA_T=lxclua.exe" \
 	"AR=$(CC) -shared -o" "RANLIB=strip --strip-unneeded" \
 	"SYSCFLAGS=-DLUA_BUILD_AS_DLL -DLUA_USE_DLOPEN -DLUA_COMPAT_MATHLIB -DLUA_COMPAT_MAXN -DLUA_COMPAT_MODULE" "SYSLIBS=$(MYLIBS)" "SYSLDFLAGS=-s" \
-	"MYOBJS=$(MYOBJS)" lua.exe
+	"MYOBJS=$(MYOBJS)" lxclua.exe
 	TMPDIR=. TMP=. TEMP=. $(MAKE) "LUA_A=lua55.dll" "LUAC_T=luac.exe" \
 	"AR=$(CC) -shared -o" "RANLIB=strip --strip-unneeded" \
 	"SYSCFLAGS=-DLUA_BUILD_AS_DLL -DLUA_USE_DLOPEN -DLUA_COMPAT_MATHLIB -DLUA_COMPAT_MAXN -DLUA_COMPAT_MODULE" "SYSLIBS=$(MYLIBS)" "SYSLDFLAGS=-s" \
@@ -163,8 +163,43 @@ posix:
 SunOS solaris:
 	$(MAKE) $(ALL) SYSCFLAGS="-DLUA_USE_POSIX -DLUA_USE_DLOPEN -D_REENTRANT" SYSLIBS="-ldl"
 
+# WebAssembly (Emscripten)
+# 需要先安装 Emscripten SDK: https://emscripten.org/docs/getting_started/downloads.html
+# 使用方法: make wasm
+# Emscripten 3.0.0+ 支持 C23 (底层 Clang 18+)
+# Emscripten SDK 路径配置（Windows需要.bat扩展名）
+EMSDK_PATH= e:/Soft/Proje/LXCLUA-NCore/lua/emsdk-main/upstream/emscripten
+EMCC= $(EMSDK_PATH)/emcc.bat
+EMAR= $(EMSDK_PATH)/emar.bat
+EMRANLIB= $(EMSDK_PATH)/emranlib.bat
+
+wasm:
+	$(MAKE) $(ALL) CC="$(EMCC) -std=c23" \
+	"CFLAGS=-O3 -DNDEBUG -fno-exceptions -DLUA_32BITS=0" \
+	"SYSCFLAGS=-DLUA_USE_LONGJMP -DLUA_COMPAT_MATHLIB -DLUA_COMPAT_MAXN" \
+	"SYSLIBS=" \
+	"AR=$(EMAR) rcu" \
+	"RANLIB=$(EMRANLIB)" \
+	"LUA_T=lxclua.js" \
+	"LUAC_T=luac.js" \
+	"LBCDUMP_T=lbcdump.js" \
+	"LDFLAGS=-sWASM=1 -sSINGLE_FILE=1 -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,callMain -sMODULARIZE=1 -sEXPORT_NAME=LuaModule -sALLOW_MEMORY_GROWTH=1 -sFILESYSTEM=1 -sINVOKE_RUN=0"
+
+# WASM 最小化版本（无文件系统，更小体积）
+wasm-minimal:
+	$(MAKE) $(ALL) CC="$(EMCC) -std=c23" \
+	"CFLAGS=-Os -DNDEBUG -fno-exceptions -DLUA_32BITS=0" \
+	"SYSCFLAGS=-DLUA_USE_LONGJMP -DLUA_COMPAT_MATHLIB -DLUA_COMPAT_MAXN" \
+	"SYSLIBS=" \
+	"AR=$(EMAR) rcu" \
+	"RANLIB=$(EMRANLIB)" \
+	"LUA_T=lxclua.js" \
+	"LUAC_T=luac.js" \
+	"LBCDUMP_T=lbcdump.js" \
+	"LDFLAGS=-sWASM=1 -sEXPORTED_RUNTIME_METHODS=ccall,cwrap -sMODULARIZE=1 -sEXPORT_NAME=LuaModule -sALLOW_MEMORY_GROWTH=1 -sFILESYSTEM=0 --closure 1 -sINVOKE_RUN=0"
+
 # Targets that do not create files (not all makes understand .PHONY).
-.PHONY: all $(PLATS) help test clean default o a depend echo
+.PHONY: all $(PLATS) help test clean default o a depend echo wasm wasm-minimal
 
 # Compiler modules may use special flags.
 llex.o:

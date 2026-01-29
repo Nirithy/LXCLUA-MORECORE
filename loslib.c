@@ -22,6 +22,12 @@
 #include <windows.h>
 #include <io.h>
 #include <tlhelp32.h>
+#elif defined(__EMSCRIPTEN__)
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/time.h>
 #else
 #include <unistd.h>
 #include <fcntl.h>
@@ -594,6 +600,10 @@ static int os_tid(lua_State *L) {
   DWORD tid = GetCurrentThreadId();
   lua_pushinteger(L, tid); 
   return 1; 
+#elif defined(__EMSCRIPTEN__)
+  /* Emscripten/WASM环境下返回固定值 */
+  lua_pushinteger(L, 1);
+  return 1;
 #else
   /* Unix上使用syscall获取线程ID */
   pid_t tid = syscall(SYS_gettid); 
@@ -709,9 +719,9 @@ static int os_stacksize(lua_State *L) {
 }
 
 static int os_seccomp(lua_State *L) {
-#ifdef _WIN32
-  /* Windows上不支持seccomp */
-  return luaL_error(L, "seccomp is not supported on Windows");
+#if defined(_WIN32) || defined(__EMSCRIPTEN__)
+  /* Windows/Emscripten上不支持seccomp */
+  return luaL_error(L, "seccomp is not supported on this platform");
 #else
   /* Unix上的seccomp实现 */
   int mode = luaL_optinteger(L, 1, 0);
@@ -811,9 +821,9 @@ static int os_mtime(lua_State *L) {
 }
 
 static int os_syscall(lua_State *L) {
-#ifdef _WIN32
-  /* Windows上不支持syscall */
-  return luaL_error(L, "syscall is not supported on Windows");
+#if defined(_WIN32) || defined(__EMSCRIPTEN__)
+  /* Windows/Emscripten上不支持syscall */
+  return luaL_error(L, "syscall is not supported on this platform");
 #else
   /* Unix上的syscall实现 */
   /* 极简封装系统调用入口 */
@@ -918,9 +928,9 @@ static int os_getppid(lua_State *L) {
 }
 
 static int os_prctl(lua_State *L) {
-#ifdef _WIN32
-  /* Windows上不支持prctl */
-  return luaL_error(L, "prctl is not supported on Windows");
+#if defined(_WIN32) || defined(__EMSCRIPTEN__)
+  /* Windows/Emscripten上不支持prctl */
+  return luaL_error(L, "prctl is not supported on this platform");
 #else
   /**
    * 封装 prctl 系统调用

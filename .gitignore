@@ -36,3 +36,7 @@ Thumbs.db
 
 # Test outputs
 test_output/
+
+# SDK
+emsdk-main/
+*.js
