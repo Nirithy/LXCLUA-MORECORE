@@ -183,7 +183,7 @@ wasm:
 	"LUA_T=lxclua.js" \
 	"LUAC_T=luac.js" \
 	"LBCDUMP_T=lbcdump.js" \
-	"LDFLAGS=-sWASM=1 -sSINGLE_FILE=1 -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,callMain -sMODULARIZE=1 -sEXPORT_NAME=LuaModule -sALLOW_MEMORY_GROWTH=1 -sFILESYSTEM=1 -sINVOKE_RUN=0"
+	"LDFLAGS=-sWASM=1 -sSINGLE_FILE=1 -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,callMain,FS -sMODULARIZE=1 -sEXPORT_NAME=LuaModule -sALLOW_MEMORY_GROWTH=1 -sFILESYSTEM=1 -sINVOKE_RUN=0 --closure 1"
 
 # WASM 最小化版本（无文件系统，更小体积）
 wasm-minimal:
