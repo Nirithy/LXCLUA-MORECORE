@@ -751,6 +751,504 @@ static int f_flush (lua_State *L) {
 }
 
 
+/**
+ * 按行号读取文件的特定行
+ * 功能描述：读取文件中指定行号的内容，支持文本和二进制模式
+ * 参数说明：filename - 文件名, line_num - 行号(从1开始), mode - 可选,"b"为二进制模式
+ * 返回值说明：文本模式返回字符串，二进制模式返回字节table，失败返回nil和错误信息
+ */
+static int io_readline_n (lua_State *L) {
+  const char *filename = luaL_checkstring(L, 1);
+  lua_Integer line_num = luaL_checkinteger(L, 2);
+  const char *mode = luaL_optstring(L, 3, "t");
+  int binary_mode = (mode[0] == 'b' || mode[0] == 'B');
+  FILE *f;
+  int current_line = 1;
+  luaL_Buffer b;
+  int c;
+  
+  if (line_num < 1) {
+    luaL_pushfail(L);
+    lua_pushliteral(L, "行号必须大于0");
+    return 2;
+  }
+  
+  errno = 0;
+  f = fopen(filename, binary_mode ? "rb" : "r");
+  if (f == NULL) {
+    return luaL_fileresult(L, 0, filename);
+  }
+  
+  /* 跳过前面的行 */
+  while (current_line < line_num) {
+    c = fgetc(f);
+    if (c == EOF) {
+      fclose(f);
+      luaL_pushfail(L);
+      lua_pushfstring(L, "文件只有 %d 行", current_line - 1);
+      return 2;
+    }
+    if (c == '\n') current_line++;
+  }
+  
+  if (binary_mode) {
+    /* 二进制模式：返回字节table */
+    lua_newtable(L);
+    int idx = 1;
+    while ((c = fgetc(f)) != EOF && c != '\n') {
+      lua_pushinteger(L, (unsigned char)c);
+      lua_rawseti(L, -2, idx++);
+    }
+  } else {
+    /* 文本模式：返回字符串 */
+    luaL_buffinit(L, &b);
+    while ((c = fgetc(f)) != EOF && c != '\n') {
+      luaL_addchar(&b, c);
+    }
+    luaL_pushresult(&b);
+  }
+  
+  fclose(f);
+  return 1;
+}
+
+
+/**
+ * 按行号写入/替换文件的特定行
+ * 功能描述：写入或替换文件中指定行号的内容，支持文本和二进制模式
+ * 参数说明：filename - 文件名, line_num - 行号(从1开始), content - 字符串或字节table, mode - 可选,"b"为二进制
+ * 返回值说明：成功返回true，失败返回nil和错误信息
+ */
+static int io_writeline_n (lua_State *L) {
+  const char *filename = luaL_checkstring(L, 1);
+  lua_Integer line_num = luaL_checkinteger(L, 2);
+  const char *mode = luaL_optstring(L, 4, "t");
+  int binary_mode = (mode[0] == 'b' || mode[0] == 'B');
+  FILE *f_in, *f_out;
+  char *temp_filename;
+  int current_line = 1;
+  int c;
+  size_t fname_len;
+  const char *content = NULL;
+  size_t content_len = 0;
+  
+  if (line_num < 1) {
+    luaL_pushfail(L);
+    lua_pushliteral(L, "行号必须大于0");
+    return 2;
+  }
+  
+  /* 获取内容 */
+  if (binary_mode) {
+    luaL_checktype(L, 3, LUA_TTABLE);
+  } else {
+    content = luaL_checklstring(L, 3, &content_len);
+  }
+  
+  /* 创建临时文件名 */
+  fname_len = strlen(filename);
+  temp_filename = (char *)lua_newuserdata(L, fname_len + 5);
+  strcpy(temp_filename, filename);
+  strcat(temp_filename, ".tmp");
+  
+  errno = 0;
+  f_in = fopen(filename, binary_mode ? "rb" : "r");
+  if (f_in == NULL) {
+    /* 文件不存在，创建新文件 */
+    f_out = fopen(filename, binary_mode ? "wb" : "w");
+    if (f_out == NULL) {
+      return luaL_fileresult(L, 0, filename);
+    }
+    /* 写入空行直到目标行 */
+    for (lua_Integer i = 1; i < line_num; i++) {
+      fputc('\n', f_out);
+    }
+    /* 写入内容 */
+    if (binary_mode) {
+      lua_Integer len = luaL_len(L, 3);
+      for (lua_Integer i = 1; i <= len; i++) {
+        lua_rawgeti(L, 3, i);
+        fputc((unsigned char)lua_tointeger(L, -1), f_out);
+        lua_pop(L, 1);
+      }
+    } else {
+      fwrite(content, 1, content_len, f_out);
+    }
+    fputc('\n', f_out);
+    fclose(f_out);
+    lua_pushboolean(L, 1);
+    return 1;
+  }
+  
+  f_out = fopen(temp_filename, binary_mode ? "wb" : "w");
+  if (f_out == NULL) {
+    fclose(f_in);
+    return luaL_fileresult(L, 0, temp_filename);
+  }
+  
+  /* 复制并替换指定行 */
+  while ((c = fgetc(f_in)) != EOF) {
+    if (current_line == line_num) {
+      /* 写入新内容 */
+      if (binary_mode) {
+        lua_Integer len = luaL_len(L, 3);
+        for (lua_Integer i = 1; i <= len; i++) {
+          lua_rawgeti(L, 3, i);
+          fputc((unsigned char)lua_tointeger(L, -1), f_out);
+          lua_pop(L, 1);
+        }
+      } else {
+        fwrite(content, 1, content_len, f_out);
+      }
+      /* 跳过原来的行内容 */
+      while (c != '\n' && c != EOF) {
+        c = fgetc(f_in);
+      }
+      if (c == '\n') {
+        fputc('\n', f_out);
+      }
+      current_line++;
+    } else {
+      fputc(c, f_out);
+      if (c == '\n') current_line++;
+    }
+  }
+  
+  /* 如果目标行超过文件行数，追加空行 */
+  while (current_line < line_num) {
+    fputc('\n', f_out);
+    current_line++;
+  }
+  if (current_line == line_num) {
+    if (binary_mode) {
+      lua_Integer len = luaL_len(L, 3);
+      for (lua_Integer i = 1; i <= len; i++) {
+        lua_rawgeti(L, 3, i);
+        fputc((unsigned char)lua_tointeger(L, -1), f_out);
+        lua_pop(L, 1);
+      }
+    } else {
+      fwrite(content, 1, content_len, f_out);
+    }
+    fputc('\n', f_out);
+  }
+  
+  fclose(f_in);
+  fclose(f_out);
+  
+  /* 替换原文件 */
+  remove(filename);
+  rename(temp_filename, filename);
+  
+  lua_pushboolean(L, 1);
+  return 1;
+}
+
+
+/**
+ * 文件句柄的按行号读取
+ * 功能描述：从文件句柄读取指定行号的内容，支持文本和二进制模式
+ * 参数说明：line_num - 行号(从1开始), mode - 可选,"b"为二进制模式
+ * 返回值说明：文本模式返回字符串，二进制模式返回字节table，失败返回nil
+ */
+static int f_readline_n (lua_State *L) {
+  FILE *f = tofile(L);
+  lua_Integer line_num = luaL_checkinteger(L, 2);
+  const char *mode = luaL_optstring(L, 3, "t");
+  int binary_mode = (mode[0] == 'b' || mode[0] == 'B');
+  int current_line = 1;
+  luaL_Buffer b;
+  int c;
+  long saved_pos;
+  
+  if (line_num < 1) {
+    luaL_pushfail(L);
+    lua_pushliteral(L, "行号必须大于0");
+    return 2;
+  }
+  
+  /* 保存当前位置 */
+  saved_pos = ftell(f);
+  rewind(f);
+  
+  /* 跳过前面的行 */
+  while (current_line < line_num) {
+    c = fgetc(f);
+    if (c == EOF) {
+      fseek(f, saved_pos, SEEK_SET);
+      luaL_pushfail(L);
+      return 1;
+    }
+    if (c == '\n') current_line++;
+  }
+  
+  if (binary_mode) {
+    /* 二进制模式：返回字节table */
+    lua_newtable(L);
+    int idx = 1;
+    while ((c = fgetc(f)) != EOF && c != '\n') {
+      lua_pushinteger(L, (unsigned char)c);
+      lua_rawseti(L, -2, idx++);
+    }
+  } else {
+    /* 文本模式：返回字符串 */
+    luaL_buffinit(L, &b);
+    while ((c = fgetc(f)) != EOF && c != '\n') {
+      luaL_addchar(&b, c);
+    }
+    luaL_pushresult(&b);
+  }
+  
+  /* 恢复位置 */
+  fseek(f, saved_pos, SEEK_SET);
+  return 1;
+}
+
+
+/**
+ * 获取文件总行数
+ * 功能描述：统计文件中的总行数
+ * 参数说明：filename - 文件名
+ * 返回值说明：返回行数整数
+ */
+static int io_linecount (lua_State *L) {
+  const char *filename = luaL_checkstring(L, 1);
+  FILE *f;
+  int count = 0;
+  int c;
+  int has_content = 0;
+  
+  errno = 0;
+  f = fopen(filename, "r");
+  if (f == NULL) {
+    return luaL_fileresult(L, 0, filename);
+  }
+  
+  while ((c = fgetc(f)) != EOF) {
+    has_content = 1;
+    if (c == '\n') count++;
+  }
+  
+  /* 如果文件有内容但最后一行没有换行符，也算一行 */
+  if (has_content && c != '\n') count++;
+  
+  fclose(f);
+  lua_pushinteger(L, count);
+  return 1;
+}
+
+
+/**
+ * 读取文件指定范围的行
+ * 功能描述：读取文件中从start_line到end_line的所有行
+ * 参数说明：filename - 文件名, start - 起始行(从1开始), end - 结束行, mode - 可选,"b"为二进制
+ * 返回值说明：返回包含所有行的table，每行为字符串或字节table
+ */
+static int io_readlines_range (lua_State *L) {
+  const char *filename = luaL_checkstring(L, 1);
+  lua_Integer start_line = luaL_checkinteger(L, 2);
+  lua_Integer end_line = luaL_checkinteger(L, 3);
+  const char *mode = luaL_optstring(L, 4, "t");
+  int binary_mode = (mode[0] == 'b' || mode[0] == 'B');
+  FILE *f;
+  int current_line = 1;
+  int c;
+  int result_idx = 1;
+  luaL_Buffer b;
+  
+  if (start_line < 1) {
+    luaL_pushfail(L);
+    lua_pushliteral(L, "起始行号必须大于0");
+    return 2;
+  }
+  if (end_line < start_line) {
+    luaL_pushfail(L);
+    lua_pushliteral(L, "结束行号必须大于等于起始行号");
+    return 2;
+  }
+  
+  errno = 0;
+  f = fopen(filename, binary_mode ? "rb" : "r");
+  if (f == NULL) {
+    return luaL_fileresult(L, 0, filename);
+  }
+  
+  /* 创建结果table */
+  lua_newtable(L);
+  
+  /* 跳过前面的行 */
+  while (current_line < start_line) {
+    c = fgetc(f);
+    if (c == EOF) {
+      fclose(f);
+      return 1;  /* 返回空table */
+    }
+    if (c == '\n') current_line++;
+  }
+  
+  /* 读取范围内的所有行 */
+  while (current_line <= end_line) {
+    if (binary_mode) {
+      /* 二进制模式：每行为字节table */
+      lua_newtable(L);
+      int byte_idx = 1;
+      while ((c = fgetc(f)) != EOF && c != '\n') {
+        lua_pushinteger(L, (unsigned char)c);
+        lua_rawseti(L, -2, byte_idx++);
+      }
+      lua_rawseti(L, -2, result_idx++);
+    } else {
+      /* 文本模式：每行为字符串 */
+      luaL_buffinit(L, &b);
+      while ((c = fgetc(f)) != EOF && c != '\n') {
+        luaL_addchar(&b, c);
+      }
+      luaL_pushresult(&b);
+      lua_rawseti(L, -2, result_idx++);
+    }
+    
+    if (c == EOF) break;
+    current_line++;
+  }
+  
+  fclose(f);
+  return 1;
+}
+
+
+/**
+ * 写入文件指定范围的行
+ * 功能描述：替换文件中从start_line到end_line的所有行
+ * 参数说明：filename - 文件名, start - 起始行, end - 结束行, lines - 行table, mode - 可选,"b"为二进制
+ * 返回值说明：成功返回true，失败返回nil和错误信息
+ */
+static int io_writelines_range (lua_State *L) {
+  const char *filename = luaL_checkstring(L, 1);
+  lua_Integer start_line = luaL_checkinteger(L, 2);
+  lua_Integer end_line = luaL_checkinteger(L, 3);
+  luaL_checktype(L, 4, LUA_TTABLE);
+  const char *mode = luaL_optstring(L, 5, "t");
+  int binary_mode = (mode[0] == 'b' || mode[0] == 'B');
+  FILE *f_in, *f_out;
+  char *temp_filename;
+  int current_line = 1;
+  int c;
+  size_t fname_len;
+  lua_Integer lines_count;
+  
+  if (start_line < 1) {
+    luaL_pushfail(L);
+    lua_pushliteral(L, "起始行号必须大于0");
+    return 2;
+  }
+  if (end_line < start_line) {
+    luaL_pushfail(L);
+    lua_pushliteral(L, "结束行号必须大于等于起始行号");
+    return 2;
+  }
+  
+  lines_count = luaL_len(L, 4);
+  
+  /* 创建临时文件名 */
+  fname_len = strlen(filename);
+  temp_filename = (char *)lua_newuserdata(L, fname_len + 5);
+  strcpy(temp_filename, filename);
+  strcat(temp_filename, ".tmp");
+  
+  errno = 0;
+  f_in = fopen(filename, binary_mode ? "rb" : "r");
+  f_out = fopen(temp_filename, binary_mode ? "wb" : "w");
+  
+  if (f_out == NULL) {
+    if (f_in) fclose(f_in);
+    return luaL_fileresult(L, 0, temp_filename);
+  }
+  
+  if (f_in == NULL) {
+    /* 文件不存在，创建新文件 */
+    for (lua_Integer i = 1; i < start_line; i++) {
+      fputc('\n', f_out);
+    }
+    /* 写入新行 */
+    for (lua_Integer i = 1; i <= lines_count; i++) {
+      lua_rawgeti(L, 4, i);
+      if (binary_mode && lua_istable(L, -1)) {
+        lua_Integer len = luaL_len(L, -1);
+        for (lua_Integer j = 1; j <= len; j++) {
+          lua_rawgeti(L, -1, j);
+          fputc((unsigned char)lua_tointeger(L, -1), f_out);
+          lua_pop(L, 1);
+        }
+      } else {
+        size_t slen;
+        const char *s = lua_tolstring(L, -1, &slen);
+        if (s) fwrite(s, 1, slen, f_out);
+      }
+      fputc('\n', f_out);
+      lua_pop(L, 1);
+    }
+    fclose(f_out);
+    lua_pushboolean(L, 1);
+    return 1;
+  }
+  
+  /* 复制start_line之前的行 */
+  while (current_line < start_line) {
+    c = fgetc(f_in);
+    if (c == EOF) break;
+    fputc(c, f_out);
+    if (c == '\n') current_line++;
+  }
+  
+  /* 补充空行（如果原文件行数不够） */
+  while (current_line < start_line) {
+    fputc('\n', f_out);
+    current_line++;
+  }
+  
+  /* 写入新行 */
+  for (lua_Integer i = 1; i <= lines_count; i++) {
+    lua_rawgeti(L, 4, i);
+    if (binary_mode && lua_istable(L, -1)) {
+      lua_Integer len = luaL_len(L, -1);
+      for (lua_Integer j = 1; j <= len; j++) {
+        lua_rawgeti(L, -1, j);
+        fputc((unsigned char)lua_tointeger(L, -1), f_out);
+        lua_pop(L, 1);
+      }
+    } else {
+      size_t slen;
+      const char *s = lua_tolstring(L, -1, &slen);
+      if (s) fwrite(s, 1, slen, f_out);
+    }
+    fputc('\n', f_out);
+    lua_pop(L, 1);
+  }
+  
+  /* 跳过原文件中被替换的行 */
+  while (current_line <= end_line) {
+    c = fgetc(f_in);
+    if (c == EOF) break;
+    if (c == '\n') current_line++;
+  }
+  
+  /* 复制剩余的行 */
+  while ((c = fgetc(f_in)) != EOF) {
+    fputc(c, f_out);
+  }
+  
+  fclose(f_in);
+  fclose(f_out);
+  
+  /* 替换原文件 */
+  remove(filename);
+  rename(temp_filename, filename);
+  
+  lua_pushboolean(L, 1);
+  return 1;
+}
+
+
 /*
 ** functions for 'io' library
 */
@@ -882,6 +1380,7 @@ static const luaL_Reg iolib[] = {
   {"close", io_close},
   {"flush", io_flush},
   {"input", io_input},
+  {"linecount", io_linecount},
   {"lines", io_lines},
 #ifndef _WIN32
   {"mmap", io_mmap},
@@ -891,10 +1390,14 @@ static const luaL_Reg iolib[] = {
   {"output", io_output},
   {"popen", io_popen},
   {"read", io_read},
+  {"readline", io_readline_n},
   {"saveall", io_saveall},
   {"tmpfile", io_tmpfile},
   {"type", io_type},
   {"write", io_write},
+  {"writeline", io_writeline_n},
+  {"readlines", io_readlines_range},
+  {"writelines", io_writelines_range},
   {NULL, NULL}
 };
 
@@ -904,6 +1407,7 @@ static const luaL_Reg iolib[] = {
 */
 static const luaL_Reg meth[] = {
   {"read", f_read},
+  {"readline", f_readline_n},
   {"write", f_write},
   {"lines", f_lines},
   {"flush", f_flush},

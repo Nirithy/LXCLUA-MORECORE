@@ -84,7 +84,7 @@ test:
 clean:
 	$(RM) $(ALL_T) $(ALL_O)
 	$(RM) lxclua.exe luac.exe lbcdump.exe lua55.dll
-	$(RM) *.o *.a *.dll *.js *.wasm
+	$(RM) *.o *.a *.dll *.js *.wasm lxclua_standalone.html
 
 depend:
 	@$(CC) $(CFLAGS) -MM l*.c
