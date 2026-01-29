@@ -6068,12 +6068,64 @@ static void asmstat (LexState *ls, int line) {
     }
     
     if (strcmp(opname, "_assert") == 0 || strcmp(opname, "asmassert") == 0) {
-      lua_Integer cond;
+      int cond_result;
+      lua_Integer left_val, right_val;
       luaX_next(ls);  /* 跳过 '_assert' */
       
-      cond = asm_getint_ex(ls, &ctx, NULL, NULL);
+      /* 解析左操作数 */
+      left_val = asm_getint_ex(ls, &ctx, NULL, NULL);
       
-      if (cond == 0) {
+      /* 检查是否有比较运算符 */
+      if (ls->t.token == TK_EQ) {  /* == */
+        luaX_next(ls);
+        right_val = asm_getint_ex(ls, &ctx, NULL, NULL);
+        cond_result = (left_val == right_val);
+      }
+      else if (ls->t.token == TK_NE) {  /* ~= 或 != */
+        luaX_next(ls);
+        right_val = asm_getint_ex(ls, &ctx, NULL, NULL);
+        cond_result = (left_val != right_val);
+      }
+      else if (ls->t.token == '>') {
+        luaX_next(ls);
+        if (ls->t.token == '=') {  /* >= */
+          luaX_next(ls);
+          right_val = asm_getint_ex(ls, &ctx, NULL, NULL);
+          cond_result = (left_val >= right_val);
+        }
+        else {  /* > */
+          right_val = asm_getint_ex(ls, &ctx, NULL, NULL);
+          cond_result = (left_val > right_val);
+        }
+      }
+      else if (ls->t.token == '<') {
+        luaX_next(ls);
+        if (ls->t.token == '=') {  /* <= */
+          luaX_next(ls);
+          right_val = asm_getint_ex(ls, &ctx, NULL, NULL);
+          cond_result = (left_val <= right_val);
+        }
+        else {  /* < */
+          right_val = asm_getint_ex(ls, &ctx, NULL, NULL);
+          cond_result = (left_val < right_val);
+        }
+      }
+      else if (ls->t.token == TK_GE) {  /* >= */
+        luaX_next(ls);
+        right_val = asm_getint_ex(ls, &ctx, NULL, NULL);
+        cond_result = (left_val >= right_val);
+      }
+      else if (ls->t.token == TK_LE) {  /* <= */
+        luaX_next(ls);
+        right_val = asm_getint_ex(ls, &ctx, NULL, NULL);
+        cond_result = (left_val <= right_val);
+      }
+      else {
+        /* 没有比较运算符，只检查值是否非零 */
+        cond_result = (left_val != 0);
+      }
+      
+      if (cond_result == 0) {
         /* 断言失败 */
         if (ls->t.token == TK_STRING || ls->t.token == TK_RAWSTRING) {
           const char *msg = getstr(ls->t.seminfo.ts);
