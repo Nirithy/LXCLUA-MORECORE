@@ -12,6 +12,7 @@
 
 #include <limits.h>
 #include <string.h>
+#include <stdio.h>
 
 #include "lua.h"
 
@@ -1298,6 +1299,8 @@ static void fieldsel (LexState *ls, expdesc *v) {
       case TK_WHEN: ts = luaS_newliteral(ls->L, "when"); break;
       case TK_WITH: ts = luaS_newliteral(ls->L, "with"); break;
       case TK_WHILE: ts = luaS_newliteral(ls->L, "while"); break;
+      case TK_KEYWORD: ts = luaS_newliteral(ls->L, "keyword"); break;
+      case TK_OPERATOR: ts = luaS_newliteral(ls->L, "operator"); break;
       default: error_expected(ls, TK_NAME);
     }
     codestring(&key, ts);
@@ -2247,6 +2250,8 @@ static void suffixedexp (LexState *ls, expdesc *v) {
             case TK_WHEN: ts = luaS_newliteral(ls->L, "when"); break;
             case TK_WITH: ts = luaS_newliteral(ls->L, "with"); break;
             case TK_WHILE: ts = luaS_newliteral(ls->L, "while"); break;
+            case TK_KEYWORD: ts = luaS_newliteral(ls->L, "keyword"); break;
+            case TK_OPERATOR: ts = luaS_newliteral(ls->L, "operator"); break;
             default: error_expected(ls, TK_NAME);
           }
           codestring(&key, ts);
@@ -3505,6 +3510,8 @@ static void cond_suffixedexp (LexState *ls, expdesc *v) {
             case TK_WHEN: ts = luaS_newliteral(ls->L, "when"); break;
             case TK_WITH: ts = luaS_newliteral(ls->L, "with"); break;
             case TK_WHILE: ts = luaS_newliteral(ls->L, "while"); break;
+            case TK_KEYWORD: ts = luaS_newliteral(ls->L, "keyword"); break;
+            case TK_OPERATOR: ts = luaS_newliteral(ls->L, "operator"); break;
             default: error_expected(ls, TK_NAME);
           }
           codestring(&key, ts);
@@ -5204,6 +5211,7 @@ static int funcname (LexState *ls, expdesc *v) {
 */
 #define ASM_MAX_LABELS 64    /* 最大标签数量 */
 #define ASM_MAX_PENDING 128  /* 最大待修补跳转数量 */
+#define ASM_MAX_DEFINES 64   /* 最大汇编常量定义数量 */
 
 typedef struct AsmLabel {
   TString *name;    /* 标签名称 */
@@ -5218,11 +5226,22 @@ typedef struct AsmPending {
   int isJump;       /* 是否是跳转指令（需要计算偏移） */
 } AsmPending;
 
+/*
+** 汇编常量定义结构
+** 用于 def 伪指令定义的编译期常量
+*/
+typedef struct AsmDefine {
+  TString *name;    /* 常量名称 */
+  lua_Integer value;/* 常量值 */
+} AsmDefine;
+
 typedef struct AsmContext {
   AsmLabel labels[ASM_MAX_LABELS];      /* 标签数组 */
   int nlabels;                           /* 标签数量 */
   AsmPending pending[ASM_MAX_PENDING];  /* 待修补跳转数组 */
   int npending;                          /* 待修补数量 */
+  AsmDefine defines[ASM_MAX_DEFINES];   /* 常量定义数组 */
+  int ndefines;                          /* 常量定义数量 */
 } AsmContext;
 
 
@@ -5290,6 +5309,50 @@ static void asm_deflabel (LexState *ls, AsmContext *ctx, TString *name, int pc, 
     ctx->labels[ctx->nlabels].pc = pc;
     ctx->labels[ctx->nlabels].line = line;
     ctx->nlabels++;
+  }
+}
+
+
+/*
+** 在汇编上下文中查找常量定义
+** 参数：
+**   ctx - 汇编上下文
+**   name - 常量名称
+** 返回值：
+**   常量索引，如果找不到则返回 -1
+*/
+static int asm_finddefine (AsmContext *ctx, TString *name) {
+  int i;
+  for (i = 0; i < ctx->ndefines; i++) {
+    if (ctx->defines[i].name == name)
+      return i;
+  }
+  return -1;
+}
+
+
+/*
+** 添加或更新汇编常量定义
+** 参数：
+**   ls - 词法状态
+**   ctx - 汇编上下文
+**   name - 常量名称
+**   value - 常量值
+*/
+static void asm_adddefine (LexState *ls, AsmContext *ctx, TString *name, lua_Integer value) {
+  int idx = asm_finddefine(ctx, name);
+  if (idx >= 0) {
+    /* 更新已存在的定义 */
+    ctx->defines[idx].value = value;
+  }
+  else {
+    /* 新定义 */
+    if (ctx->ndefines >= ASM_MAX_DEFINES) {
+      luaK_semerror(ls, "too many defines in asm (max %d)", ASM_MAX_DEFINES);
+    }
+    ctx->defines[ctx->ndefines].name = name;
+    ctx->defines[ctx->ndefines].value = value;
+    ctx->ndefines++;
   }
 }
 
@@ -5507,6 +5570,7 @@ static lua_Integer asm_getint_ex (LexState *ls, AsmContext *ctx,
   else if (ls->t.token == TK_NAME) {
     /* 检查是否是 Rn/rn 格式的寄存器引用 */
     const char *name = getstr(ls->t.seminfo.ts);
+    TString *ts = ls->t.seminfo.ts;
     if ((name[0] == 'R' || name[0] == 'r') && name[1] >= '0' && name[1] <= '9') {
       /* 解析寄存器编号 */
       val = 0;
@@ -5523,7 +5587,15 @@ static lua_Integer asm_getint_ex (LexState *ls, AsmContext *ctx,
         return val;
       }
     }
-    /* 不是寄存器格式，报错 */
+    /* 检查是否是通过 def 定义的常量 */
+    if (ctx != NULL) {
+      int defIdx = asm_finddefine(ctx, ts);
+      if (defIdx >= 0) {
+        luaX_next(ls);
+        return ctx->defines[defIdx].value;
+      }
+    }
+    /* 不是寄存器格式也不是定义的常量，报错 */
     luaX_syntaxerror(ls, "integer expected in asm instruction");
     return 0;
   }
@@ -5744,8 +5816,15 @@ static lua_Integer asm_trygetint_ex (LexState *ls, AsmContext *ctx,
   if (ls->t.token == TK_INT || ls->t.token == '-' ||
       ls->t.token == '$' || ls->t.token == '^' || 
       ls->t.token == '#' || ls->t.token == '@' ||
-      ls->t.token == '!') {
+      ls->t.token == '!' || ls->t.token == '%') {
     return asm_getint_ex(ls, ctx, pendingPc, pendingLabel);
+  }
+  /* 检查是否是 Rn 格式的寄存器引用 */
+  if (ls->t.token == TK_NAME) {
+    const char *name = getstr(ls->t.seminfo.ts);
+    if ((name[0] == 'R' || name[0] == 'r') && name[1] >= '0' && name[1] <= '9') {
+      return asm_getint_ex(ls, ctx, pendingPc, pendingLabel);
+    }
   }
   if (pendingPc) *pendingPc = -1;
   if (pendingLabel) *pendingLabel = NULL;
@@ -5799,6 +5878,7 @@ static void asmstat (LexState *ls, int line) {
   /* 初始化汇编上下文 */
   ctx.nlabels = 0;
   ctx.npending = 0;
+  ctx.ndefines = 0;
   
   luaX_next(ls);  /* 跳过 'asm' */
   checknext(ls, '(');
@@ -5908,6 +5988,98 @@ static void asmstat (LexState *ls, int line) {
         luaK_code(fs, nop_inst);
         luaK_fixline(fs, line);
       }
+      
+      testnext(ls, ';');
+      continue;
+    }
+    
+    /* def 伪指令: def name value - 定义汇编常量（仅在当前asm块有效）*/
+    if (strcmp(opname, "def") == 0 || strcmp(opname, "define") == 0) {
+      TString *def_name;
+      lua_Integer def_value;
+      luaX_next(ls);  /* 跳过 'def' */
+      
+      check(ls, TK_NAME);
+      def_name = ls->t.seminfo.ts;
+      luaX_next(ls);  /* 跳过常量名 */
+      
+      /* 获取常量值 */
+      def_value = asm_getint_ex(ls, &ctx, NULL, NULL);
+      
+      /* 添加到常量定义表 */
+      asm_adddefine(ls, &ctx, def_name, def_value);
+      
+      testnext(ls, ';');
+      continue;
+    }
+    
+    /* 
+    ** 调试辅助伪指令
+    ** _print "msg" [value]  - 编译时打印消息和可选值
+    ** _assert cond ["msg"]  - 编译时断言，条件为假时报错
+    ** _info                 - 打印当前编译状态（PC、寄存器等）
+    */
+    if (strcmp(opname, "_print") == 0 || strcmp(opname, "asmprint") == 0) {
+      luaX_next(ls);  /* 跳过 '_print' */
+      
+      if (ls->t.token == TK_STRING || ls->t.token == TK_RAWSTRING) {
+        const char *msg = getstr(ls->t.seminfo.ts);
+        luaX_next(ls);
+        
+        /* 检查是否有可选的值参数 */
+        if (ls->t.token == TK_INT || ls->t.token == '-' ||
+            ls->t.token == '$' || ls->t.token == '%' ||
+            ls->t.token == '!' || ls->t.token == '@') {
+          lua_Integer val = asm_getint_ex(ls, &ctx, NULL, NULL);
+          printf("[ASM] %s: %lld\n", msg, (long long)val);
+        }
+        else {
+          printf("[ASM] %s\n", msg);
+        }
+      }
+      else {
+        /* 没有消息，直接打印值 */
+        lua_Integer val = asm_getint_ex(ls, &ctx, NULL, NULL);
+        printf("[ASM] value: %lld\n", (long long)val);
+      }
+      
+      testnext(ls, ';');
+      continue;
+    }
+    
+    if (strcmp(opname, "_assert") == 0 || strcmp(opname, "asmassert") == 0) {
+      lua_Integer cond;
+      luaX_next(ls);  /* 跳过 '_assert' */
+      
+      cond = asm_getint_ex(ls, &ctx, NULL, NULL);
+      
+      if (cond == 0) {
+        /* 断言失败 */
+        if (ls->t.token == TK_STRING || ls->t.token == TK_RAWSTRING) {
+          const char *msg = getstr(ls->t.seminfo.ts);
+          luaX_next(ls);
+          luaK_semerror(ls, "asm assertion failed: %s", msg);
+        }
+        else {
+          luaK_semerror(ls, "asm assertion failed");
+        }
+      }
+      else {
+        /* 断言成功，跳过可选的消息 */
+        if (ls->t.token == TK_STRING || ls->t.token == TK_RAWSTRING) {
+          luaX_next(ls);
+        }
+      }
+      
+      testnext(ls, ';');
+      continue;
+    }
+    
+    if (strcmp(opname, "_info") == 0 || strcmp(opname, "asminfo") == 0) {
+      luaX_next(ls);  /* 跳过 '_info' */
+      
+      printf("[ASM INFO] line=%d, pc=%d, freereg=%d, nactvar=%d, nk=%d\n",
+             ls->linenumber, fs->pc, fs->freereg, fs->nactvar, fs->nk);
       
       testnext(ls, ';');
       continue;
