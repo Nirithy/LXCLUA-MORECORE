@@ -87,6 +87,11 @@ body {
     min-height: 200px;
     max-height: 300px;
     overflow: auto;
+    transition: all 0.3s ease;
+}
+#output.expanded {
+    min-height: 400px;
+    max-height: 600px;
 }
 #editor-container {
     display: flex;
@@ -200,6 +205,8 @@ button:active {
 .font-controls { display: inline; margin-left: 10px; }
 .font-controls button { padding: 4px 10px; font-size: 14px; background: #4b5563; }
 .font-controls select { padding: 4px 8px; background: #4b5563; color: white; border: none; font-size: 12px; cursor: pointer; border-radius: 4px; font-family: inherit; }
+.terminal-controls { display: inline; margin-left: 5px; }
+.terminal-controls button { padding: 4px 8px; font-size: 14px; background: #4b5563; margin: 0 2px; }
 #fontFileInput { display: none; }
 .drop-zone { border: 2px dashed #3c3c3c; border-radius: 4px; transition: all 0.3s; }
 .drop-zone.drag-over { border-color: #0e639c; background: rgba(14,99,156,0.2); }
@@ -221,6 +228,7 @@ var isRunning = false;
 var fontSize = 14;
 var fontFamily = 'monospace';
 var currentLang = 'en';
+var isTerminalExpanded = false;
 
 var i18n = {
     en: {
@@ -238,7 +246,8 @@ var i18n = {
         notPersist: ', will not persist', cacheWarn: '[WARN] Cache too large, some files not saved',
         importOk: 'Workspace imported!', importFail: '[ERR] Import failed: ',
         delConfirm: 'Delete ', newFileName: 'File name:', dirName: 'Directory name:',
-        newName: 'New name:', edit: 'Edit', dl: 'DL', ren: 'Ren', del: 'Del'
+        newName: 'New name:', edit: 'Edit', dl: 'DL', ren: 'Ren', del: 'Del',
+        expandTerminal: 'Expand Terminal', collapseTerminal: 'Collapse Terminal'
     },
     zh: {
         title: 'LXCLUA 网页版',
@@ -255,7 +264,8 @@ var i18n = {
         notPersist: ', 不会持久保存', cacheWarn: '[警告] 缓存过大，部分文件未保存',
         importOk: '工作区已导入!', importFail: '[错误] 导入失败: ',
         delConfirm: '删除 ', newFileName: '文件名:', dirName: '目录名:',
-        newName: '新名称:', edit: '编辑', dl: '下载', ren: '重命名', del: '删除'
+        newName: '新名称:', edit: '编辑', dl: '下载', ren: '重命名', del: '删除',
+        expandTerminal: '展开终端', collapseTerminal: '收起终端'
     }
 };
 
@@ -292,8 +302,51 @@ function applyLang() {
     document.getElementById('exportBtn').textContent = t('export');
     document.getElementById('importBtn').textContent = t('import');
     document.getElementById('fontBtn').textContent = t('font');
-    document.getElementById('input').placeholder = t('placeholder');
+    document.getElementById('terminalBtn').textContent = isTerminalExpanded ? t('collapseTerminal') : t('expandTerminal');
     updateFileList();
+}
+
+/**
+ * 切换终端大小
+ * 功能描述：展开或收起终端显示区域
+ */
+function toggleTerminalSize() {
+    isTerminalExpanded = !isTerminalExpanded;
+    var terminalBtn = document.getElementById('terminalBtn');
+    var outputEl = document.getElementById('output');
+    
+    if (isTerminalExpanded) {
+        outputEl.classList.add('expanded');
+        outputEl.style.minHeight = '400px';
+        outputEl.style.maxHeight = '600px';
+        terminalBtn.textContent = t('collapseTerminal');
+        try { localStorage.setItem('lxclua_terminal_height', 400); } catch(e) {}
+    } else {
+        outputEl.classList.remove('expanded');
+        outputEl.style.minHeight = '200px';
+        outputEl.style.maxHeight = '300px';
+        terminalBtn.textContent = t('expandTerminal');
+        try { localStorage.setItem('lxclua_terminal_height', 200); } catch(e) {}
+    }
+    
+    try { localStorage.setItem('lxclua_terminal_expanded', isTerminalExpanded); } catch(e) {}
+}
+
+/**
+ * 加载终端大小设置
+ * 功能描述：从localStorage恢复终端展开状态
+ */
+function loadTerminalSize() {
+    try {
+        var saved = localStorage.getItem('lxclua_terminal_expanded');
+        if (saved !== null) {
+            isTerminalExpanded = saved === 'true';
+            var outputEl = document.getElementById('output');
+            if (isTerminalExpanded) {
+                outputEl.classList.add('expanded');
+            }
+        }
+    } catch(e) {}
 }
 
 /**
@@ -442,20 +495,52 @@ function handleKeydown(e) {
             saveAndExit();
         } else {
             saveDraft();
-            outputEl.textContent += '[INFO] Draft saved\\n';
+            outputEl.textContent += t('draftSaved') + '\\n';
         }
     }
 }
 
 /**
  * 调整字体大小
- * 功能描述：增加或减少编辑器字体
+ * 功能描述：增加或减少编辑器和终端字体
  */
 function changeFontSize(delta) {
     fontSize = Math.max(10, Math.min(24, fontSize + delta));
     inputEl.style.fontSize = fontSize + 'px';
     lineNumEl.style.fontSize = fontSize + 'px';
+    outputEl.style.fontSize = fontSize + 'px';
     try { localStorage.setItem('lxclua_fontsize', fontSize); } catch(e) {}
+}
+
+/**
+ * 调整终端大小
+ * 功能描述：增加或减少终端高度
+ */
+function changeTerminalSize(delta) {
+    var outputEl = document.getElementById('output');
+    var currentHeight = parseInt(window.getComputedStyle(outputEl).minHeight);
+    var newHeight = Math.max(100, Math.min(800, currentHeight + delta));
+    
+    outputEl.style.minHeight = newHeight + 'px';
+    outputEl.style.maxHeight = (newHeight + 100) + 'px';
+    
+    try { localStorage.setItem('lxclua_terminal_height', newHeight); } catch(e) {}
+}
+
+/**
+ * 加载终端高度设置
+ * 功能描述：从localStorage恢复终端高度
+ */
+function loadTerminalHeight() {
+    try {
+        var saved = localStorage.getItem('lxclua_terminal_height');
+        if (saved) {
+            var height = parseInt(saved);
+            var outputEl = document.getElementById('output');
+            outputEl.style.minHeight = height + 'px';
+            outputEl.style.maxHeight = (height + 100) + 'px';
+        }
+    } catch(e) {}
 }
 
 /**
@@ -532,7 +617,7 @@ function saveCache() {
         }
         localStorage.setItem('lxclua_files', JSON.stringify(saveData));
     } catch (e) {
-        outputEl.textContent += '[WARN] Cache too large, some files not saved\\n';
+        outputEl.textContent += t('cacheWarn') + '\n';
         outputEl.scrollTop = outputEl.scrollHeight;
     }
 }
@@ -605,6 +690,8 @@ loadDraft();
 loadFontSize();
 loadFont();
 loadLang();
+loadTerminalSize();
+loadTerminalHeight();
 updateEditorSize();
 setTimeout(function() {
     initDragDrop();
@@ -746,10 +833,10 @@ function formatSize(bytes) {
  */
 function copyOutput() {
     navigator.clipboard.writeText(outputEl.textContent).then(function() {
-        outputEl.textContent += '[INFO] Output copied!\\n';
+        outputEl.textContent += t('outputCopied') + '\\n';
         outputEl.scrollTop = outputEl.scrollHeight;
     }).catch(function() {
-        outputEl.textContent += '[ERR] Copy failed\\n';
+        outputEl.textContent += t('copyFailed') + '\\n';
     });
 }
 
@@ -758,7 +845,7 @@ function copyOutput() {
  * 功能描述：创建一个新的空Lua文件
  */
 function createFile() {
-    var name = prompt('File name:', 'new.lua');
+    var name = prompt(t('newFileName'), 'new.lua');
     if (name) {
         fileCache[name] = '';
         if (lua) lua.FS.writeFile('/' + name, '');
@@ -773,22 +860,30 @@ function createFile() {
 function updateFileList() {
     var listEl = document.getElementById('fileList');
     var names = Object.keys(fileCache).sort();
-    var html = '<b>' + t('files') + '</b><br>';
-    for (var i = 0; i < names.length; i++) {
-        var name = names[i];
-        var isDir = fileCache[name] === null;
-        var size = isDir ? '' : formatSize(fileCache[name].length);
-        html += '<div class="file-item">';
-        html += '<span class="' + (isDir ? 'dir' : '') + '" ondblclick="' + (isDir ? '' : 'editFile(\\'' + name + '\\')') + '">' + name + (isDir ? '/' : '') + '</span>';
-        if (!isDir) {
-            html += '<span class="file-size">' + size + '</span>';
-            html += '<button class="edit" onclick="editFile(\\'' + name + '\\')">' + t('edit') + '</button>';
-            html += '<button class="dl" onclick="downloadFile(\\'' + name + '\\')">' + t('dl') + '</button>';
+    
+    if (names.length === 0) {
+        // 没有文件时隐藏文件列表
+        listEl.style.display = 'none';
+    } else {
+        // 有文件时显示文件列表并生成内容
+        listEl.style.display = 'block';
+        var html = '<b>' + t('files') + '</b><br>';
+        for (var i = 0; i < names.length; i++) {
+            var name = names[i];
+            var isDir = fileCache[name] === null;
+            var size = isDir ? '' : formatSize(fileCache[name].length);
+            html += '<div class="file-item">';
+            html += '<span class="' + (isDir ? 'dir' : '') + '" ondblclick="' + (isDir ? '' : 'editFile(\\'' + name + '\\')') + '">' + name + (isDir ? '/' : '') + '</span>';
+            if (!isDir) {
+                html += '<span class="file-size">' + size + '</span>';
+                html += '<button class="edit" onclick="editFile(\\'' + name + '\\')">' + t('edit') + '</button>';
+                html += '<button class="dl" onclick="downloadFile(\\'' + name + '\\')">' + t('dl') + '</button>';
+            }
+            html += '<button class="ren" onclick="renameFile(\\'' + name + '\\')">' + t('ren') + '</button>';
+            html += '<button class="del" onclick="deleteFile(\\'' + name + '\\')">' + t('del') + '</button></div>';
         }
-        html += '<button class="ren" onclick="renameFile(\\'' + name + '\\')">' + t('ren') + '</button>';
-        html += '<button class="del" onclick="deleteFile(\\'' + name + '\\')">' + t('del') + '</button></div>';
+        listEl.innerHTML = html;
     }
-    listEl.innerHTML = html;
 }
 
 /**
@@ -849,7 +944,17 @@ function downloadFile(name) {
  * 删除文件
  */
 function deleteFile(name) {
-    if (confirm('Delete ' + name + '?')) {
+    if (confirm(t('delConfirm') + name + '?')) {
+        // 检查是否正在编辑该文件
+        if (isEditingFile && currentEditFile === name) {
+            inputEl.value = '';
+            isEditingFile = false;
+            currentEditFile = null;
+            document.getElementById('saveBtn').style.display = 'none';
+            document.getElementById('cancelEditBtn').style.display = 'none';
+            updateLineNumbers();
+        }
+        
         delete fileCache[name];
         if (lua) {
             try { lua.FS.unlink('/' + name); } catch (e) {
@@ -865,7 +970,7 @@ function deleteFile(name) {
  * 重命名文件
  */
 function renameFile(name) {
-    var newName = prompt('New name:', name);
+    var newName = prompt(t('newName'), name);
     if (newName && newName !== name) {
         fileCache[newName] = fileCache[name];
         delete fileCache[name];
@@ -884,7 +989,7 @@ function uploadFiles(files) {
     for (var i = 0; i < files.length; i++) {
         (function(file) {
             if (file.size > 5000000) {
-                outputEl.textContent += '[WARN] File too large (>5MB): ' + file.name + ', will not persist\\n';
+                outputEl.textContent += t('fileTooLarge') + file.name + t('notPersist') + '\\n';
                 outputEl.scrollTop = outputEl.scrollHeight;
             }
             var reader = new FileReader();
@@ -894,7 +999,7 @@ function uploadFiles(files) {
                 if (lua) lua.FS.writeFile('/' + file.name, content);
                 saveCache();
                 updateFileList();
-                outputEl.textContent += '[INFO] Uploaded: ' + file.name + ' (' + formatSize(content.length) + ')\\n';
+                outputEl.textContent += t('uploaded') + file.name + ' (' + formatSize(content.length) + ')\n';
                 outputEl.scrollTop = outputEl.scrollHeight;
             };
             reader.readAsText(file);
@@ -907,7 +1012,7 @@ function uploadFiles(files) {
  * 创建目录
  */
 function createDir() {
-    var name = prompt('Directory name:');
+    var name = prompt(t('dirName'));
     if (name) {
         fileCache[name] = null;
         if (lua) {
@@ -952,9 +1057,9 @@ function importWorkspace(file) {
                 }
             }
             updateFileList();
-            outputEl.textContent += 'Workspace imported!\\n';
+            outputEl.textContent += t('importOk') + '\\n';
         } catch (ex) {
-            outputEl.textContent += '[ERR] Import failed: ' + ex + '\\n';
+            outputEl.textContent += t('importFail') + ex + '\n';
         }
     };
     reader.readAsText(file);
@@ -982,7 +1087,7 @@ function importWorkspace(file) {
     <div id="output">Loading...</div>
     <div id="editor-container">
         <div id="lineNumbers">1</div>
-        <textarea id="input" rows="8" placeholder="print('Hello LXCLUA!')"></textarea>
+        <textarea id="input" rows="8"></textarea>
         <div id="editor-size">0B</div>
     </div>
     <br>
@@ -990,6 +1095,11 @@ function importWorkspace(file) {
     <button id="stopBtn" onclick="stopLua()">Stop</button>
     <button id="clearBtn" onclick="clearConsole()">Clear</button>
     <button id="copyBtn" onclick="copyOutput()">Copy</button>
+    <button id="terminalBtn" onclick="toggleTerminalSize()">Expand Terminal</button>
+    <span class="terminal-controls">
+        <button onclick="changeTerminalSize(-50)">-</button>
+        <button onclick="changeTerminalSize(50)">+</button>
+    </span>
     <button id="uploadBtn" onclick="document.getElementById('fileInput').click()">Upload</button>
     <button id="newFileBtn" onclick="createFile()">New File</button>
     <button id="newDirBtn" onclick="createDir()">New Dir</button>
