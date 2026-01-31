@@ -662,6 +662,7 @@ typedef struct Proto {
   GCObject *gclist;
   int is_sleeping;
   CallQueue *call_queue;
+  struct VMCodeTable *vm_code_table;  /* VM保护代码表指针 */
 } Proto;
 
 /* }======================================================= */

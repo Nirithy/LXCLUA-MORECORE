@@ -616,6 +616,7 @@ int luaU_dump(lua_State *L, const Proto *f, lua_Writer w, void *data,
   D.data = data;
   D.strip = strip;
   D.status = 0;
+  D.timestamp = 0;  /* 初始化为0，让dumpFunction设置 */
   D.obfuscate_flags = 0;  /* 默认不启用混淆 */
   D.obfuscate_seed = 0;
   D.log_path = NULL;  /* 不输出日志 */
@@ -659,6 +660,7 @@ int luaU_dump_obfuscated(lua_State *L, const Proto *f, lua_Writer w, void *data,
   D.data = data;
   D.strip = strip;
   D.status = 0;
+  D.timestamp = 0;  /* 初始化为0，让dumpFunction设置 */
   D.obfuscate_flags = obfuscate_flags;
   D.obfuscate_seed = (seed != 0) ? seed : (unsigned int)time(NULL);
   D.log_path = log_path;

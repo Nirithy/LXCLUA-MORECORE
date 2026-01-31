@@ -349,6 +349,8 @@ typedef struct global_State {
   void *ud_warn;         /* auxiliary data to 'warnf' */
   /* 内存池管理结构 */
   MemPoolArena mempool;  /* 内存池管理 */
+  /* VM保护代码表链表 */
+  struct VMCodeTable *vm_code_list;  /* VM代码表链表头 */
 } global_State;
 
 
