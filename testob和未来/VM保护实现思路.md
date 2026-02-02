@@ -11,8 +11,22 @@
    - luaO_findVMCode
    - luaO_freeAllVMCode
    - decryptVMInst（解密函数）
+5. ✅ luaO_executeVM核心解释循环（lobfuscate.c:3057-3638）
+   - 数据移动: NOP, HALT, MOVE, LOAD, STORE
+   - 算术运算: ADD, SUB, MUL, DIV, MOD, IDIV, UNM
+   - 位运算: BAND, BOR, BXOR, BNOT, SHL, SHR
+   - 跳转比较: JMP, JEQ, JNE, JLT, JLE, JGT, JGE
+   - 逻辑: NOT, LEN, CONCAT
+   - 表操作: NEWTABLE, GETTABLE, SETTABLE, GETFIELD, SETFIELD
+   - Upvalue: GETUPVAL, SETUPVAL
+   - 函数调用: CALL, RET, CLOSURE, SELF
+   - 复杂指令(TAILCALL, VARARG, FORLOOP等)回退到原生VM
+6. ✅ lvm.c添加VM保护检测入口（startfunc标签后）
+7. ✅ luaO_vmProtect注册VM代码到全局表
+8. ✅ ldump.c VM代码序列化（写入字节码文件）
+9. ✅ lundump.c VM代码反序列化（从字节码加载）
 
-## 待完成的核心任务
+## 已完成的核心任务
 
 ### 1. 实现luaO_executeVM核心解释循环
 

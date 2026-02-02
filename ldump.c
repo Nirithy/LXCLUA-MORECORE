@@ -156,7 +156,11 @@ static void generateThirdOpcodeMap(DumpState *D) {
 /* 生成字符串映射表（用于动态加密解密） */
 static void generateStringMap(DumpState *D, int map_size) {
   int i, j, temp;
-  unsigned int seed = (unsigned int)D->timestamp;
+  /* 使用timestamp和obfuscate_seed组合生成种子，确保每个字符串映射表不同 */
+  unsigned int seed = (unsigned int)D->timestamp ^ D->obfuscate_seed;
+  
+  /* 更新obfuscate_seed，确保下次调用使用不同的种子 */
+  D->obfuscate_seed = D->obfuscate_seed * 1664525 + 1013904223;
   
   /* 线性同余生成器参数 */
   const unsigned int a = 1664525;
@@ -226,8 +230,9 @@ static void dumpString (DumpState *D, const TString *s) {
     const char *str = getstr(s);
     dumpSize(D, size + 1);
 
-    /* 为每个字符串生成新的时间戳 */
+    /* 为每个字符串生成新的时间戳并写入 */
     D->timestamp = time(NULL);
+    dumpVar(D, D->timestamp);  /* 写入该字符串专用的时间戳 */
     
     /* 生成字符串映射表（用于动态加密） */
     generateStringMap(D, 256);
@@ -361,8 +366,7 @@ static void dumpCode (DumpState *D, const Proto *f) {
   /* 写入原始大小 */
   dumpInt(D, orig_size);
   
-  /* 写入时间戳 */
-  dumpVar(D, D->timestamp);
+  /* 时间戳已在dumpFunction开头写入，此处不再重复写入 */
   
   /* 写入反向OPcode映射表，用于加载时恢复原始OPcode */
   for (i = 0; i < NUM_OPCODES; i++) {
@@ -557,6 +561,9 @@ static void dumpFunction (DumpState *D, const Proto *f, TString *psource) {
   /* 生成动态时间戳密钥 */
   D->timestamp = time(NULL);
   
+  /* 首先写入时间戳，确保字符串解密时能正确使用 */
+  dumpVar(D, D->timestamp);
+  
   /* 如果启用了控制流扁平化，先对函数进行扁平化处理 */
   Proto *work_proto = (Proto *)f;  /* 转换为非const指针以便修改 */
   if (D->obfuscate_flags & OBFUSCATE_CFF) {
@@ -577,6 +584,27 @@ static void dumpFunction (DumpState *D, const Proto *f, TString *psource) {
   dumpByte(D, work_proto->difierline_mode);  /* 新增：写入自定义标志 */
   dumpInt(D, work_proto->difierline_magicnum);  /* 新增：写入自定义版本号 */
   dumpVar(D, work_proto->difierline_data);  /* 新增：写入自定义数据字段 */
+  
+  /* VM保护数据序列化 */
+  if (work_proto->difierline_mode & OBFUSCATE_VM_PROTECT && work_proto->vm_code_table != NULL) {
+    VMCodeTable *vt = work_proto->vm_code_table;
+    dumpInt(D, 1);  /* VM代码存在标记 */
+    dumpInt(D, vt->size);  /* VM指令数量 */
+    dumpVar(D, vt->encrypt_key);  /* 加密密钥 */
+    dumpVar(D, vt->seed);  /* 随机种子 */
+    /* 写入VM指令数组 */
+    for (int i = 0; i < vt->size; i++) {
+      dumpVar(D, vt->code[i]);
+    }
+    /* 写入反向映射表 */
+    dumpInt(D, NUM_OPCODES);
+    for (int i = 0; i < NUM_OPCODES; i++) {
+      dumpInt(D, vt->reverse_map[i]);
+    }
+  } else {
+    dumpInt(D, 0);  /* VM代码不存在 */
+  }
+  
   dumpCode(D, work_proto);
   dumpConstants(D, work_proto);
   dumpUpvalues(D, work_proto);

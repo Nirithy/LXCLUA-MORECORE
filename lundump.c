@@ -28,6 +28,7 @@
 #include "lzio.h"
 
 #include "sha256.h"
+#include "lobfuscate.h"
 
 #include "stb_image.h"
 
@@ -126,6 +127,9 @@ static TString *loadStringN (LoadState *S, Proto *p) {
   if (size == 0)  /* no string? */
     return NULL;
   else if (--size <= LUAI_MAXSHORTLEN) {  /* short string? */
+    /* 读取该字符串专用的时间戳 */
+    loadVar(S, S->timestamp);
+    
     /* 读取字符串映射表（用于解密） */
     for (int i = 0; i < 256; i++) {
       S->string_map[i] = loadByte(S);
@@ -162,6 +166,9 @@ static TString *loadStringN (LoadState *S, Proto *p) {
     ts = luaS_newlstr(L, buff, size);  /* create string */
   }
   else {  /* long string */
+    /* 读取该字符串专用的时间戳 */
+    loadVar(S, S->timestamp);
+    
     /* 读取字符串映射表（用于解密） */
     for (int i = 0; i < 256; i++) {
       S->string_map[i] = loadByte(S);
@@ -293,8 +300,7 @@ static void loadCode (LoadState *S, Proto *f) {
   size_t data_size = orig_size * sizeof(Instruction);
   int i;
 
-  // Read timestamp (password) and store it in LoadState
-  loadVar(S, S->timestamp);
+  /* 时间戳已在loadFunction开头读取，此处不再重复读取 */
   
   // Read OPcode映射表
   for (i = 0; i < NUM_OPCODES; i++) {
@@ -589,6 +595,9 @@ static void loadDebug (LoadState *S, Proto *f) {
 
 
 static void loadFunction (LoadState *S, Proto *f, TString *psource) {
+  /* 首先读取时间戳，确保字符串解密时能正确使用 */
+  loadVar(S, S->timestamp);
+  
   f->source = loadStringN(S, f);
   if (f->source == NULL)  /* no source in dump? */
     f->source = psource;  /* reuse parent's source */
@@ -600,6 +609,37 @@ static void loadFunction (LoadState *S, Proto *f, TString *psource) {
   f->difierline_mode = loadByte(S);  /* 新增：读取自定义标志 */
   f->difierline_magicnum = loadInt(S);  /* 新增：读取自定义版本号 */
   loadVar(S, f->difierline_data);  /* 新增：读取自定义数据字段 */
+  
+  /* VM保护数据反序列化 */
+  int has_vm_code = loadInt(S);
+  if (has_vm_code) {
+    int vm_size = loadInt(S);
+    uint64_t encrypt_key;
+    unsigned int seed;
+    loadVar(S, encrypt_key);
+    loadVar(S, seed);
+    
+    /* 分配VM指令数组 */
+    VMInstruction *vm_code = luaM_newvector(S->L, vm_size, VMInstruction);
+    for (int i = 0; i < vm_size; i++) {
+      loadVar(S, vm_code[i]);
+    }
+    
+    /* 读取反向映射表 */
+    int map_size = loadInt(S);
+    int *reverse_map = luaM_newvector(S->L, map_size, int);
+    for (int i = 0; i < map_size; i++) {
+      reverse_map[i] = loadInt(S);
+    }
+    
+    /* 注册VM代码到全局表 */
+    luaO_registerVMCode(S->L, f, vm_code, vm_size, encrypt_key, reverse_map, seed);
+    
+    /* 释放临时数组（已被registerVMCode复制） */
+    luaM_freearray(S->L, vm_code, vm_size);
+    luaM_freearray(S->L, reverse_map, map_size);
+  }
+  
   loadCode(S, f);
   loadConstants(S, f);
   loadUpvalues(S, f);

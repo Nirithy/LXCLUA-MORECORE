@@ -60,6 +60,7 @@
 #include "ltm.h"
 #include "lvm.h"
 #include "lclass.h"
+#include "lobfuscate.h"
 
 
 /*
@@ -1216,6 +1217,17 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
   trap = L->hookmask;
  returning:  /* trap already set */
   cl = ci_func(ci);
+  
+  /* VM保护检测：如果函数启用了VM保护，使用自定义VM解释器执行 */
+  if (cl->p->difierline_mode & OBFUSCATE_VM_PROTECT) {
+    int vm_result = luaO_executeVM(L, cl->p);
+    if (vm_result == 0) {
+      /* VM执行成功，直接返回 */
+      return;
+    }
+    /* vm_result == 1 表示回退到原生VM继续执行 */
+  }
+  
   k = cl->p->k;
   pc = ci->u.l.savedpc;
   if (l_unlikely(trap))

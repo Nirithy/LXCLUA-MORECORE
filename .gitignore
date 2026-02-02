@@ -48,3 +48,6 @@ koishi/
 *.zip
 *.tar.gz
 release/
+
+# Build scripts
+*.bat
