@@ -1,9 +1,7 @@
-/*
-** $Id: lclass.c $
-** Lua 面向对象系统 - 类与对象运行时支持
-** 提供原生的类定义、继承、实例化等面向对象功能的实现
-** See Copyright Notice in lua.h
-*/
+/**
+ * @file lclass.c
+ * @brief Lua object-oriented system implementation.
+ */
 
 #define lclass_c
 #define LUA_CORE

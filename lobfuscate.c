@@ -130,8 +130,10 @@ int luaO_isBlockTerminator (OpCode op) {
     case OP_FORPREP:
     case OP_TFORPREP:
     case OP_TFORLOOP:
-    case OP_TFORCALL:
       return 1;
+    case OP_TFORCALL:
+      /* TFORCALL must be followed by TFORLOOP, don't split them */
+      return 0;
     default:
       return 0;
   }
@@ -201,6 +203,7 @@ int luaO_getJumpTarget (Instruction inst, int pc) {
     case OP_TFORLOOP:
       return pc + 1 - GETARG_Bx(inst);
     case OP_FORPREP:
+      return pc + 1 + GETARG_Bx(inst) + 1;
     case OP_TFORPREP:
       return pc + 1 + GETARG_Bx(inst);
     default:
@@ -336,6 +339,22 @@ static int findBlockStartingAt (CFFContext *ctx, int pc) {
 */
 
 
+/**
+ * @brief Identifies and builds basic blocks for a function.
+ * 
+ * Algorithm:
+ * 1. First pass: Identify all basic block entry points (leaders).
+ *    - Function entry (PC=0).
+ *    - Jump targets.
+ *    - Instructions following a jump (unless unconditional or end of function).
+ *    - Instructions following a conditional test (skips the JMP).
+ *    - Instructions following a return.
+ * 2. Second pass: Partition code into blocks based on identified leaders.
+ * 3. Third pass: Analyze block exits (jump targets, sequential fall-throughs).
+ * 
+ * @param ctx CFF context.
+ * @return 0 on success, error code on failure.
+ */
 int luaO_identifyBlocks (CFFContext *ctx) {
   Proto *f = ctx->f;
   int code_size = f->sizecode;
@@ -691,6 +710,24 @@ static int emitBogusBlock (CFFContext *ctx, int bogus_state, unsigned int *seed)
 */
 
 
+/**
+ * @brief Generates the standard dispatcher and flattened code.
+ * 
+ * Dispatcher structure:
+ * 1. Initialize state variable with entry block's state ID.
+ * 2. Main dispatcher loop (dispatcher_pc):
+ *    - For each block (real and bogus):
+ *      - Compare current state variable with block's state ID (EQI).
+ *      - Jump to the block's code if equal.
+ *    - Default: Jump back to dispatcher loop.
+ * 3. Block code sections:
+ *    - Original block instructions (modified jumps).
+ *    - Set state variable to next block's state ID.
+ *    - Jump back to dispatcher loop.
+ * 
+ * @param ctx CFF context.
+ * @return 0 on success, error code on failure.
+ */
 int luaO_generateDispatcher (CFFContext *ctx) {
   if (ctx->num_blocks == 0) return 0;
   
@@ -903,10 +940,6 @@ int luaO_generateDispatcher (CFFContext *ctx) {
   
   for (int i = 0; i < ctx->num_blocks; i++) {
     BasicBlock *block = &ctx->blocks[i];
-    all_block_starts[i] = ctx->new_code_size;
-    
-    CFF_LOG("块 %d: 原始PC [%d, %d), 新起始PC=%d, state_id=%d", 
-            i, block->start_pc, block->end_pc, all_block_starts[i], block->state_id);
     
     /* 分析基本块的最后指令 */
     int last_pc = block->end_pc - 1;
@@ -916,8 +949,6 @@ int luaO_generateDispatcher (CFFContext *ctx) {
     
     if (last_pc >= block->start_pc) {
       last_op = GET_OPCODE(f->code[last_pc]);
-      
-      /* 检查是否有条件测试+JMP模式 */
       /* 条件测试指令在倒数第二条，JMP在最后一条 */
       if (last_op == OP_JMP && last_pc > block->start_pc) {
         OpCode prev_op = GET_OPCODE(f->code[last_pc - 1]);
@@ -933,36 +964,86 @@ int luaO_generateDispatcher (CFFContext *ctx) {
     /* 复制基本块的指令 */
     int copy_end = block->end_pc;
     
+    /* 处理循环回跳 stub (必须在 all_block_starts 之前) */
+    int loop_stub_pc = -1;
+    if (last_op == OP_FORLOOP || last_op == OP_TFORLOOP) {
+      int target_state = ctx->blocks[block->original_target].state_id;
+      if (ctx->obfuscate_flags & OBFUSCATE_STATE_ENCODE) {
+        target_state = luaO_encodeState(target_state, ctx->seed);
+      }
+      loop_stub_pc = ctx->new_code_size;
+      CFF_LOG("  生成循环回跳 stub @ PC=%d", loop_stub_pc);
+      emitInstruction(ctx, CREATE_ABx(OP_LOADI, state_reg, target_state + OFFSET_sBx));
+      int jmp_disp = ctx->dispatcher_pc - ctx->new_code_size - 1;
+      emitInstruction(ctx, CREATE_sJ(OP_JMP, jmp_disp + OFFSET_sJ, 0));
+    }
+
+    all_block_starts[i] = ctx->new_code_size;
+    CFF_LOG("块 %d: 原始PC [%d, %d), 新起始PC=%d, state_id=%d", 
+            i, block->start_pc, block->end_pc, all_block_starts[i], block->state_id);
+
     if (has_cond_test) {
-      /* 条件分支块：复制到条件测试指令之前（不含） */
       copy_end = cond_test_pc;
-    } else if (last_op == OP_JMP) {
-      /* 无条件跳转块：不复制最后的JMP */
+    } else if (last_op == OP_JMP || last_op == OP_FORLOOP || last_op == OP_TFORLOOP ||
+               last_op == OP_FORPREP || last_op == OP_TFORPREP) {
       copy_end = block->end_pc - 1;
     }
-    /* 其他情况（包括返回指令）：复制全部 */
-    
+
     /* 复制指令 */
     for (int pc = block->start_pc; pc < copy_end; pc++) {
-      if (emitInstruction(ctx, f->code[pc]) < 0) {
-        luaM_free_(ctx->L, all_block_jmp_pcs, sizeof(int) * ctx->num_blocks);
-        luaM_free_(ctx->L, all_block_starts, sizeof(int) * ctx->num_blocks);
-        return -1;
-      }
+      if (emitInstruction(ctx, f->code[pc]) < 0) return -1;
     }
-    
-    /* 处理基本块的出口 */
+
+    /* 处理基本块出口 */
     if (block->is_exit) {
-      /* 出口块：复制返回指令（如果还没复制） */
       if (copy_end < block->end_pc) {
         for (int pc = copy_end; pc < block->end_pc; pc++) {
-          if (emitInstruction(ctx, f->code[pc]) < 0) {
-            luaM_free_(ctx->L, all_block_jmp_pcs, sizeof(int) * ctx->num_blocks);
-            luaM_free_(ctx->L, all_block_starts, sizeof(int) * ctx->num_blocks);
-            return -1;
-          }
+          if (emitInstruction(ctx, f->code[pc]) < 0) return -1;
         }
       }
+    } else if (last_op == OP_FORLOOP || last_op == OP_TFORLOOP) {
+      int fall_state = ctx->blocks[block->fall_through].state_id;
+      if (ctx->obfuscate_flags & OBFUSCATE_STATE_ENCODE) {
+        fall_state = luaO_encodeState(fall_state, ctx->seed);
+      }
+      Instruction loop_inst = f->code[last_pc];
+      /* 计算回跳到 stub 的偏移量 */
+      int bx = ctx->new_code_size + 1 - loop_stub_pc;
+      if (last_op == OP_TFORLOOP) {
+        /* TFORLOOP includes pc++ from TFORCALL */
+        bx += 1;
+      }
+      SETARG_Bx(loop_inst, bx);
+      CFF_LOG("  生成循环指令: %s, Bx=%d", getOpName(last_op), bx);
+      emitInstruction(ctx, loop_inst);
+
+      /* 失败分支（退出循环） */
+      emitInstruction(ctx, CREATE_ABx(OP_LOADI, state_reg, fall_state + OFFSET_sBx));
+      int jmp_disp = ctx->dispatcher_pc - ctx->new_code_size - 1;
+      emitInstruction(ctx, CREATE_sJ(OP_JMP, jmp_disp + OFFSET_sJ, 0));
+
+    } else if (last_op == OP_FORPREP || last_op == OP_TFORPREP) {
+      int target_state = ctx->blocks[block->original_target].state_id;
+      int fall_state = ctx->blocks[block->fall_through].state_id;
+      if (ctx->obfuscate_flags & OBFUSCATE_STATE_ENCODE) {
+        target_state = luaO_encodeState(target_state, ctx->seed);
+        fall_state = luaO_encodeState(fall_state, ctx->seed);
+      }
+      Instruction prep_inst = f->code[last_pc];
+      int bx = (last_op == OP_FORPREP) ? 1 : 2; 
+      SETARG_Bx(prep_inst, bx);
+      emitInstruction(ctx, prep_inst);
+
+      /* 成功分支（进入循环） */
+      emitInstruction(ctx, CREATE_ABx(OP_LOADI, state_reg, fall_state + OFFSET_sBx));
+      int jmp_disp = ctx->dispatcher_pc - ctx->new_code_size - 1;
+      emitInstruction(ctx, CREATE_sJ(OP_JMP, jmp_disp + OFFSET_sJ, 0));
+
+      /* 失败分支（跳过循环） */
+      emitInstruction(ctx, CREATE_ABx(OP_LOADI, state_reg, target_state + OFFSET_sBx));
+      jmp_disp = ctx->dispatcher_pc - ctx->new_code_size - 1;
+      emitInstruction(ctx, CREATE_sJ(OP_JMP, jmp_disp + OFFSET_sJ, 0));
+
     } else if (has_cond_test) {
       /* 条件分支块：需要生成两个分支的状态转换 */
       
@@ -1205,24 +1286,6 @@ int luaO_flatten (lua_State *L, Proto *f, int flags, unsigned int seed,
     return 0;
   }
   
-  /* 检查是否包含不支持的指令（循环指令） */
-  /* 当前简化实现不支持循环指令的扁平化 */
-  for (int pc = 0; pc < f->sizecode; pc++) {
-    OpCode op = GET_OPCODE(f->code[pc]);
-    switch (op) {
-      case OP_FORLOOP:
-      case OP_FORPREP:
-      case OP_TFORPREP:
-      case OP_TFORLOOP:
-      case OP_TFORCALL:
-        /* 包含循环指令，跳过扁平化 */
-        CFF_LOG("检测到循环指令 %s @ PC=%d，跳过扁平化", getOpName(op), pc);
-        if (log_file != NULL) { fclose(log_file); g_cff_log_file = NULL; }
-        return 0;
-      default:
-        break;
-    }
-  }
   
   /* 初始化上下文 */
   CFFContext *ctx = initContext(L, f, flags, seed);
@@ -1547,6 +1610,25 @@ static int findBlockGroup (CFFContext *ctx, int block_idx) {
 }
 
 
+/**
+ * @brief Generates a nested dispatcher (multi-layered state machine).
+ * 
+ * Structure:
+ * - Initialize outer and inner state variables.
+ * - Outer Dispatcher:
+ *   - Compares outer state variable to select an inner dispatcher.
+ * - Inner Dispatchers:
+ *   - For each group of blocks, compares inner state variable to select a block.
+ * - Basic Blocks:
+ *   - Original code.
+ *   - Update both outer and inner state variables for the next transition.
+ *   - Jump back to outer dispatcher.
+ * 
+ * This increases complexity for static analysis by splitting the state space.
+ * 
+ * @param ctx CFF context.
+ * @return 0 on success, error code on failure.
+ */
 int luaO_generateNestedDispatcher (CFFContext *ctx) {
   if (ctx->num_blocks == 0) return 0;
   
@@ -1679,14 +1761,6 @@ int luaO_generateNestedDispatcher (CFFContext *ctx) {
   CFF_LOG("--- 复制基本块代码 ---");
   for (int i = 0; i < ctx->num_blocks; i++) {
     BasicBlock *block = &ctx->blocks[i];
-    block_starts[i] = ctx->new_code_size;
-    
-    CFF_LOG("块 %d: 原始PC [%d, %d), 新起始PC=%d", 
-            i, block->start_pc, block->end_pc, block_starts[i]);
-    
-    /* 修正跳转到此块的指令 */
-    int offset = block_starts[i] - block_jmp_pcs[i] - 1;
-    SETARG_sJ(ctx->new_code[block_jmp_pcs[i]], offset);
     
     /* 分析基本块的最后指令 */
     int last_pc = block->end_pc - 1;
@@ -1696,8 +1770,6 @@ int luaO_generateNestedDispatcher (CFFContext *ctx) {
     
     if (last_pc >= block->start_pc) {
       last_op = GET_OPCODE(f->code[last_pc]);
-      
-      /* 检查条件测试+JMP模式 */
       if (last_op == OP_JMP && last_pc > block->start_pc) {
         OpCode prev_op = GET_OPCODE(f->code[last_pc - 1]);
         if (isConditionalTest(prev_op)) {
@@ -1707,11 +1779,37 @@ int luaO_generateNestedDispatcher (CFFContext *ctx) {
       }
     }
     
+    /* 处理循环回跳 stub (必须在 block_starts 之前) */
+    int loop_stub_pc = -1;
+    if (last_op == OP_FORLOOP || last_op == OP_TFORLOOP) {
+      int target_group = findBlockGroup(ctx, block->original_target);
+      int target_inner = ctx->blocks[block->original_target].state_id;
+      if (ctx->obfuscate_flags & OBFUSCATE_STATE_ENCODE) {
+        target_group = luaO_encodeState(target_group, ctx->seed);
+        target_inner = luaO_encodeState(target_inner, ctx->seed ^ 0x12345678);
+      }
+      loop_stub_pc = ctx->new_code_size;
+      CFF_LOG("  生成嵌套循环回跳 stub @ PC=%d", loop_stub_pc);
+      emitInstruction(ctx, CREATE_ABx(OP_LOADI, outer_state_reg, target_group + OFFSET_sBx));
+      emitInstruction(ctx, CREATE_ABx(OP_LOADI, state_reg, target_inner + OFFSET_sBx));
+      int jmp_disp = ctx->outer_dispatcher_pc - ctx->new_code_size - 1;
+      emitInstruction(ctx, CREATE_sJ(OP_JMP, jmp_disp + OFFSET_sJ, 0));
+    }
+
+    block_starts[i] = ctx->new_code_size;
+    CFF_LOG("块 %d: 原始PC [%d, %d), 新起始PC=%d", 
+            i, block->start_pc, block->end_pc, block_starts[i]);
+    
+    /* 修正跳转到此块的指令 */
+    int offset = block_starts[i] - block_jmp_pcs[i] - 1;
+    SETARG_sJ(ctx->new_code[block_jmp_pcs[i]], offset);
+
     /* 确定复制范围 */
     int copy_end = block->end_pc;
     if (has_cond_test) {
       copy_end = cond_test_pc;
-    } else if (last_op == OP_JMP) {
+    } else if (last_op == OP_JMP || last_op == OP_FORLOOP || last_op == OP_TFORLOOP ||
+               last_op == OP_FORPREP || last_op == OP_TFORPREP) {
       copy_end = block->end_pc - 1;
     }
     
@@ -1728,6 +1826,54 @@ int luaO_generateNestedDispatcher (CFFContext *ctx) {
           if (emitInstruction(ctx, f->code[pc]) < 0) goto cleanup_all;
         }
       }
+    } else if (last_op == OP_FORLOOP || last_op == OP_TFORLOOP) {
+      int fall_group = findBlockGroup(ctx, block->fall_through);
+      int fall_inner = ctx->blocks[block->fall_through].state_id;
+      if (ctx->obfuscate_flags & OBFUSCATE_STATE_ENCODE) {
+        fall_group = luaO_encodeState(fall_group, ctx->seed);
+        fall_inner = luaO_encodeState(fall_inner, ctx->seed ^ 0x12345678);
+      }
+      Instruction loop_inst = f->code[last_pc];
+      int bx = ctx->new_code_size + 1 - loop_stub_pc;
+      if (last_op == OP_TFORLOOP) bx += 1;
+      SETARG_Bx(loop_inst, bx);
+      CFF_LOG("  生成嵌套循环指令: %s, Bx=%d", getOpName(last_op), bx);
+      emitInstruction(ctx, loop_inst);
+
+      /* 失败分支（退出循环） */
+      emitInstruction(ctx, CREATE_ABx(OP_LOADI, outer_state_reg, fall_group + OFFSET_sBx));
+      emitInstruction(ctx, CREATE_ABx(OP_LOADI, state_reg, fall_inner + OFFSET_sBx));
+      int jmp_disp = ctx->outer_dispatcher_pc - ctx->new_code_size - 1;
+      emitInstruction(ctx, CREATE_sJ(OP_JMP, jmp_disp + OFFSET_sJ, 0));
+
+    } else if (last_op == OP_FORPREP || last_op == OP_TFORPREP) {
+      int target_group = findBlockGroup(ctx, block->original_target);
+      int target_inner = ctx->blocks[block->original_target].state_id;
+      int fall_group = findBlockGroup(ctx, block->fall_through);
+      int fall_inner = ctx->blocks[block->fall_through].state_id;
+      if (ctx->obfuscate_flags & OBFUSCATE_STATE_ENCODE) {
+        target_group = luaO_encodeState(target_group, ctx->seed);
+        target_inner = luaO_encodeState(target_inner, ctx->seed ^ 0x12345678);
+        fall_group = luaO_encodeState(fall_group, ctx->seed);
+        fall_inner = luaO_encodeState(fall_inner, ctx->seed ^ 0x12345678);
+      }
+      Instruction prep_inst = f->code[last_pc];
+      int bx = (last_op == OP_FORPREP) ? 2 : 3; 
+      SETARG_Bx(prep_inst, bx);
+      emitInstruction(ctx, prep_inst);
+
+      /* 成功分支（进入循环） */
+      emitInstruction(ctx, CREATE_ABx(OP_LOADI, outer_state_reg, fall_group + OFFSET_sBx));
+      emitInstruction(ctx, CREATE_ABx(OP_LOADI, state_reg, fall_inner + OFFSET_sBx));
+      int jmp_disp = ctx->outer_dispatcher_pc - ctx->new_code_size - 1;
+      emitInstruction(ctx, CREATE_sJ(OP_JMP, jmp_disp + OFFSET_sJ, 0));
+
+      /* 失败分支（跳过循环） */
+      emitInstruction(ctx, CREATE_ABx(OP_LOADI, outer_state_reg, target_group + OFFSET_sBx));
+      emitInstruction(ctx, CREATE_ABx(OP_LOADI, state_reg, target_inner + OFFSET_sBx));
+      jmp_disp = ctx->outer_dispatcher_pc - ctx->new_code_size - 1;
+      emitInstruction(ctx, CREATE_sJ(OP_JMP, jmp_disp + OFFSET_sJ, 0));
+
     } else if (has_cond_test) {
       /* 条件分支块：生成双路状态转换 */
       Instruction cond_inst = f->code[cond_test_pc];
