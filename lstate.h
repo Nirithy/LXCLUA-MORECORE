@@ -297,10 +297,13 @@ typedef struct {
   size_t small_limit;                /* 小对象大小上限 */
 } MemPoolArena;
 
+/**
+ * @brief Global state structure.
+ */
 typedef struct global_State {
-  lua_Alloc frealloc;  /* function to reallocate memory */
-  void *ud;         /* auxiliary data to 'frealloc' */
-  l_mem GCtotalbytes;  /* number of bytes currently allocated - GCdebt */
+  lua_Alloc frealloc;  /**< function to reallocate memory */
+  void *ud;         /**< auxiliary data to 'frealloc' */
+  l_mem GCtotalbytes;  /**< number of bytes currently allocated - GCdebt */
   l_mem GCdebt;  /* bytes allocated not yet compensated by the collector */
   lu_mem GCestimate;  /* an estimate of the non-garbage memory in use */
   lu_mem lastatomic;  /* see function 'genstep' in file 'lgc.c' */
@@ -357,12 +360,15 @@ typedef struct global_State {
 /*
 ** 'per thread' state
 */
+/**
+ * @brief Per-thread state structure.
+ */
 struct lua_State {
   CommonHeader;
   lu_byte status;
   lu_byte allowhook;
-  unsigned short nci;  /* number of items in 'ci' list */
-  StkIdRel top;  /* first free slot in the stack */
+  unsigned short nci;  /**< number of items in 'ci' list */
+  StkIdRel top;  /**< first free slot in the stack */
   global_State *l_G;
   CallInfo *ci;  /* call info for current function */
   StkIdRel stack_last;  /* end of stack (last element + 1) */

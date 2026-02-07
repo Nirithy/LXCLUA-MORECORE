@@ -1,7 +1,12 @@
+/**
+ * @file crc.c
+ * @brief CRC32 calculation implementation.
+ */
+
 #include "crc.h"
 
 #if !defined(CRC_NOT_TABLE)
-/* CRC polynomial 0x04c11db7 */
+/** @brief CRC polynomial 0x04c11db7 */
 unsigned int crc_32_tab[]= {
 	0x00000000, 0x77073096, 0xee0e612c, 0x990951ba, 0x076dc419, 0x706af48f, 0xe963a535, 0x9e6495a3,
 	0x0edb8832, 0x79dcb8a4, 0xe0d5e91e, 0x97d2d988, 0x09b64c2b, 0x7eb17cbd, 0xe7b82d07, 0x90bf1d91,
@@ -56,12 +61,8 @@ unsigned int naga_crc32int(unsigned int *data) {
 	return (CRC >> 8) ^ crc_32_tab[ (CRC ^ *d) & 0xFF ] ^ 0xFFFFFFFF;
 }
 
-/* 保持小端字序 */
-//#if __BYTE_ORDER__ == __LITTLE_ENDIAN__
+/** @brief Expected CRC value for self-tests (little-endian). */
 #define __CRC_SELFTEST__ 0x6fcf9e13
-//#else
-//#define __CRC_SELFTEST__ 0xca87914d
-//#endif
 
 unsigned char naga_crc32_selftests() {
 	unsigned int i;

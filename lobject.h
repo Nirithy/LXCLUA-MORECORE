@@ -66,6 +66,10 @@ typedef union Value {
 
 #define TValuefields	Value value_; lu_byte tt_
 
+/**
+ * @brief Tagged value structure.
+ * Represents any Lua value with its type tag.
+ */
 typedef struct TValue {
   TValuefields;
 } TValue;
@@ -633,36 +637,39 @@ LUAI_FUNC int luaF_callqueuepop (lua_State *L, CallQueue *q, int *nargs, TValue 
 /*
 ** Function Prototypes
 */
+/**
+ * @brief Function prototype structure.
+ */
 typedef struct Proto {
   CommonHeader;
-  lu_byte numparams;  /* number of fixed (named) parameters */
+  lu_byte numparams;  /**< Number of fixed (named) parameters. */
   lu_byte flag;
   lu_byte is_vararg;
-  lu_byte maxstacksize;  /* number of registers needed by this function */
-  lu_byte difierline_mode;
-  int difierline_magicnum;
-  uint64_t difierline_data;
-  int sizeupvalues;  /* size of 'upvalues' */
-  int sizek;  /* size of 'k' */
-  int sizecode;
+  lu_byte maxstacksize;  /**< Number of registers needed by this function. */
+  lu_byte difierline_mode;      /**< Obfuscation mode flags. */
+  int difierline_magicnum;      /**< Magic number for identification. */
+  uint64_t difierline_data;      /**< Extra data for obfuscation. */
+  int sizeupvalues;  /**< Size of 'upvalues' array. */
+  int sizek;  /**< Size of 'k' (constants) array. */
+  int sizecode;      /**< Size of 'code' array. */
   int sizelineinfo;
-  int sizep;  /* size of 'p' */
+  int sizep;  /**< Size of 'p' (nested prototypes) array. */
   int sizelocvars;
-  int sizeabslineinfo;  /* size of 'abslineinfo' */
-  int linedefined;  /* debug information  */
-  int lastlinedefined;  /* debug information  */
-  TValue *k;  /* constants used by the function */
-  Instruction *code;  /* opcodes */
-  struct Proto **p;  /* functions defined inside the function */
-  Upvaldesc *upvalues;  /* upvalue information */
-  ls_byte *lineinfo;  /* information about source lines (debug information) */
-  AbsLineInfo *abslineinfo;  /* idem */
-  LocVar *locvars;  /* information about local variables (debug information) */
-  TString  *source;  /* used for debug information */
+  int sizeabslineinfo;  /**< Size of 'abslineinfo' array. */
+  int linedefined;  /**< Debug information: start line. */
+  int lastlinedefined;  /**< Debug information: end line. */
+  TValue *k;  /**< Constants used by the function. */
+  Instruction *code;  /**< Opcodes (bytecode). */
+  struct Proto **p;  /**< Functions defined inside this function. */
+  Upvaldesc *upvalues;  /**< Upvalue information. */
+  ls_byte *lineinfo;  /**< Map from opcodes to source lines. */
+  AbsLineInfo *abslineinfo;  /**< Map from opcodes to absolute source lines. */
+  LocVar *locvars;  /**< Information about local variables. */
+  TString  *source;  /**< Source file name. */
   GCObject *gclist;
   int is_sleeping;
   CallQueue *call_queue;
-  struct VMCodeTable *vm_code_table;  /* VM保护代码表指针 */
+  struct VMCodeTable *vm_code_table;  /**< VM protection code table pointer. */
 } Proto;
 
 /* }======================================================= */
@@ -827,17 +834,20 @@ typedef union Node {
 #define setnorealasize(t)	((t)->flags |= BITRAS)
 
 
+/**
+ * @brief Lua table structure.
+ */
 typedef struct Table {
   CommonHeader;
-  lu_byte flags;  /* 1<<p means tagmethod(p) is not present */
-  lu_byte lsizenode;  /* log2 of size of 'node' array */
-  unsigned int alimit;  /* "limit" of 'array' array */
-  TValue *array;  /* array part */
-  Node *node;
-  Node *lastfree;  /* any free position is before this position */
-  struct Table *metatable;
+  lu_byte flags;  /**< 1<<p means tagmethod(p) is not present. */
+  lu_byte lsizenode;  /**< log2 of size of 'node' array. */
+  unsigned int alimit;  /**< "limit" of 'array' array. */
+  TValue *array;  /**< Array part. */
+  Node *node;      /**< Hash part. */
+  Node *lastfree;  /**< Any free position is before this position. */
+  struct Table *metatable; /**< Metatable pointer. */
   GCObject *gclist;
-  lu_byte type;
+  lu_byte type;    /**< Custom type flag. */
 } Table;
 
 

@@ -1,3 +1,8 @@
+/**
+ * @file aes.c
+ * @brief AES algorithm implementation.
+ */
+
 /*
 
 This is an implementation of the AES algorithm, specifically ECB, CTR and CBC mode.
@@ -148,7 +153,11 @@ static uint8_t getSBoxInvert(uint8_t num)
 */
 #define getSBoxInvert(num) (rsbox[(num)])
 
-// This function produces Nb(Nr+1) round keys. The round keys are used in each round to decrypt the states. 
+/**
+ * @brief Produces Nb(Nr+1) round keys.
+ * @param RoundKey Pointer to the buffer that will hold the expanded keys.
+ * @param Key Pointer to the original key.
+ */
 static void KeyExpansion(uint8_t* RoundKey, const uint8_t* Key)
 {
   unsigned i, j, k;
@@ -569,4 +578,3 @@ void AES_CTR_xcrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, uint32_t length)
 }
 
 #endif // #if defined(CTR) && (CTR == 1)
-
