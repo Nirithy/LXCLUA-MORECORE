@@ -66,6 +66,8 @@
 #define OBFUSCATE_OPAQUE_PREDICATES (1<<5)  /**< Opaque predicates (always true/false conditions). */
 #define OBFUSCATE_FUNC_INTERLEAVE   (1<<6)  /**< Function interleaving (fake function paths). */
 #define OBFUSCATE_VM_PROTECT        (1<<7)  /**< VM protection (custom instruction set). */
+#define OBFUSCATE_BINARY_DISPATCHER (1<<8)  /**< Binary search dispatcher. */
+#define OBFUSCATE_RANDOM_NOP        (1<<9)  /**< Insert random NOP instructions. */
 /**@}*/
 
 

@@ -312,8 +312,7 @@ static void setpath (lua_State *L, const char *fieldname,
     }
     luaL_pushresult(&b);
   }
-  /* 临时禁用 setprogdir */
-  // setprogdir(L);
+  setprogdir(L);
   lua_setfield(L, -3, fieldname);  /* package[fieldname] = path value */
   lua_pop(L, 1);  /* pop versioned variable name ('nver') */
 }

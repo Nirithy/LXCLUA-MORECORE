@@ -9,7 +9,6 @@
 
 #include "lprefix.h"
 
-
 #define _BSD_SOURCE
 #define _POSIX_C_SOURCE 200809L
 
@@ -18,6 +17,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+// 平台相关系统头文件
 #ifdef _WIN32
 #include <windows.h>
 #include <io.h>
@@ -29,6 +30,7 @@
 #include <sys/types.h>
 #include <sys/time.h>
 #else
+// Android / Linux 通用
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -42,10 +44,10 @@
 #endif
 
 #include "lua.h"
-
 #include "lauxlib.h"
 #include "lualib.h"
 #include "llimits.h"
+
 
 
 /*

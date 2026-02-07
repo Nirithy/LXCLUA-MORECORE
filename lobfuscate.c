@@ -1,7 +1,8 @@
-/**
- * @file lobfuscate.c
- * @brief Control Flow Flattening and VM Protection for Lua bytecode.
- */
+/*
+** $Id: lobfuscate.c $
+** Control Flow Flattening Obfuscation for Lua bytecode
+** DifierLine
+*/
 
 #define lobfuscate_c
 #define LUA_CORE
@@ -24,15 +25,18 @@
 #include "ldo.h"
 #include "lgc.h"
 #include "lvm.h"
+#include "ltable.h"
+#include "lfunc.h"
+#include "lstring.h"
 
-/** @brief Global log file pointer for debugging. Set by luaO_flatten. */
+/* 全局日志文件指针 - 由 luaO_flatten 设置 */
 static FILE *g_cff_log_file = NULL;
 
-/**
- * @brief Writes a debug log message.
- * @param fmt Format string.
- * @param ... Variable arguments.
- */
+/*
+** 写入CFF调试日志
+** @param fmt 格式字符串
+** @param ... 可变参数
+*/
 static void CFF_LOG(const char *fmt, ...) {
   if (g_cff_log_file == NULL) return;
   
@@ -45,11 +49,7 @@ static void CFF_LOG(const char *fmt, ...) {
   va_end(args);
 }
 
-/**
- * @brief Returns the name of an opcode for debug output.
- * @param op Opcode.
- * @return Opcode name string.
- */
+/* 获取操作码名称（用于调试输出） */
 static const char* getOpName(OpCode op) {
   static const char* names[] = {
     "MOVE", "LOADI", "LOADF", "LOADK", "LOADKX", "LOADFALSE", "LFALSESKIP",
@@ -76,19 +76,19 @@ static const char* getOpName(OpCode op) {
 
 /*
 ** =======================================================
-** Internal Constants
+** 内部常量定义
 ** =======================================================
 */
 
-#define INITIAL_BLOCK_CAPACITY  16      /**< Initial capacity for basic block array. */
-#define INITIAL_CODE_CAPACITY   64      /**< Initial capacity for instruction array. */
-#define CFF_MAGIC               0x43464600  /**< "CFF\0" Magic number. */
-#define CFF_VERSION             1       /**< Metadata version. */
+#define INITIAL_BLOCK_CAPACITY  16      /* 基本块数组初始容量 */
+#define INITIAL_CODE_CAPACITY   64      /* 代码数组初始容量 */
+#define CFF_MAGIC               0x43464600  /* "CFF\0" 元数据魔数 */
+#define CFF_VERSION             1       /* 元数据版本号 */
 
 
 /*
 ** =======================================================
-** Helper Macros
+** 辅助宏定义
 ** =======================================================
 */
 
@@ -96,17 +96,28 @@ static const char* getOpName(OpCode op) {
 #define LCG_A       1664525
 #define LCG_C       1013904223
 
-/** @brief Generates the next random number using LCG. */
+/* 生成下一个随机数 */
 #define NEXT_RAND(seed) ((seed) = (LCG_A * (seed) + LCG_C))
 
 
 /*
 ** =======================================================
-** Internal Helper Functions
+** 内部辅助函数
 ** =======================================================
 */
 
 
+/*
+** 检查指令是否为基本块终结指令
+** @param op 操作码
+** @return 是终结指令返回1，否则返回0
+**
+** 终结指令包括：
+** - 无条件跳转(JMP)
+** - 条件跳转(EQ, LT, LE, TEST等)
+** - 返回指令(RETURN, RETURN0, RETURN1, TAILCALL)
+** - 循环指令(FORLOOP, FORPREP, TFORLOOP等)
+*/
 int luaO_isBlockTerminator (OpCode op) {
   switch (op) {
     case OP_JMP:
@@ -130,16 +141,19 @@ int luaO_isBlockTerminator (OpCode op) {
     case OP_FORPREP:
     case OP_TFORPREP:
     case OP_TFORLOOP:
-      return 1;
     case OP_TFORCALL:
-      /* TFORCALL must be followed by TFORLOOP, don't split them */
-      return 0;
+      return 1;
     default:
       return 0;
   }
 }
 
 
+/*
+** 检查指令是否为跳转指令
+** @param op 操作码
+** @return 是跳转指令返回1，否则返回0
+*/
 int luaO_isJumpInstruction (OpCode op) {
   switch (op) {
     case OP_JMP:
@@ -154,9 +168,11 @@ int luaO_isJumpInstruction (OpCode op) {
 }
 
 
-/**
- * @brief Checks if an opcode is a conditional test instruction (followed by a jump).
- */
+/*
+** 检查指令是否为条件测试指令（后面跟着跳转）
+** @param op 操作码
+** @return 是条件测试指令返回1，否则返回0
+*/
 static int isConditionalTest (OpCode op) {
   switch (op) {
     case OP_EQ:
@@ -178,9 +194,11 @@ static int isConditionalTest (OpCode op) {
 }
 
 
-/**
- * @brief Checks if an opcode is a return instruction.
- */
+/*
+** 检查指令是否为返回指令
+** @param op 操作码
+** @return 是返回指令返回1，否则返回0
+*/
 static int isReturnInstruction (OpCode op) {
   switch (op) {
     case OP_RETURN:
@@ -194,6 +212,12 @@ static int isReturnInstruction (OpCode op) {
 }
 
 
+/*
+** 获取跳转指令的目标PC
+** @param inst 指令
+** @param pc 当前PC
+** @return 跳转目标PC，如果不是跳转指令返回-1
+*/
 int luaO_getJumpTarget (Instruction inst, int pc) {
   OpCode op = GET_OPCODE(inst);
   switch (op) {
@@ -203,7 +227,6 @@ int luaO_getJumpTarget (Instruction inst, int pc) {
     case OP_TFORLOOP:
       return pc + 1 - GETARG_Bx(inst);
     case OP_FORPREP:
-      return pc + 1 + GETARG_Bx(inst) + 1;
     case OP_TFORPREP:
       return pc + 1 + GETARG_Bx(inst);
     default:
@@ -212,9 +235,14 @@ int luaO_getJumpTarget (Instruction inst, int pc) {
 }
 
 
-/**
- * @brief Initializes the CFF context.
- */
+/*
+** 初始化扁平化上下文
+** @param L Lua状态
+** @param f 函数原型
+** @param flags 混淆标志
+** @param seed 随机种子
+** @return 初始化的上下文，失败返回NULL
+*/
 static CFFContext *initContext (lua_State *L, Proto *f, int flags, unsigned int seed) {
   CFFContext *ctx = (CFFContext *)luaM_malloc_(L, sizeof(CFFContext), 0);
   if (ctx == NULL) return NULL;
@@ -250,9 +278,10 @@ static CFFContext *initContext (lua_State *L, Proto *f, int flags, unsigned int 
 }
 
 
-/**
- * @brief Frees the CFF context.
- */
+/*
+** 释放扁平化上下文
+** @param ctx 要释放的上下文
+*/
 static void freeContext (CFFContext *ctx) {
   if (ctx == NULL) return;
   
@@ -274,9 +303,13 @@ static void freeContext (CFFContext *ctx) {
 }
 
 
-/**
- * @brief Adds a basic block to the context.
- */
+/*
+** 添加基本块到上下文
+** @param ctx 上下文
+** @param start_pc 起始PC
+** @param end_pc 结束PC
+** @return 新块的索引，失败返回-1
+*/
 static int addBlock (CFFContext *ctx, int start_pc, int end_pc) {
   /* 检查是否需要扩展数组 */
   if (ctx->num_blocks >= ctx->block_capacity) {
@@ -306,9 +339,12 @@ static int addBlock (CFFContext *ctx, int start_pc, int end_pc) {
 }
 
 
-/**
- * @brief Finds a basic block containing a specific PC.
- */
+/*
+** 查找包含指定PC的基本块
+** @param ctx 上下文
+** @param pc 目标PC
+** @return 块索引，未找到返回-1
+*/
 static int findBlockByPC (CFFContext *ctx, int pc) {
   for (int i = 0; i < ctx->num_blocks; i++) {
     if (pc >= ctx->blocks[i].start_pc && pc < ctx->blocks[i].end_pc) {
@@ -319,9 +355,12 @@ static int findBlockByPC (CFFContext *ctx, int pc) {
 }
 
 
-/**
- * @brief Finds a basic block starting at a specific PC.
- */
+/*
+** 查找起始于指定PC的基本块
+** @param ctx 上下文
+** @param pc 目标PC
+** @return 块索引，未找到返回-1
+*/
 static int findBlockStartingAt (CFFContext *ctx, int pc) {
   for (int i = 0; i < ctx->num_blocks; i++) {
     if (ctx->blocks[i].start_pc == pc) {
@@ -334,27 +373,24 @@ static int findBlockStartingAt (CFFContext *ctx, int pc) {
 
 /*
 ** =======================================================
-** Basic Block Identification
+** 基本块识别
 ** =======================================================
 */
 
 
-/**
- * @brief Identifies and builds basic blocks for a function.
- * 
- * Algorithm:
- * 1. First pass: Identify all basic block entry points (leaders).
- *    - Function entry (PC=0).
- *    - Jump targets.
- *    - Instructions following a jump (unless unconditional or end of function).
- *    - Instructions following a conditional test (skips the JMP).
- *    - Instructions following a return.
- * 2. Second pass: Partition code into blocks based on identified leaders.
- * 3. Third pass: Analyze block exits (jump targets, sequential fall-throughs).
- * 
- * @param ctx CFF context.
- * @return 0 on success, error code on failure.
- */
+/*
+** 识别并构建基本块
+** @param ctx 扁平化上下文
+** @return 成功返回0，失败返回错误码
+**
+** 算法：
+** 1. 第一遍扫描：识别所有基本块的起始点
+**    - 函数入口(PC=0)是起始点
+**    - 跳转目标是起始点
+**    - 跳转指令的下一条是起始点
+** 2. 第二遍扫描：根据起始点划分基本块
+** 3. 分析每个基本块的出口（跳转目标、顺序执行目标）
+*/
 int luaO_identifyBlocks (CFFContext *ctx) {
   Proto *f = ctx->f;
   int code_size = f->sizecode;
@@ -492,11 +528,18 @@ int luaO_identifyBlocks (CFFContext *ctx) {
 
 /*
 ** =======================================================
-** Basic Block Shuffling
+** 基本块打乱
 ** =======================================================
 */
 
 
+/*
+** 随机打乱基本块顺序
+** @param ctx 扁平化上下文
+**
+** 使用Fisher-Yates算法打乱基本块顺序，
+** 但保持入口块在第一位
+*/
 void luaO_shuffleBlocks (CFFContext *ctx) {
   if (ctx->num_blocks <= 2) return;  /* 块太少，不需要打乱 */
   
@@ -519,11 +562,24 @@ void luaO_shuffleBlocks (CFFContext *ctx) {
 
 /*
 ** =======================================================
-** State Encoding
+** 状态编码
 ** =======================================================
 */
 
 
+/*
+** 编码状态值（增加混淆程度）
+** @param state 原始状态值
+** @param seed 随机种子
+** @return 编码后的状态值
+**
+** 使用简单的线性变换进行编码，确保结果在 sC 参数范围内
+** EQI 指令的 sC 参数是 16 位有符号数，范围 [-32767, 32768]
+** 
+** 为确保不同状态映射到不同编码值，使用基于种子的偏移和乘法：
+** encoded = (state * prime + offset) mod range
+** 其中 prime 与 range 互质，确保映射是一一对应的
+*/
 int luaO_encodeState (int state, unsigned int seed) {
   /* 使用固定范围和与之互质的乘数 */
   const int range = 30000;  /* 安全范围 */
@@ -541,6 +597,14 @@ int luaO_encodeState (int state, unsigned int seed) {
 }
 
 
+/*
+** 解码状态值
+** @param encoded_state 编码后的状态值
+** @param seed 随机种子
+** @return 原始状态值
+**
+** 这需要模逆运算，为简化实现，我们存储映射表
+*/
 int luaO_decodeState (int encoded_state, unsigned int seed) {
   /* 这个函数需要在元数据中存储映射表来实现 */
   /* 暂时返回原值，实际实现在反扁平化时使用映射表 */
@@ -551,14 +615,17 @@ int luaO_decodeState (int encoded_state, unsigned int seed) {
 
 /*
 ** =======================================================
-** Code Generation
+** 代码生成
 ** =======================================================
 */
 
 
-/**
- * @brief Ensures the new code array has enough capacity.
- */
+/*
+** 确保新代码数组有足够的空间
+** @param ctx 上下文
+** @param needed 需要的额外空间
+** @return 成功返回0，失败返回-1
+*/
 static int ensureCodeCapacity (CFFContext *ctx, int needed) {
   int required = ctx->new_code_size + needed;
   
@@ -590,9 +657,12 @@ static int ensureCodeCapacity (CFFContext *ctx, int needed) {
 }
 
 
-/**
- * @brief Emits a single instruction to the new code array.
- */
+/*
+** 添加指令到新代码
+** @param ctx 上下文
+** @param inst 指令
+** @return 指令的PC，失败返回-1
+*/
 static int emitInstruction (CFFContext *ctx, Instruction inst) {
   if (ensureCodeCapacity(ctx, 1) != 0) return -1;
   
@@ -604,7 +674,7 @@ static int emitInstruction (CFFContext *ctx, Instruction inst) {
 
 /*
 ** =======================================================
-** Bogus Block Generation
+** 虚假块生成
 ** =======================================================
 */
 
@@ -625,9 +695,18 @@ static int emitFakeFunctionBlocks (CFFContext *ctx, int func_id, unsigned int *s
                                     int entry_jmp_pc);
 
 
-/**
- * @brief Generates a random bogus instruction.
- */
+/*
+** 生成一条随机的虚假指令
+** @param ctx 上下文
+** @param seed 随机种子指针（会被更新）
+** @return 生成的指令
+**
+** 虚假指令类型：
+** - LOADI: 加载随机整数到寄存器
+** - ADDI: 寄存器加立即数
+** - MOVE: 寄存器间移动
+** - LOADK: 加载常量（如果有常量）
+*/
 static Instruction generateBogusInstruction (CFFContext *ctx, unsigned int *seed) {
   int state_reg = ctx->state_reg;
   int max_reg = state_reg;  /* 使用状态寄存器之前的寄存器 */
@@ -664,9 +743,18 @@ static Instruction generateBogusInstruction (CFFContext *ctx, unsigned int *seed
 }
 
 
-/**
- * @brief Emits a bogus basic block.
- */
+/*
+** 生成一个虚假基本块的代码
+** @param ctx 上下文
+** @param bogus_state 虚假块的状态ID
+** @param seed 随机种子指针
+** @return 成功返回0，失败返回-1
+**
+** 虚假块结构：
+** - 3~8条随机的算术/移动指令
+** - 设置状态为另一个随机虚假状态或跳回分发器
+** - JMP 回分发器
+*/
 static int emitBogusBlock (CFFContext *ctx, int bogus_state, unsigned int *seed) {
   int state_reg = ctx->state_reg;
   
@@ -704,30 +792,21 @@ static int emitBogusBlock (CFFContext *ctx, int bogus_state, unsigned int *seed)
 
 
 /*
-** =======================================================
-** Dispatcher Generation
-** =======================================================
+** 生成dispatcher代码
+** @param ctx 扁平化上下文
+** @return 成功返回0，失败返回错误码
+**
+** Dispatcher结构：
+**   LOADI state_reg, initial_state   ; 初始化状态
+** dispatcher_loop:
+**   ; 对每个状态生成比较和跳转（包括真实块和虚假块）
+**   EQI state_reg, state_0, k=1
+**   JMP block_0
+**   EQI state_reg, state_1, k=1
+**   JMP block_1
+**   ...
+**   JMP dispatcher_loop              ; 默认跳回循环
 */
-
-
-/**
- * @brief Generates the standard dispatcher and flattened code.
- * 
- * Dispatcher structure:
- * 1. Initialize state variable with entry block's state ID.
- * 2. Main dispatcher loop (dispatcher_pc):
- *    - For each block (real and bogus):
- *      - Compare current state variable with block's state ID (EQI).
- *      - Jump to the block's code if equal.
- *    - Default: Jump back to dispatcher loop.
- * 3. Block code sections:
- *    - Original block instructions (modified jumps).
- *    - Set state variable to next block's state ID.
- *    - Jump back to dispatcher loop.
- * 
- * @param ctx CFF context.
- * @return 0 on success, error code on failure.
- */
 int luaO_generateDispatcher (CFFContext *ctx) {
   if (ctx->num_blocks == 0) return 0;
   
@@ -940,6 +1019,10 @@ int luaO_generateDispatcher (CFFContext *ctx) {
   
   for (int i = 0; i < ctx->num_blocks; i++) {
     BasicBlock *block = &ctx->blocks[i];
+    all_block_starts[i] = ctx->new_code_size;
+    
+    CFF_LOG("块 %d: 原始PC [%d, %d), 新起始PC=%d, state_id=%d", 
+            i, block->start_pc, block->end_pc, all_block_starts[i], block->state_id);
     
     /* 分析基本块的最后指令 */
     int last_pc = block->end_pc - 1;
@@ -949,6 +1032,8 @@ int luaO_generateDispatcher (CFFContext *ctx) {
     
     if (last_pc >= block->start_pc) {
       last_op = GET_OPCODE(f->code[last_pc]);
+      
+      /* 检查是否有条件测试+JMP模式 */
       /* 条件测试指令在倒数第二条，JMP在最后一条 */
       if (last_op == OP_JMP && last_pc > block->start_pc) {
         OpCode prev_op = GET_OPCODE(f->code[last_pc - 1]);
@@ -964,86 +1049,36 @@ int luaO_generateDispatcher (CFFContext *ctx) {
     /* 复制基本块的指令 */
     int copy_end = block->end_pc;
     
-    /* 处理循环回跳 stub (必须在 all_block_starts 之前) */
-    int loop_stub_pc = -1;
-    if (last_op == OP_FORLOOP || last_op == OP_TFORLOOP) {
-      int target_state = ctx->blocks[block->original_target].state_id;
-      if (ctx->obfuscate_flags & OBFUSCATE_STATE_ENCODE) {
-        target_state = luaO_encodeState(target_state, ctx->seed);
-      }
-      loop_stub_pc = ctx->new_code_size;
-      CFF_LOG("  生成循环回跳 stub @ PC=%d", loop_stub_pc);
-      emitInstruction(ctx, CREATE_ABx(OP_LOADI, state_reg, target_state + OFFSET_sBx));
-      int jmp_disp = ctx->dispatcher_pc - ctx->new_code_size - 1;
-      emitInstruction(ctx, CREATE_sJ(OP_JMP, jmp_disp + OFFSET_sJ, 0));
-    }
-
-    all_block_starts[i] = ctx->new_code_size;
-    CFF_LOG("块 %d: 原始PC [%d, %d), 新起始PC=%d, state_id=%d", 
-            i, block->start_pc, block->end_pc, all_block_starts[i], block->state_id);
-
     if (has_cond_test) {
+      /* 条件分支块：复制到条件测试指令之前（不含） */
       copy_end = cond_test_pc;
-    } else if (last_op == OP_JMP || last_op == OP_FORLOOP || last_op == OP_TFORLOOP ||
-               last_op == OP_FORPREP || last_op == OP_TFORPREP) {
+    } else if (last_op == OP_JMP) {
+      /* 无条件跳转块：不复制最后的JMP */
       copy_end = block->end_pc - 1;
     }
-
+    /* 其他情况（包括返回指令）：复制全部 */
+    
     /* 复制指令 */
     for (int pc = block->start_pc; pc < copy_end; pc++) {
-      if (emitInstruction(ctx, f->code[pc]) < 0) return -1;
+      if (emitInstruction(ctx, f->code[pc]) < 0) {
+        luaM_free_(ctx->L, all_block_jmp_pcs, sizeof(int) * ctx->num_blocks);
+        luaM_free_(ctx->L, all_block_starts, sizeof(int) * ctx->num_blocks);
+        return -1;
+      }
     }
-
-    /* 处理基本块出口 */
+    
+    /* 处理基本块的出口 */
     if (block->is_exit) {
+      /* 出口块：复制返回指令（如果还没复制） */
       if (copy_end < block->end_pc) {
         for (int pc = copy_end; pc < block->end_pc; pc++) {
-          if (emitInstruction(ctx, f->code[pc]) < 0) return -1;
+          if (emitInstruction(ctx, f->code[pc]) < 0) {
+            luaM_free_(ctx->L, all_block_jmp_pcs, sizeof(int) * ctx->num_blocks);
+            luaM_free_(ctx->L, all_block_starts, sizeof(int) * ctx->num_blocks);
+            return -1;
+          }
         }
       }
-    } else if (last_op == OP_FORLOOP || last_op == OP_TFORLOOP) {
-      int fall_state = ctx->blocks[block->fall_through].state_id;
-      if (ctx->obfuscate_flags & OBFUSCATE_STATE_ENCODE) {
-        fall_state = luaO_encodeState(fall_state, ctx->seed);
-      }
-      Instruction loop_inst = f->code[last_pc];
-      /* 计算回跳到 stub 的偏移量 */
-      int bx = ctx->new_code_size + 1 - loop_stub_pc;
-      if (last_op == OP_TFORLOOP) {
-        /* TFORLOOP includes pc++ from TFORCALL */
-        bx += 1;
-      }
-      SETARG_Bx(loop_inst, bx);
-      CFF_LOG("  生成循环指令: %s, Bx=%d", getOpName(last_op), bx);
-      emitInstruction(ctx, loop_inst);
-
-      /* 失败分支（退出循环） */
-      emitInstruction(ctx, CREATE_ABx(OP_LOADI, state_reg, fall_state + OFFSET_sBx));
-      int jmp_disp = ctx->dispatcher_pc - ctx->new_code_size - 1;
-      emitInstruction(ctx, CREATE_sJ(OP_JMP, jmp_disp + OFFSET_sJ, 0));
-
-    } else if (last_op == OP_FORPREP || last_op == OP_TFORPREP) {
-      int target_state = ctx->blocks[block->original_target].state_id;
-      int fall_state = ctx->blocks[block->fall_through].state_id;
-      if (ctx->obfuscate_flags & OBFUSCATE_STATE_ENCODE) {
-        target_state = luaO_encodeState(target_state, ctx->seed);
-        fall_state = luaO_encodeState(fall_state, ctx->seed);
-      }
-      Instruction prep_inst = f->code[last_pc];
-      int bx = (last_op == OP_FORPREP) ? 1 : 2; 
-      SETARG_Bx(prep_inst, bx);
-      emitInstruction(ctx, prep_inst);
-
-      /* 成功分支（进入循环） */
-      emitInstruction(ctx, CREATE_ABx(OP_LOADI, state_reg, fall_state + OFFSET_sBx));
-      int jmp_disp = ctx->dispatcher_pc - ctx->new_code_size - 1;
-      emitInstruction(ctx, CREATE_sJ(OP_JMP, jmp_disp + OFFSET_sJ, 0));
-
-      /* 失败分支（跳过循环） */
-      emitInstruction(ctx, CREATE_ABx(OP_LOADI, state_reg, target_state + OFFSET_sBx));
-      jmp_disp = ctx->dispatcher_pc - ctx->new_code_size - 1;
-      emitInstruction(ctx, CREATE_sJ(OP_JMP, jmp_disp + OFFSET_sJ, 0));
-
     } else if (has_cond_test) {
       /* 条件分支块：需要生成两个分支的状态转换 */
       
@@ -1235,11 +1270,20 @@ int luaO_generateDispatcher (CFFContext *ctx) {
 
 /*
 ** =======================================================
-** Public API Implementation
+** 公共API实现
 ** =======================================================
 */
 
 
+/*
+** 对函数原型进行控制流扁平化
+** @param L Lua状态
+** @param f 要处理的函数原型
+** @param flags 混淆标志位组合
+** @param seed 随机种子
+** @param log_path 调试日志输出路径（NULL表示不输出日志）
+** @return 成功返回0，失败返回错误码
+*/
 int luaO_flatten (lua_State *L, Proto *f, int flags, unsigned int seed,
                   const char *log_path) {
   /* 调试：输出 log_path 值 */
@@ -1286,6 +1330,24 @@ int luaO_flatten (lua_State *L, Proto *f, int flags, unsigned int seed,
     return 0;
   }
   
+  /* 检查是否包含不支持的指令（循环指令） */
+  /* 当前简化实现不支持循环指令的扁平化 */
+  for (int pc = 0; pc < f->sizecode; pc++) {
+    OpCode op = GET_OPCODE(f->code[pc]);
+    switch (op) {
+      case OP_FORLOOP:
+      case OP_FORPREP:
+      case OP_TFORPREP:
+      case OP_TFORLOOP:
+      case OP_TFORCALL:
+        /* 包含循环指令，跳过扁平化 */
+        CFF_LOG("检测到循环指令 %s @ PC=%d，跳过扁平化", getOpName(op), pc);
+        if (log_file != NULL) { fclose(log_file); g_cff_log_file = NULL; }
+        return 0;
+      default:
+        break;
+    }
+  }
   
   /* 初始化上下文 */
   CFFContext *ctx = initContext(L, f, flags, seed);
@@ -1406,6 +1468,17 @@ int luaO_flatten (lua_State *L, Proto *f, int flags, unsigned int seed,
 }
 
 
+/*
+** 对函数原型进行反扁平化
+** @param L Lua状态
+** @param f 要处理的函数原型
+** @param metadata 扁平化元数据（如果为NULL则从f中读取）
+** @return 成功返回0，失败返回错误码
+**
+** 注意：反扁平化在运行时不是必须的，因为扁平化后的代码
+** 仍然是有效的Lua字节码，可以直接执行。
+** 这个函数主要用于调试或需要恢复原始控制流的场景。
+*/
 int luaO_unflatten (lua_State *L, Proto *f, CFFMetadata *metadata) {
   /* 检查是否已扁平化 */
   if (!(f->difierline_mode & OBFUSCATE_CFF)) {
@@ -1433,6 +1506,14 @@ int luaO_unflatten (lua_State *L, Proto *f, CFFMetadata *metadata) {
 }
 
 
+/*
+** 序列化扁平化元数据
+** @param L Lua状态
+** @param ctx 扁平化上下文
+** @param buffer 输出缓冲区
+** @param size 缓冲区大小（输入输出参数）
+** @return 成功返回0，失败返回错误码
+*/
 int luaO_serializeMetadata (lua_State *L, CFFContext *ctx, 
                              void *buffer, size_t *size) {
   /* 计算所需大小 */
@@ -1482,6 +1563,14 @@ int luaO_serializeMetadata (lua_State *L, CFFContext *ctx,
 }
 
 
+/*
+** 反序列化扁平化元数据
+** @param L Lua状态
+** @param buffer 输入缓冲区
+** @param size 缓冲区大小
+** @param metadata 输出元数据结构
+** @return 成功返回0，失败返回错误码
+*/
 int luaO_deserializeMetadata (lua_State *L, const void *buffer, 
                                size_t size, CFFMetadata *metadata) {
   if (size < sizeof(int) * 4 + sizeof(unsigned int)) {
@@ -1541,6 +1630,11 @@ int luaO_deserializeMetadata (lua_State *L, const void *buffer,
 }
 
 
+/*
+** 释放扁平化元数据占用的内存
+** @param L Lua状态
+** @param metadata 要释放的元数据
+*/
 void luaO_freeMetadata (lua_State *L, CFFMetadata *metadata) {
   if (metadata == NULL) return;
   
@@ -1555,7 +1649,7 @@ void luaO_freeMetadata (lua_State *L, CFFMetadata *metadata) {
 
 /*
 ** =======================================================
-** Nested Dispatcher Generation
+** 嵌套分发器生成
 ** =======================================================
 */
 
@@ -1564,9 +1658,15 @@ void luaO_freeMetadata (lua_State *L, CFFMetadata *metadata) {
 #define NESTED_GROUP_SIZE  4
 
 
-/**
- * @brief Partitions basic blocks into groups for the nested dispatcher.
- */
+/*
+** 将基本块分配到不同的分组中
+** @param ctx 扁平化上下文
+** @return 成功返回0，失败返回-1
+**
+** 功能描述：
+** 将基本块分成多个分组，每个分组由外层分发器的一个状态对应。
+** 分组内的基本块由内层分发器管理。
+*/
 static int partitionBlocksIntoGroups (CFFContext *ctx) {
   if (ctx->num_blocks == 0) return 0;
   
@@ -1597,9 +1697,12 @@ static int partitionBlocksIntoGroups (CFFContext *ctx) {
 }
 
 
-/**
- * @brief Finds which group a basic block belongs to.
- */
+/*
+** 查找基本块所属的分组
+** @param ctx 上下文
+** @param block_idx 基本块索引
+** @return 分组索引
+*/
 static int findBlockGroup (CFFContext *ctx, int block_idx) {
   for (int g = 0; g < ctx->num_groups; g++) {
     if (block_idx >= ctx->group_starts[g] && block_idx < ctx->group_starts[g+1]) {
@@ -1610,25 +1713,36 @@ static int findBlockGroup (CFFContext *ctx, int block_idx) {
 }
 
 
-/**
- * @brief Generates a nested dispatcher (multi-layered state machine).
- * 
- * Structure:
- * - Initialize outer and inner state variables.
- * - Outer Dispatcher:
- *   - Compares outer state variable to select an inner dispatcher.
- * - Inner Dispatchers:
- *   - For each group of blocks, compares inner state variable to select a block.
- * - Basic Blocks:
- *   - Original code.
- *   - Update both outer and inner state variables for the next transition.
- *   - Jump back to outer dispatcher.
- * 
- * This increases complexity for static analysis by splitting the state space.
- * 
- * @param ctx CFF context.
- * @return 0 on success, error code on failure.
- */
+/*
+** 生成嵌套分发器代码
+** @param ctx 扁平化上下文
+** @return 成功返回0，失败返回错误码
+**
+** 嵌套分发器结构：
+**   LOADI outer_state_reg, initial_outer_state
+**   LOADI state_reg, initial_inner_state
+** outer_dispatcher:
+**   EQI outer_state_reg, 0, k=1
+**   JMP inner_dispatcher_0
+**   EQI outer_state_reg, 1, k=1
+**   JMP inner_dispatcher_1
+**   ...
+**   JMP outer_dispatcher  ; 默认循环
+** 
+** inner_dispatcher_0:
+**   EQI state_reg, state_0, k=1
+**   JMP block_0
+**   EQI state_reg, state_1, k=1
+**   JMP block_1
+**   ...
+**   JMP outer_dispatcher  ; 返回外层
+**
+** block_N:
+**   ; 原始代码
+**   LOADI outer_state_reg, next_outer
+**   LOADI state_reg, next_inner
+**   JMP outer_dispatcher
+*/
 int luaO_generateNestedDispatcher (CFFContext *ctx) {
   if (ctx->num_blocks == 0) return 0;
   
@@ -1761,6 +1875,14 @@ int luaO_generateNestedDispatcher (CFFContext *ctx) {
   CFF_LOG("--- 复制基本块代码 ---");
   for (int i = 0; i < ctx->num_blocks; i++) {
     BasicBlock *block = &ctx->blocks[i];
+    block_starts[i] = ctx->new_code_size;
+    
+    CFF_LOG("块 %d: 原始PC [%d, %d), 新起始PC=%d", 
+            i, block->start_pc, block->end_pc, block_starts[i]);
+    
+    /* 修正跳转到此块的指令 */
+    int offset = block_starts[i] - block_jmp_pcs[i] - 1;
+    SETARG_sJ(ctx->new_code[block_jmp_pcs[i]], offset);
     
     /* 分析基本块的最后指令 */
     int last_pc = block->end_pc - 1;
@@ -1770,6 +1892,8 @@ int luaO_generateNestedDispatcher (CFFContext *ctx) {
     
     if (last_pc >= block->start_pc) {
       last_op = GET_OPCODE(f->code[last_pc]);
+      
+      /* 检查条件测试+JMP模式 */
       if (last_op == OP_JMP && last_pc > block->start_pc) {
         OpCode prev_op = GET_OPCODE(f->code[last_pc - 1]);
         if (isConditionalTest(prev_op)) {
@@ -1779,37 +1903,11 @@ int luaO_generateNestedDispatcher (CFFContext *ctx) {
       }
     }
     
-    /* 处理循环回跳 stub (必须在 block_starts 之前) */
-    int loop_stub_pc = -1;
-    if (last_op == OP_FORLOOP || last_op == OP_TFORLOOP) {
-      int target_group = findBlockGroup(ctx, block->original_target);
-      int target_inner = ctx->blocks[block->original_target].state_id;
-      if (ctx->obfuscate_flags & OBFUSCATE_STATE_ENCODE) {
-        target_group = luaO_encodeState(target_group, ctx->seed);
-        target_inner = luaO_encodeState(target_inner, ctx->seed ^ 0x12345678);
-      }
-      loop_stub_pc = ctx->new_code_size;
-      CFF_LOG("  生成嵌套循环回跳 stub @ PC=%d", loop_stub_pc);
-      emitInstruction(ctx, CREATE_ABx(OP_LOADI, outer_state_reg, target_group + OFFSET_sBx));
-      emitInstruction(ctx, CREATE_ABx(OP_LOADI, state_reg, target_inner + OFFSET_sBx));
-      int jmp_disp = ctx->outer_dispatcher_pc - ctx->new_code_size - 1;
-      emitInstruction(ctx, CREATE_sJ(OP_JMP, jmp_disp + OFFSET_sJ, 0));
-    }
-
-    block_starts[i] = ctx->new_code_size;
-    CFF_LOG("块 %d: 原始PC [%d, %d), 新起始PC=%d", 
-            i, block->start_pc, block->end_pc, block_starts[i]);
-    
-    /* 修正跳转到此块的指令 */
-    int offset = block_starts[i] - block_jmp_pcs[i] - 1;
-    SETARG_sJ(ctx->new_code[block_jmp_pcs[i]], offset);
-
     /* 确定复制范围 */
     int copy_end = block->end_pc;
     if (has_cond_test) {
       copy_end = cond_test_pc;
-    } else if (last_op == OP_JMP || last_op == OP_FORLOOP || last_op == OP_TFORLOOP ||
-               last_op == OP_FORPREP || last_op == OP_TFORPREP) {
+    } else if (last_op == OP_JMP) {
       copy_end = block->end_pc - 1;
     }
     
@@ -1826,54 +1924,6 @@ int luaO_generateNestedDispatcher (CFFContext *ctx) {
           if (emitInstruction(ctx, f->code[pc]) < 0) goto cleanup_all;
         }
       }
-    } else if (last_op == OP_FORLOOP || last_op == OP_TFORLOOP) {
-      int fall_group = findBlockGroup(ctx, block->fall_through);
-      int fall_inner = ctx->blocks[block->fall_through].state_id;
-      if (ctx->obfuscate_flags & OBFUSCATE_STATE_ENCODE) {
-        fall_group = luaO_encodeState(fall_group, ctx->seed);
-        fall_inner = luaO_encodeState(fall_inner, ctx->seed ^ 0x12345678);
-      }
-      Instruction loop_inst = f->code[last_pc];
-      int bx = ctx->new_code_size + 1 - loop_stub_pc;
-      if (last_op == OP_TFORLOOP) bx += 1;
-      SETARG_Bx(loop_inst, bx);
-      CFF_LOG("  生成嵌套循环指令: %s, Bx=%d", getOpName(last_op), bx);
-      emitInstruction(ctx, loop_inst);
-
-      /* 失败分支（退出循环） */
-      emitInstruction(ctx, CREATE_ABx(OP_LOADI, outer_state_reg, fall_group + OFFSET_sBx));
-      emitInstruction(ctx, CREATE_ABx(OP_LOADI, state_reg, fall_inner + OFFSET_sBx));
-      int jmp_disp = ctx->outer_dispatcher_pc - ctx->new_code_size - 1;
-      emitInstruction(ctx, CREATE_sJ(OP_JMP, jmp_disp + OFFSET_sJ, 0));
-
-    } else if (last_op == OP_FORPREP || last_op == OP_TFORPREP) {
-      int target_group = findBlockGroup(ctx, block->original_target);
-      int target_inner = ctx->blocks[block->original_target].state_id;
-      int fall_group = findBlockGroup(ctx, block->fall_through);
-      int fall_inner = ctx->blocks[block->fall_through].state_id;
-      if (ctx->obfuscate_flags & OBFUSCATE_STATE_ENCODE) {
-        target_group = luaO_encodeState(target_group, ctx->seed);
-        target_inner = luaO_encodeState(target_inner, ctx->seed ^ 0x12345678);
-        fall_group = luaO_encodeState(fall_group, ctx->seed);
-        fall_inner = luaO_encodeState(fall_inner, ctx->seed ^ 0x12345678);
-      }
-      Instruction prep_inst = f->code[last_pc];
-      int bx = (last_op == OP_FORPREP) ? 2 : 3; 
-      SETARG_Bx(prep_inst, bx);
-      emitInstruction(ctx, prep_inst);
-
-      /* 成功分支（进入循环） */
-      emitInstruction(ctx, CREATE_ABx(OP_LOADI, outer_state_reg, fall_group + OFFSET_sBx));
-      emitInstruction(ctx, CREATE_ABx(OP_LOADI, state_reg, fall_inner + OFFSET_sBx));
-      int jmp_disp = ctx->outer_dispatcher_pc - ctx->new_code_size - 1;
-      emitInstruction(ctx, CREATE_sJ(OP_JMP, jmp_disp + OFFSET_sJ, 0));
-
-      /* 失败分支（跳过循环） */
-      emitInstruction(ctx, CREATE_ABx(OP_LOADI, outer_state_reg, target_group + OFFSET_sBx));
-      emitInstruction(ctx, CREATE_ABx(OP_LOADI, state_reg, target_inner + OFFSET_sBx));
-      jmp_disp = ctx->outer_dispatcher_pc - ctx->new_code_size - 1;
-      emitInstruction(ctx, CREATE_sJ(OP_JMP, jmp_disp + OFFSET_sJ, 0));
-
     } else if (has_cond_test) {
       /* 条件分支块：生成双路状态转换 */
       Instruction cond_inst = f->code[cond_test_pc];
@@ -1969,6 +2019,22 @@ cleanup_nested:
 }
 
 
+/*
+** =======================================================
+** NOP指令功能实现
+** =======================================================
+*/
+
+
+/*
+** 生成带虚假参数的NOP指令
+** @param seed 随机种子（用于生成随机参数）
+** @return 生成的NOP指令
+**
+** 功能描述：
+** 创建一个OP_NOP指令，其A/B/C参数被填充为随机值，
+** 这些参数在执行时被忽略，但可以干扰反编译器的分析。
+*/
 Instruction luaO_createNOP (unsigned int seed) {
   /* 生成随机参数值 */
   unsigned int r = seed;
@@ -1987,20 +2053,37 @@ Instruction luaO_createNOP (unsigned int seed) {
 
 /*
 ** =======================================================
-** Opaque Predicates Implementation
+** 不透明谓词功能实现
 ** =======================================================
 */
 
 
-/**
- * @brief Number of variants for each opaque predicate type.
- */
+/*
+** 不透明谓词变体数量
+** 每种类型有多个数学等价的实现方式
+*/
 #define NUM_OPAQUE_VARIANTS  4
 
 
-/**
- * @brief Emits an always-true opaque predicate.
- */
+/*
+** 生成恒真不透明谓词
+** @param ctx 上下文
+** @param seed 随机种子指针
+** @return 成功返回0，失败返回-1
+**
+** 恒真谓词示例：
+** 1. x*(x+1) % 2 == 0  (连续整数乘积必为偶数)
+** 2. x*x >= 0          (平方数非负)
+** 3. (x | 1) != 0      (任何数或1都不为0)
+** 4. (x & -x) <= x     (取最低位不会超过原值，x>=0时)
+**
+** 生成的字节码结构：
+**   LOADI reg1, random_value      ; 加载一个随机值
+**   MUL reg2, reg1, reg1          ; reg2 = reg1 * reg1
+**   GEI reg2, 0, k=0              ; 检查 reg2 >= 0 (恒真)
+**   JMP +1                        ; 条件为假时跳过（永不执行）
+**   ; 继续正常执行...
+*/
 static int emitAlwaysTruePredicate (CFFContext *ctx, unsigned int *seed) {
   int reg1 = ctx->opaque_reg1;
   int reg2 = ctx->opaque_reg2;
@@ -2089,9 +2172,17 @@ static int emitAlwaysTruePredicate (CFFContext *ctx, unsigned int *seed) {
 }
 
 
-/**
- * @brief Emits an always-false opaque predicate.
- */
+/*
+** 生成恒假不透明谓词
+** @param ctx 上下文
+** @param seed 随机种子指针
+** @return 成功返回0，失败返回-1
+**
+** 恒假谓词示例：
+** 1. x*x < 0           (平方数不可能为负)
+** 2. x != x            (自身不等于自身，假)
+** 3. x - x != 0        (x减x必为0)
+*/
 static int emitAlwaysFalsePredicate (CFFContext *ctx, unsigned int *seed) {
   int reg1 = ctx->opaque_reg1;
   int reg2 = ctx->opaque_reg2;
@@ -2154,6 +2245,13 @@ static int emitAlwaysFalsePredicate (CFFContext *ctx, unsigned int *seed) {
 }
 
 
+/*
+** 生成不透明谓词代码
+** @param ctx 扁平化上下文
+** @param type 谓词类型（恒真或恒假）
+** @param seed 随机种子指针
+** @return 成功返回生成的指令数，失败返回-1
+*/
 int luaO_emitOpaquePredicate (CFFContext *ctx, OpaquePredicateType type,
                                unsigned int *seed) {
   int start_size = ctx->new_code_size;
@@ -2173,25 +2271,31 @@ int luaO_emitOpaquePredicate (CFFContext *ctx, OpaquePredicateType type,
 
 /*
 ** =======================================================
-** Function Interleaving Implementation
+** 函数交织功能实现
 ** =======================================================
 */
 
 
-/**
- * @brief Fake function templates for interleaving.
- */
+/*
+** 虚假函数模板
+** 用于生成看起来像真实函数的代码序列
+*/
 typedef enum {
-  FAKE_FUNC_CALCULATOR,   /**< Simulate calculator. */
-  FAKE_FUNC_STRING_OP,    /**< Simulate string ops. */
-  FAKE_FUNC_TABLE_OP,     /**< Simulate table ops. */
-  FAKE_FUNC_LOOP          /**< Simulate loop. */
+  FAKE_FUNC_CALCULATOR,   /* 模拟计算函数 */
+  FAKE_FUNC_STRING_OP,    /* 模拟字符串操作 */
+  FAKE_FUNC_TABLE_OP,     /* 模拟表操作 */
+  FAKE_FUNC_LOOP          /* 模拟循环函数 */
 } FakeFuncType;
 
 
-/**
- * @brief Emits a basic block for a fake function.
- */
+/*
+** 生成虚假函数的一个基本块
+** @param ctx 上下文
+** @param func_type 虚假函数类型
+** @param block_idx 块在虚假函数中的索引
+** @param seed 随机种子指针
+** @return 成功返回0，失败返回-1
+*/
 static int emitFakeFunctionBlock (CFFContext *ctx, FakeFuncType func_type, 
                                    int block_idx, unsigned int *seed) {
   int reg_base = ctx->opaque_reg1;  /* 使用不透明谓词的寄存器 */
@@ -2299,9 +2403,28 @@ static int emitFakeFunctionBlock (CFFContext *ctx, FakeFuncType func_type,
 }
 
 
-/**
- * @brief Emits the entry check and initial jump for a fake function.
- */
+/*
+** 生成虚假函数的完整代码路径
+** @param ctx 上下文
+** @param func_id 虚假函数ID
+** @param seed 随机种子指针
+** @param jmp_pcs 输出：每个块的跳转PC数组
+** @return 成功返回生成的块数，失败返回-1
+**
+** 虚假函数结构：
+**   ; 函数ID检查
+**   EQI func_id_reg, func_id, k=1
+**   JMP fake_func_block_0
+**   
+**   fake_func_block_0:
+**     ; 虚假代码
+**     LOADI state_reg, next_state
+**     JMP dispatcher
+**   
+**   fake_func_block_1:
+**     ; 虚假代码
+**     ...
+*/
 static int emitFakeFunction (CFFContext *ctx, int func_id, unsigned int *seed,
                               int *entry_jmp_pc) {
   int func_id_reg = ctx->func_id_reg;
@@ -2331,9 +2454,14 @@ static int emitFakeFunction (CFFContext *ctx, int func_id, unsigned int *seed,
 }
 
 
-/**
- * @brief Emits the blocks for a fake function.
- */
+/*
+** 生成虚假函数的所有基本块
+** @param ctx 上下文
+** @param func_id 虚假函数ID
+** @param seed 随机种子指针
+** @param entry_jmp_pc 入口跳转PC（需要修正）
+** @return 成功返回0，失败返回-1
+*/
 static int emitFakeFunctionBlocks (CFFContext *ctx, int func_id, unsigned int *seed,
                                     int entry_jmp_pc) {
   int state_reg = ctx->state_reg;
@@ -2384,15 +2512,37 @@ static int emitFakeFunctionBlocks (CFFContext *ctx, int func_id, unsigned int *s
 
 /*
 ** =======================================================
-** VM Protection Implementation
+** VM保护功能实现
 ** =======================================================
+**
+** VM保护将Lua字节码转换为自定义虚拟机指令集，
+** 并使用加密保护，使静态分析更加困难。
+**
+** 实现步骤：
+** 1. 生成随机操作码映射表
+** 2. 将Lua指令转换为VM指令
+** 3. 使用XOR加密指令
+** 4. 生成VM解释器代码（嵌入到字节码中）
 */
 
 
+/* VM保护相关常量 */
 #define VM_CODE_INITIAL_CAPACITY  128   /* VM代码初始容量 */
 #define VM_ENCRYPT_ROUNDS         3     /* 加密轮数 */
 
 
+/*
+** 初始化VM保护上下文
+** @param L Lua状态
+** @param f 函数原型
+** @param seed 随机种子
+** @return 上下文指针，失败返回NULL
+**
+** 功能描述：
+** - 分配VM保护上下文结构
+** - 生成随机操作码映射表
+** - 初始化加密密钥
+*/
 VMProtectContext *luaO_initVMContext (lua_State *L, Proto *f, unsigned int seed) {
   VMProtectContext *ctx = (VMProtectContext *)luaM_malloc_(L, sizeof(VMProtectContext), 0);
   if (ctx == NULL) return NULL;
@@ -2413,21 +2563,21 @@ VMProtectContext *luaO_initVMContext (lua_State *L, Proto *f, unsigned int seed)
   
   /* 分配操作码映射表 */
   ctx->opcode_map = (int *)luaM_malloc_(L, sizeof(int) * NUM_OPCODES, 0);
-  ctx->reverse_map = (int *)luaM_malloc_(L, sizeof(int) * VM_OP_COUNT, 0);
+  ctx->reverse_map = (int *)luaM_malloc_(L, sizeof(int) * NUM_OPCODES, 0);  /* 修复：使用NUM_OPCODES而非VM_OP_COUNT */
   
   if (ctx->opcode_map == NULL || ctx->reverse_map == NULL) {
     if (ctx->opcode_map) luaM_free_(L, ctx->opcode_map, sizeof(int) * NUM_OPCODES);
-    if (ctx->reverse_map) luaM_free_(L, ctx->reverse_map, sizeof(int) * VM_OP_COUNT);
+    if (ctx->reverse_map) luaM_free_(L, ctx->reverse_map, sizeof(int) * NUM_OPCODES);
     luaM_free_(L, ctx, sizeof(VMProtectContext));
     return NULL;
   }
   
   /* 初始化映射表 */
   for (int i = 0; i < NUM_OPCODES; i++) {
-    ctx->opcode_map[i] = -1;  /* -1 表示未映射 */
+    ctx->opcode_map[i] = 0;  /* 默认映射到0 */
   }
-  for (int i = 0; i < VM_OP_COUNT; i++) {
-    ctx->reverse_map[i] = -1;
+  for (int i = 0; i < NUM_OPCODES; i++) {
+    ctx->reverse_map[i] = 0;  /* 修复：初始化为0而非-1，避免序列化时64位负数溢出 */
   }
   
   /* 生成随机操作码映射（Lua OpCode -> VM OpCode） */
@@ -2452,6 +2602,10 @@ VMProtectContext *luaO_initVMContext (lua_State *L, Proto *f, unsigned int seed)
 }
 
 
+/*
+** 释放VM保护上下文
+** @param ctx 要释放的上下文
+*/
 void luaO_freeVMContext (VMProtectContext *ctx) {
   if (ctx == NULL) return;
   
@@ -2466,16 +2620,19 @@ void luaO_freeVMContext (VMProtectContext *ctx) {
   }
   
   if (ctx->reverse_map != NULL) {
-    luaM_free_(L, ctx->reverse_map, sizeof(int) * VM_OP_COUNT);
+    luaM_free_(L, ctx->reverse_map, sizeof(int) * NUM_OPCODES);  /* 修复：使用NUM_OPCODES */
   }
   
   luaM_free_(L, ctx, sizeof(VMProtectContext));
 }
 
 
-/**
- * @brief Ensures VM code array capacity.
- */
+/*
+** 确保VM代码数组有足够容量
+** @param ctx VM上下文
+** @param needed 需要的额外空间
+** @return 成功返回0，失败返回-1
+*/
 static int ensureVMCodeCapacity (VMProtectContext *ctx, int needed) {
   int required = ctx->vm_code_size + needed;
   
@@ -2507,9 +2664,12 @@ static int ensureVMCodeCapacity (VMProtectContext *ctx, int needed) {
 }
 
 
-/**
- * @brief Emits a VM instruction.
- */
+/*
+** 添加VM指令
+** @param ctx VM上下文
+** @param inst VM指令
+** @return 指令的PC，失败返回-1
+*/
 static int emitVMInstruction (VMProtectContext *ctx, VMInstruction inst) {
   if (ensureVMCodeCapacity(ctx, 1) != 0) return -1;
   
@@ -2519,9 +2679,18 @@ static int emitVMInstruction (VMProtectContext *ctx, VMInstruction inst) {
 }
 
 
-/**
- * @brief Encrypts a VM instruction using XOR and rotation.
- */
+/*
+** 加密VM指令
+** @param inst 原始指令
+** @param key 加密密钥
+** @param pc 指令位置（用于位置相关加密）
+** @return 加密后的指令
+**
+** 加密算法：
+** 1. XOR with key
+** 2. 位旋转（基于PC）
+** 3. 再次XOR
+*/
 static VMInstruction encryptVMInstruction (VMInstruction inst, uint64_t key, int pc) {
   uint64_t encrypted = inst;
   
@@ -2540,9 +2709,13 @@ static VMInstruction encryptVMInstruction (VMInstruction inst, uint64_t key, int
 }
 
 
-/**
- * @brief Decrypts a VM instruction.
- */
+/*
+** 解密VM指令
+** @param inst 加密的指令
+** @param key 解密密钥
+** @param pc 指令位置
+** @return 解密后的指令
+*/
 static VMInstruction decryptVMInstruction (VMInstruction inst, uint64_t key, int pc) {
   uint64_t decrypted = inst;
   
@@ -2561,9 +2734,13 @@ static VMInstruction decryptVMInstruction (VMInstruction inst, uint64_t key, int
 }
 
 
-/**
- * @brief Translates a single Lua instruction to VM format.
- */
+/*
+** 将单条Lua指令转换为VM指令
+** @param ctx VM上下文
+** @param inst Lua指令
+** @param pc 原始PC
+** @return 成功返回0，失败返回-1
+*/
 static int convertLuaInstToVM (VMProtectContext *ctx, Instruction inst, int pc) {
   OpCode lua_op = GET_OPCODE(inst);
   
@@ -2600,6 +2777,12 @@ static int convertLuaInstToVM (VMProtectContext *ctx, Instruction inst, int pc) 
     case isJ:
       a = GETARG_sJ(inst);
       break;
+    case ivABC:
+      /* variant ABC模式，特殊处理 */
+      b = GETARG_B(inst);
+      c = GETARG_C(inst);
+      flags = getarg(inst, POS_k, 1);  /* k标志位 */
+      break;
   }
   
   /* 构造VM指令 */
@@ -2618,6 +2801,16 @@ static int convertLuaInstToVM (VMProtectContext *ctx, Instruction inst, int pc) 
 }
 
 
+/*
+** 将Lua字节码转换为VM指令
+** @param ctx VM保护上下文
+** @return 成功返回0，失败返回错误码
+**
+** 功能描述：
+** - 遍历函数的所有Lua指令
+** - 将每条指令转换为对应的VM指令
+** - 应用加密保护
+*/
 int luaO_convertToVM (VMProtectContext *ctx) {
   Proto *f = ctx->f;
   
@@ -2645,14 +2838,42 @@ int luaO_convertToVM (VMProtectContext *ctx) {
 }
 
 
-/**
- * @brief Generates the Lua bytecode for the VM interpreter.
- * @note Currently a simplified implementation that preserves original code.
- */
+/*
+** 生成VM解释器的Lua字节码
+** @param ctx VM上下文
+** @param out_code 输出代码数组
+** @param out_size 输出代码大小
+** @return 成功返回0，失败返回-1
+**
+** 功能描述：
+** 生成一个内联的VM解释器，使用Lua字节码实现。
+** 解释器循环：
+** 1. 读取加密的VM指令
+** 2. 解密指令
+** 3. 根据VM操作码执行相应操作
+** 4. 更新PC
+**
+** 注意：完整的VM解释器非常复杂，这里实现一个简化版本。
+** 简化版本会在运行时还原部分指令。
+*/
 static int generateVMInterpreter (VMProtectContext *ctx, 
                                    Instruction **out_code, int *out_size) {
   lua_State *L = ctx->L;
   Proto *f = ctx->f;
+  
+  /* 
+  ** 简化实现：
+  ** 当前版本直接复制原始代码，不添加序言。
+  ** VM保护的实际效果通过在difierline_mode中设置标志来实现，
+  ** 运行时检测到该标志后可以启用额外的保护机制。
+  ** 
+  ** 完整的VM保护需要：
+  ** 1. 将代码转换为自定义VM指令（已在luaO_convertToVM中完成）
+  ** 2. 在运行时用自定义解释器执行（需要修改lvm.c）
+  ** 
+  ** 由于添加序言会破坏CFF生成的跳转偏移量，
+  ** 当前采用不添加序言的方式保持兼容性。
+  */
   
   /* 直接复制原始代码 */
   int total_size = f->sizecode;
@@ -2674,11 +2895,22 @@ static int generateVMInterpreter (VMProtectContext *ctx,
 
 /*
 ** =======================================================
-** VM Code Table Management
+** VM代码表管理函数
 ** =======================================================
 */
 
 
+/*
+** 注册VM代码到全局表
+** @param L Lua状态
+** @param p 函数原型
+** @param code VM指令数组
+** @param size 指令数量
+** @param key 加密密钥
+** @param reverse_map 反向映射表
+** @param seed 随机种子
+** @return 成功返回VMCodeTable指针，失败返回NULL
+*/
 VMCodeTable *luaO_registerVMCode (lua_State *L, Proto *p,
                                    VMInstruction *code, int size,
                                    uint64_t key, int *reverse_map,
@@ -2727,6 +2959,12 @@ VMCodeTable *luaO_registerVMCode (lua_State *L, Proto *p,
 }
 
 
+/*
+** 查找函数关联的VM代码表
+** @param L Lua状态
+** @param p 函数原型
+** @return 找到返回VMCodeTable指针，未找到返回NULL
+*/
 VMCodeTable *luaO_findVMCode (lua_State *L, Proto *p) {
   /* 优先使用 Proto 中的直接指针 */
   if (p->vm_code_table != NULL) {
@@ -2749,6 +2987,10 @@ VMCodeTable *luaO_findVMCode (lua_State *L, Proto *p) {
 }
 
 
+/*
+** 释放所有VM代码表
+** @param L Lua状态
+*/
 void luaO_freeAllVMCode (lua_State *L) {
   global_State *g = G(L);
   VMCodeTable *vt = g->vm_code_list;
@@ -2781,9 +3023,13 @@ void luaO_freeAllVMCode (lua_State *L) {
 }
 
 
-/**
- * @brief Decrypts a single VM instruction.
- */
+/*
+** 解密单条VM指令
+** @param encrypted 加密的指令
+** @param key 加密密钥
+** @param pc 程序计数器位置
+** @return 解密后的指令
+*/
 static VMInstruction decryptVMInst (VMInstruction encrypted, uint64_t key, int pc) {
   uint64_t decrypted = encrypted;
   
@@ -2803,17 +3049,619 @@ static VMInstruction decryptVMInst (VMInstruction encrypted, uint64_t key, int p
 }
 
 
+/*
+** 执行VM保护的代码
+** @param L Lua状态
+** @param f 函数原型（包含VM代码）
+** @return 执行结果: 0成功, -1失败, 1表示需要回退到原生VM
+**
+** 功能描述：
+** 这是VM解释器的核心函数。
+** 它读取加密的VM指令，解密并执行。
+**
+** 执行流程：
+** 1. 获取VMCodeTable
+** 2. 解密当前指令
+** 3. 映射VM操作码到Lua操作码
+** 4. 根据操作码执行相应操作
+** 5. 更新PC继续执行
+*/
 int luaO_executeVM (lua_State *L, Proto *f) {
   /* 检查是否为VM保护的函数 */
   if (!(f->difierline_mode & OBFUSCATE_VM_PROTECT)) {
-    return 0;  /* 不是VM保护的函数，使用默认执行 */
+    return 1;  /* 不是VM保护的函数，使用默认执行 */
   }
   
-  (void)L;
+  /* 获取VM代码表 */
+  VMCodeTable *vm = luaO_findVMCode(L, f);
+  if (vm == NULL) {
+    CFF_LOG("[VM EXEC] 未找到VM代码表，回退到原生VM");
+    return 1;  /* 回退到原生Lua VM */
+  }
+  
+  /* 获取当前调用信息 */
+  CallInfo *ci = L->ci;
+  LClosure *cl = clLvalue(s2v(ci->func.p));
+  TValue *k = f->k;             /* 常量表 */
+  StkId base = ci->func.p + 1;  /* 栈基址 */
+  
+  int pc = 0;  /* VM程序计数器 */
+  
+  CFF_LOG("[VM EXEC] 开始执行VM代码: size=%d, key=0x%016llx", 
+          vm->size, (unsigned long long)vm->encrypt_key);
+  
+  /* 主执行循环 */
+  while (pc < vm->size) {
+    /* 1. 解密当前指令 */
+    VMInstruction encrypted = vm->code[pc];
+    VMInstruction decrypted = decryptVMInst(encrypted, vm->encrypt_key, pc);
+    
+    /* 2. 提取VM操作码 */
+    int vm_op = VM_GET_OP(decrypted);
+    int a = VM_GET_A(decrypted);
+    int b = VM_GET_B(decrypted);
+    int c = VM_GET_C(decrypted);
+    int flags = VM_GET_FLAGS(decrypted);
+    
+    /* 3. 映射VM操作码到Lua操作码 */
+    int lua_op = -1;
+    if (vm_op >= 0 && vm_op < VM_OP_COUNT && vm->reverse_map != NULL) {
+      lua_op = vm->reverse_map[vm_op];
+    }
+    
+    CFF_LOG("[VM EXEC] PC=%d: vm_op=%d -> lua_op=%d, A=%d B=%d C=%d", 
+            pc, vm_op, lua_op, a, b, c);
+    
+    /* 4. 根据VM操作码执行 */
+    switch (vm_op) {
+      case VM_OP_NOP: {
+        /* 空操作 */
+        break;
+      }
+      
+      case VM_OP_HALT: {
+        /* 停止执行 */
+        CFF_LOG("[VM EXEC] HALT - 执行完成");
+        return 0;
+      }
+      
+      case VM_OP_MOVE: {
+        /* 寄存器移动: R[A] := R[B] */
+        StkId ra = base + a;
+        StkId rb = base + b;
+        setobjs2s(L, ra, rb);
+        break;
+      }
+      
+      case VM_OP_LOAD: {
+        /* 加载常量或立即数 */
+        StkId ra = base + a;
+        if (flags & 0x01) {
+          /* 加载常量 K[B] */
+          if (b < f->sizek) {
+            TValue *rb = k + b;
+            setobj2s(L, ra, rb);
+          }
+        } else {
+          /* 加载立即数 (有符号) */
+          lua_Integer ib = (lua_Integer)(int16_t)b;
+          setivalue(s2v(ra), ib);
+        }
+        break;
+      }
+      
+      case VM_OP_STORE: {
+        /* 存储到upvalue: UpValue[B] := R[A] */
+        StkId ra = base + a;
+        if (b < cl->nupvalues) {
+          UpVal *uv = cl->upvals[b];
+          setobj(L, uv->v.p, s2v(ra));
+          luaC_barrier(L, uv, s2v(ra));
+        }
+        break;
+      }
+      
+      case VM_OP_ADD: {
+        /* 加法: R[A] := R[B] + R[C] */
+        StkId ra = base + a;
+        TValue *rb = s2v(base + b);
+        TValue *rc = s2v(base + c);
+        if (ttisinteger(rb) && ttisinteger(rc)) {
+          lua_Integer ib = ivalue(rb);
+          lua_Integer ic = ivalue(rc);
+          setivalue(s2v(ra), intop(+, ib, ic));
+        } else {
+          lua_Number nb, nc;
+          if (tonumberns(rb, nb) && tonumberns(rc, nc)) {
+            setfltvalue(s2v(ra), luai_numadd(L, nb, nc));
+          }
+        }
+        break;
+      }
+      
+      case VM_OP_SUB: {
+        /* 减法: R[A] := R[B] - R[C] */
+        StkId ra = base + a;
+        TValue *rb = s2v(base + b);
+        TValue *rc = s2v(base + c);
+        if (ttisinteger(rb) && ttisinteger(rc)) {
+          lua_Integer ib = ivalue(rb);
+          lua_Integer ic = ivalue(rc);
+          setivalue(s2v(ra), intop(-, ib, ic));
+        } else {
+          lua_Number nb, nc;
+          if (tonumberns(rb, nb) && tonumberns(rc, nc)) {
+            setfltvalue(s2v(ra), luai_numsub(L, nb, nc));
+          }
+        }
+        break;
+      }
+      
+      case VM_OP_MUL: {
+        /* 乘法: R[A] := R[B] * R[C] */
+        StkId ra = base + a;
+        TValue *rb = s2v(base + b);
+        TValue *rc = s2v(base + c);
+        if (ttisinteger(rb) && ttisinteger(rc)) {
+          lua_Integer ib = ivalue(rb);
+          lua_Integer ic = ivalue(rc);
+          setivalue(s2v(ra), intop(*, ib, ic));
+        } else {
+          lua_Number nb, nc;
+          if (tonumberns(rb, nb) && tonumberns(rc, nc)) {
+            setfltvalue(s2v(ra), luai_nummul(L, nb, nc));
+          }
+        }
+        break;
+      }
+      
+      case VM_OP_DIV: {
+        /* 除法: R[A] := R[B] / R[C] */
+        StkId ra = base + a;
+        TValue *rb = s2v(base + b);
+        TValue *rc = s2v(base + c);
+        lua_Number nb, nc;
+        if (tonumberns(rb, nb) && tonumberns(rc, nc)) {
+          setfltvalue(s2v(ra), luai_numdiv(L, nb, nc));
+        }
+        break;
+      }
+      
+      case VM_OP_MOD: {
+        /* 取模: R[A] := R[B] % R[C] */
+        StkId ra = base + a;
+        TValue *rb = s2v(base + b);
+        TValue *rc = s2v(base + c);
+        if (ttisinteger(rb) && ttisinteger(rc)) {
+          lua_Integer ib = ivalue(rb);
+          lua_Integer ic = ivalue(rc);
+          setivalue(s2v(ra), luaV_mod(L, ib, ic));
+        } else {
+          lua_Number nb, nc;
+          if (tonumberns(rb, nb) && tonumberns(rc, nc)) {
+            setfltvalue(s2v(ra), luaV_modf(L, nb, nc));
+          }
+        }
+        break;
+      }
+      
+      case VM_OP_IDIV: {
+        /* 整除: R[A] := R[B] // R[C] */
+        StkId ra = base + a;
+        TValue *rb = s2v(base + b);
+        TValue *rc = s2v(base + c);
+        if (ttisinteger(rb) && ttisinteger(rc)) {
+          lua_Integer ib = ivalue(rb);
+          lua_Integer ic = ivalue(rc);
+          setivalue(s2v(ra), luaV_idiv(L, ib, ic));
+        }
+        break;
+      }
+      
+      case VM_OP_UNM: {
+        /* 取负: R[A] := -R[B] */
+        StkId ra = base + a;
+        TValue *rb = s2v(base + b);
+        if (ttisinteger(rb)) {
+          lua_Integer ib = ivalue(rb);
+          setivalue(s2v(ra), intop(-, 0, ib));
+        } else if (ttisfloat(rb)) {
+          setfltvalue(s2v(ra), luai_numunm(L, fltvalue(rb)));
+        }
+        break;
+      }
+      
+      case VM_OP_BAND: {
+        /* 按位与: R[A] := R[B] & R[C] */
+        StkId ra = base + a;
+        TValue *rb = s2v(base + b);
+        TValue *rc = s2v(base + c);
+        lua_Integer ib, ic;
+        if (tointegerns(rb, &ib) && tointegerns(rc, &ic)) {
+          setivalue(s2v(ra), intop(&, ib, ic));
+        }
+        break;
+      }
+      
+      case VM_OP_BOR: {
+        /* 按位或: R[A] := R[B] | R[C] */
+        StkId ra = base + a;
+        TValue *rb = s2v(base + b);
+        TValue *rc = s2v(base + c);
+        lua_Integer ib, ic;
+        if (tointegerns(rb, &ib) && tointegerns(rc, &ic)) {
+          setivalue(s2v(ra), intop(|, ib, ic));
+        }
+        break;
+      }
+      
+      case VM_OP_BXOR: {
+        /* 按位异或: R[A] := R[B] ~ R[C] */
+        StkId ra = base + a;
+        TValue *rb = s2v(base + b);
+        TValue *rc = s2v(base + c);
+        lua_Integer ib, ic;
+        if (tointegerns(rb, &ib) && tointegerns(rc, &ic)) {
+          setivalue(s2v(ra), intop(^, ib, ic));
+        }
+        break;
+      }
+      
+      case VM_OP_BNOT: {
+        /* 按位取反: R[A] := ~R[B] */
+        StkId ra = base + a;
+        TValue *rb = s2v(base + b);
+        lua_Integer ib;
+        if (tointegerns(rb, &ib)) {
+          setivalue(s2v(ra), intop(^, ~l_castS2U(0), ib));
+        }
+        break;
+      }
+      
+      case VM_OP_SHL: {
+        /* 左移: R[A] := R[B] << R[C] */
+        StkId ra = base + a;
+        TValue *rb = s2v(base + b);
+        TValue *rc = s2v(base + c);
+        lua_Integer ib, ic;
+        if (tointegerns(rb, &ib) && tointegerns(rc, &ic)) {
+          setivalue(s2v(ra), luaV_shiftl(ib, ic));
+        }
+        break;
+      }
+      
+      case VM_OP_SHR: {
+        /* 右移: R[A] := R[B] >> R[C] */
+        StkId ra = base + a;
+        TValue *rb = s2v(base + b);
+        TValue *rc = s2v(base + c);
+        lua_Integer ib, ic;
+        if (tointegerns(rb, &ib) && tointegerns(rc, &ic)) {
+          setivalue(s2v(ra), luaV_shiftr(ib, ic));
+        }
+        break;
+      }
+      
+      case VM_OP_JMP: {
+        /* 无条件跳转: PC += A (有符号) */
+        int offset = (int)(int16_t)a;
+        pc += offset;
+        continue;  /* 跳过pc++ */
+      }
+      
+      case VM_OP_JEQ: {
+        /* 相等跳转: if R[A] == R[B] then PC += C */
+        TValue *ra_v = s2v(base + a);
+        TValue *rb_v = s2v(base + b);
+        if (luaV_equalobj(L, ra_v, rb_v)) {
+          int offset = (int)(int16_t)c;
+          pc += offset;
+          continue;
+        }
+        break;
+      }
+      
+      case VM_OP_JNE: {
+        /* 不等跳转: if R[A] != R[B] then PC += C */
+        TValue *ra_v = s2v(base + a);
+        TValue *rb_v = s2v(base + b);
+        if (!luaV_equalobj(L, ra_v, rb_v)) {
+          int offset = (int)(int16_t)c;
+          pc += offset;
+          continue;
+        }
+        break;
+      }
+      
+      case VM_OP_JLT: {
+        /* 小于跳转: if R[A] < R[B] then PC += C */
+        TValue *ra_v = s2v(base + a);
+        TValue *rb_v = s2v(base + b);
+        if (luaV_lessthan(L, ra_v, rb_v)) {
+          int offset = (int)(int16_t)c;
+          pc += offset;
+          continue;
+        }
+        break;
+      }
+      
+      case VM_OP_JLE: {
+        /* 小于等于跳转: if R[A] <= R[B] then PC += C */
+        TValue *ra_v = s2v(base + a);
+        TValue *rb_v = s2v(base + b);
+        if (luaV_lessequal(L, ra_v, rb_v)) {
+          int offset = (int)(int16_t)c;
+          pc += offset;
+          continue;
+        }
+        break;
+      }
+      
+      case VM_OP_JGT: {
+        /* 大于跳转: if R[A] > R[B] then PC += C */
+        TValue *ra_v = s2v(base + a);
+        TValue *rb_v = s2v(base + b);
+        if (luaV_lessthan(L, rb_v, ra_v)) {
+          int offset = (int)(int16_t)c;
+          pc += offset;
+          continue;
+        }
+        break;
+      }
+      
+      case VM_OP_JGE: {
+        /* 大于等于跳转: if R[A] >= R[B] then PC += C */
+        TValue *ra_v = s2v(base + a);
+        TValue *rb_v = s2v(base + b);
+        if (luaV_lessequal(L, rb_v, ra_v)) {
+          int offset = (int)(int16_t)c;
+          pc += offset;
+          continue;
+        }
+        break;
+      }
+      
+      case VM_OP_NOT: {
+        /* 逻辑非: R[A] := not R[B] */
+        StkId ra = base + a;
+        TValue *rb = s2v(base + b);
+        if (l_isfalse(rb))
+          setbtvalue(s2v(ra));
+        else
+          setbfvalue(s2v(ra));
+        break;
+      }
+      
+      case VM_OP_LEN: {
+        /* 获取长度: R[A] := #R[B] */
+        StkId ra = base + a;
+        luaV_objlen(L, ra, s2v(base + b));
+        break;
+      }
+      
+      case VM_OP_CONCAT: {
+        /* 字符串连接: R[A] := R[A].. ... ..R[A+B-1] */
+        StkId ra = base + a;
+        int n = b;
+        L->top.p = ra + n;
+        luaV_concat(L, n);
+        break;
+      }
+      
+      case VM_OP_NEWTABLE: {
+        /* 创建表: R[A] := {} */
+        StkId ra = base + a;
+        Table *t = luaH_new(L);
+        sethvalue2s(L, ra, t);
+        if (b != 0 || c != 0) {
+          unsigned hash_size = (b > 0) ? (1u << (b - 1)) : 0;
+          luaH_resize(L, t, c, hash_size);
+        }
+        break;
+      }
+      
+      case VM_OP_GETTABLE: {
+        /* 获取表元素: R[A] := R[B][R[C]] */
+        StkId ra = base + a;
+        TValue *rb = s2v(base + b);
+        TValue *rc = s2v(base + c);
+        const TValue *slot;
+        if (luaV_fastget(L, rb, rc, slot, luaH_get)) {
+          setobj2s(L, ra, slot);
+        } else {
+          luaV_finishget(L, rb, rc, ra, slot);
+        }
+        break;
+      }
+      
+      case VM_OP_SETTABLE: {
+        /* 设置表元素: R[A][R[B]] := R[C] */
+        TValue *ra_v = s2v(base + a);
+        TValue *rb = s2v(base + b);
+        TValue *rc = s2v(base + c);
+        const TValue *slot;
+        if (luaV_fastget(L, ra_v, rb, slot, luaH_get)) {
+          luaV_finishfastset(L, ra_v, slot, rc);
+        } else {
+          luaV_finishset(L, ra_v, rb, rc, slot);
+        }
+        break;
+      }
+      
+      case VM_OP_GETFIELD: {
+        /* 获取字段: R[A] := R[B][K[C]] */
+        StkId ra = base + a;
+        TValue *rb = s2v(base + b);
+        if (c < f->sizek) {
+          TValue *rc = k + c;
+          const TValue *slot;
+          if (ttisstring(rc)) {
+            TString *key = tsvalue(rc);
+            if (luaV_fastget(L, rb, key, slot, luaH_getshortstr)) {
+              setobj2s(L, ra, slot);
+            } else {
+              luaV_finishget(L, rb, rc, ra, slot);
+            }
+          }
+        }
+        break;
+      }
+      
+      case VM_OP_SETFIELD: {
+        /* 设置字段: R[A][K[B]] := R[C] */
+        TValue *ra_v = s2v(base + a);
+        if (b < f->sizek) {
+          TValue *rb = k + b;
+          TValue *rc = s2v(base + c);
+          const TValue *slot;
+          if (ttisstring(rb)) {
+            TString *key = tsvalue(rb);
+            if (luaV_fastget(L, ra_v, key, slot, luaH_getshortstr)) {
+              luaV_finishfastset(L, ra_v, slot, rc);
+            } else {
+              luaV_finishset(L, ra_v, rb, rc, slot);
+            }
+          }
+        }
+        break;
+      }
+      
+      case VM_OP_GETUPVAL: {
+        /* 获取upvalue: R[A] := UpValue[B] */
+        StkId ra = base + a;
+        if (b < cl->nupvalues) {
+          setobj2s(L, ra, cl->upvals[b]->v.p);
+        }
+        break;
+      }
+      
+      case VM_OP_SETUPVAL: {
+        /* 设置upvalue: UpValue[B] := R[A] */
+        StkId ra = base + a;
+        if (b < cl->nupvalues) {
+          UpVal *uv = cl->upvals[b];
+          setobj(L, uv->v.p, s2v(ra));
+          luaC_barrier(L, uv, s2v(ra));
+        }
+        break;
+      }
+      
+      case VM_OP_CALL: {
+        /* 函数调用: R[A], ..., R[A+C-2] := R[A](R[A+1], ..., R[A+B-1]) */
+        StkId ra = base + a;
+        int nargs = b - 1;
+        int nresults = c - 1;
+        if (b != 0)
+          L->top.p = ra + b;
+        ci->u.l.savedpc = (const Instruction *)(f->code + pc + 1);
+        if (luaD_precall(L, ra, nresults) == NULL) {
+          /* C函数调用完成 */
+        } else {
+          /* Lua函数调用 - 需要递归执行 */
+          luaV_execute(L, L->ci);
+        }
+        base = ci->func.p + 1;  /* 可能栈重分配 */
+        break;
+      }
+      
+      case VM_OP_TAILCALL: {
+        /* 尾调用: return R[A](R[A+1], ..., R[A+B-1]) */
+        StkId ra = base + a;
+        if (b != 0)
+          L->top.p = ra + b;
+        /* 尾调用优化 - 回退到原生VM处理 */
+        CFF_LOG("[VM EXEC] TAILCALL - 回退到原生VM");
+        return 1;
+      }
+      
+      case VM_OP_RET: {
+        /* 返回: return R[A], ..., R[A+B-2] */
+        StkId ra = base + a;
+        int n = b - 1;
+        if (n < 0)
+          n = cast_int(L->top.p - ra);
+        L->top.p = ra + n;
+        luaD_poscall(L, ci, n);
+        CFF_LOG("[VM EXEC] RETURN - 返回%d个值", n);
+        return 0;
+      }
+      
+      case VM_OP_CLOSURE: {
+        /* 创建闭包: R[A] := closure(KPROTO[B]) */
+        StkId ra = base + a;
+        if (b < f->sizep) {
+          Proto *p = f->p[b];
+          LClosure *ncl = luaF_newLclosure(L, p->sizeupvalues);
+          ncl->p = p;
+          setclLvalue2s(L, ra, ncl);
+          /* 简化处理：upvalue初始化留给原生VM */
+        }
+        break;
+      }
+      
+      case VM_OP_VARARG: {
+        /* 可变参数: R[A], R[A+1], ..., R[A+C-2] := vararg */
+        /* 复杂操作 - 回退到原生VM */
+        CFF_LOG("[VM EXEC] VARARG - 回退到原生VM");
+        return 1;
+      }
+      
+      case VM_OP_SELF: {
+        /* self调用准备: R[A+1] := R[B]; R[A] := R[B][RK(C)] */
+        StkId ra = base + a;
+        TValue *rb = s2v(base + b);
+        setobj2s(L, ra + 1, s2v(base + b));
+        /* 获取方法 */
+        TValue *rc = (flags & 0x01) ? (k + c) : s2v(base + c);
+        const TValue *slot;
+        if (ttisstring(rc)) {
+          TString *key = tsvalue(rc);
+          if (luaV_fastget(L, rb, key, slot, luaH_getstr)) {
+            setobj2s(L, ra, slot);
+          } else {
+            luaV_finishget(L, rb, rc, ra, slot);
+          }
+        }
+        break;
+      }
+      
+      case VM_OP_FORLOOP:
+      case VM_OP_FORPREP:
+      case VM_OP_SETLIST: {
+        /* 复杂循环操作 - 回退到原生VM */
+        CFF_LOG("[VM EXEC] 复杂循环指令 - 回退到原生VM");
+        return 1;
+      }
+      
+      default: {
+        /* 未知或未实现的VM操作码 */
+        CFF_LOG("[VM EXEC] 未知VM操作码 %d @ PC=%d - 回退到原生VM", vm_op, pc);
+        return 1;
+      }
+    }
+    
+    pc++;
+  }
+  
+  CFF_LOG("[VM EXEC] 执行完成 - 到达代码末尾");
   return 0;
 }
 
 
+/*
+** 对函数进行VM保护
+** @param L Lua状态
+** @param f 要保护的函数原型
+** @param seed 随机种子
+** @return 成功返回0，失败返回错误码
+**
+** 功能描述：
+** 1. 初始化VM保护上下文
+** 2. 将Lua字节码转换为VM指令
+** 3. 加密VM指令
+** 4. 生成VM解释器代码
+** 5. 更新函数原型
+*/
 int luaO_vmProtect (lua_State *L, Proto *f, unsigned int seed) {
   fprintf(stderr, "[VM DEBUG] luaO_vmProtect called, sizecode=%d\n", f->sizecode);
   fflush(stderr);
@@ -2850,6 +3698,29 @@ int luaO_vmProtect (lua_State *L, Proto *f, unsigned int seed) {
   fprintf(stderr, "[VM DEBUG] Setting VM protect flag...\n");
   fflush(stderr);
   
+  /* 
+  ** 注册VM代码到全局表，供运行时VM解释器使用。
+  ** VM指令数据已经生成并加密，存储在ctx->vm_code中。
+  */
+  
+  fprintf(stderr, "[VM DEBUG] Registering VM code to global table...\n");
+  fflush(stderr);
+  
+  /* 注册VM代码到全局表 */
+  VMCodeTable *vt = luaO_registerVMCode(L, f, 
+                                        ctx->vm_code, 
+                                        ctx->vm_code_size,
+                                        ctx->encrypt_key,
+                                        ctx->reverse_map,
+                                        seed);
+  if (vt == NULL) {
+    CFF_LOG("注册VM代码失败");
+    fprintf(stderr, "[VM DEBUG] Failed to register VM code\n");
+    fflush(stderr);
+    luaO_freeVMContext(ctx);
+    return -1;
+  }
+  
   /* 标记为VM保护 */
   f->difierline_mode |= OBFUSCATE_VM_PROTECT;
   
@@ -2861,9 +3732,13 @@ int luaO_vmProtect (lua_State *L, Proto *f, unsigned int seed) {
   fflush(stderr);
   
   CFF_LOG("========== VM保护完成 ==========");
-  CFF_LOG("VM指令数: %d, 加密密钥: 0x%08x", 
-          ctx->vm_code_size, (unsigned int)(ctx->encrypt_key & 0xFFFFFFFF));
+  CFF_LOG("VM指令数: %d, 加密密钥: 0x%016llx", 
+          ctx->vm_code_size, (unsigned long long)ctx->encrypt_key);
+  CFF_LOG("VM代码表已注册: proto=%p, vt=%p", (void*)f, (void*)vt);
   
+  /* 注意：不释放ctx->vm_code和ctx->reverse_map，因为已转移给VMCodeTable */
+  ctx->vm_code = NULL;
+  ctx->reverse_map = NULL;
   luaO_freeVMContext(ctx);
   
   fprintf(stderr, "[VM DEBUG] luaO_vmProtect returning 0\n");

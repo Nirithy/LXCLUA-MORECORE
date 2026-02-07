@@ -13,18 +13,28 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+
 #ifdef _WIN32
+// Windows 专用头文件
 #include <windows.h>
 #include <io.h>
 #else
+// 非 Windows（安卓/Linux/macOS）专用头文件
 #include <sys/stat.h>
 #include <unistd.h>
 #include <dirent.h>
 #endif
 
+
 #include "lua.h"
 #include "lauxlib.h"
 #include "lualib.h"
+
+/* 引入luajava头文件 */
+#ifdef __ANDROID__
+#include "../luajava/luajava.h"
+#endif
+
 
 #define SHARED_USER_ID "com.difierline.lua.shared"
 #define SHARED_DIR_NAME "shared"
@@ -38,12 +48,47 @@ static void init_app_dirs(lua_State *L) {
   if (app_files_dir != NULL) {
     return;  /* 已经初始化过 */
   }
-  
+
 #ifdef _WIN32
-  /* Windows上使用当前目录作为默认路径 */
+  /* Windows：使用当前目录 */
   app_files_dir = strdup("./");
+
+#elif defined(__ANDROID__)
+  /* 安卓：通过 Java activity 获取应用私有目录 */
+  lua_getglobal(L, "activity");
+  if (isJavaObject(L, -1)) {
+    lua_pushstring(L, "getFilesDir");
+    lua_gettable(L, -2);
+    if (lua_isfunction(L, -1)) {
+      lua_pushvalue(L, -3);
+      lua_call(L, 1, 1);
+
+      lua_pushstring(L, "getAbsolutePath");
+      lua_gettable(L, -2);
+      if (lua_isfunction(L, -1)) {
+        lua_pushvalue(L, -3);
+        lua_call(L, 1, 1);
+
+        if (lua_isstring(L, -1)) {
+          const char *path_cstr = lua_tostring(L, -1);
+          app_files_dir = strdup(path_cstr);
+        }
+        lua_pop(L, 1);
+      }
+      lua_pop(L, 1);
+      lua_pop(L, 1);
+    }
+    lua_pop(L, 1);
+  }
+  lua_pop(L, 1);
+
+  /* 安卓兜底路径 */
+  if (app_files_dir == NULL) {
+    app_files_dir = strdup("/data/user/0/com.difierline.lua/files/");
+  }
+
 #else
-  /* Unix/Linux上使用HOME目录或当前目录 */
+  /* Linux/macOS 等非 Windows、非安卓 */
   const char *home = getenv("HOME");
   if (home != NULL) {
     size_t len = strlen(home) + 16;
@@ -53,7 +98,7 @@ static void init_app_dirs(lua_State *L) {
     app_files_dir = strdup("./");
   }
 #endif
-  
+
   /* 构建共享目录路径 */
   size_t len = strlen(app_files_dir) + strlen(SHARED_DIR_NAME) + 2;
   shared_data_dir = (char *)malloc(len);

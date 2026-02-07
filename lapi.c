@@ -456,10 +456,20 @@ LUA_API lua_Integer lua_tointeger_safe (lua_State *L, int idx, int *isnum, int *
   lua_Integer res = 0;
   const TValue *o = index2value(L, idx);
   int is_success = tointeger(o, &res);
+
   if (isnum)
     *isnum = is_success;
-  if (overflow)
+
+  if (overflow) {
+#ifdef _WIN32
+    // Windows：数字转整数失败 → 标记溢出
     *overflow = (is_success == 0 && ttisnumber(o)) ? 1 : 0;
+#else
+    // 安卓/其他：永远不标记溢出
+    *overflow = 0;
+#endif
+  }
+
   return res;
 }
 

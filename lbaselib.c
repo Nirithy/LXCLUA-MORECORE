@@ -34,6 +34,9 @@
 #define LOGD(...) ((void)0)
 #endif
 
+/* 声明libc库的初始化函数 */
+extern int luaopen_libc(lua_State *L);
+
 /* 声明logtable模块的初始化函数 */
 extern int luaopen_logtable(lua_State *L);
 
@@ -1270,12 +1273,21 @@ static const ModuleInfo modules[] = {
   {LUA_DBLIBNAME, luaopen_debug},
   {LUA_BITLIBNAME, luaopen_bit},
   {LUA_PTRLIBNAME, luaopen_ptr},
+
 #ifndef _WIN32
   {LUA_SMGRNAME, luaopen_smgr},
   {"translator", luaopen_translator},
+
+  // 仅安卓端（Android）才加 libc 模块
+#ifdef __ANDROID__
+  {"libc", luaopen_libc},
 #endif
+
+#endif
+
   {NULL, NULL}
 };
+
 
 // 前置声明
 static int luaB_fsleep (lua_State *L);

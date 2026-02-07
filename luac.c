@@ -25,6 +25,7 @@
 #include "lopnames.h"
 #include "lstate.h"
 #include "lundump.h"
+#include "lobfuscate.h"
 
 static void PrintFunction(const Proto* f, int full);
 #define luaU_print	PrintFunction
@@ -35,6 +36,7 @@ static void PrintFunction(const Proto* f, int full);
 static int listing=0;			/* list bytecodes? */
 static int dumping=1;			/* dump bytecodes? */
 static int stripping=0;			/* strip debug information? */
+static int obfuscate_flags=0;		/* obfuscation flags */
 static char Output[]={ OUTPUT };	/* default output file name */
 static const char* output=Output;	/* actual output file name */
 static const char* progname=PROGNAME;	/* actual program name */
@@ -65,6 +67,9 @@ static void usage(const char* message)
   "  -o name  output to file 'name' (default is \"%s\")\n"
   "  -p       parse only\n"
   "  -s       strip debug information\n"
+  "  -f       enable control flow flattening\n"
+  "  -b       enable binary search dispatcher (implies -f)\n"
+  "  -O mask  enable obfuscation flags by bitmask\n"
   "  -v       show version information\n"
   "  --       stop handling options\n"
   "  -        stop handling options and process stdin\n"
@@ -104,6 +109,16 @@ static int doargs(int argc, char* argv[])
    dumping=0;
   else if (IS("-s"))			/* strip debug information */
    stripping=1;
+  else if (IS("-f"))			/* CFF */
+   obfuscate_flags |= OBFUSCATE_CFF;
+  else if (IS("-b"))			/* Binary search dispatcher */
+   obfuscate_flags |= OBFUSCATE_CFF | OBFUSCATE_BINARY_DISPATCHER;
+  else if (IS("-O"))			/* obfuscation mask */
+  {
+   const char *mask = argv[++i];
+   if (mask == NULL || *mask == 0) usage("'-O' needs argument");
+   obfuscate_flags |= strtol(mask, NULL, 0);
+  }
   else if (IS("-v"))			/* show version */
    ++version;
   else					/* unknown option */
@@ -186,7 +201,10 @@ static int pmain(lua_State* L)
   FILE* D= (output==NULL) ? stdout : fopen(output,"wb");
   if (D==NULL) cannot("open");
   lua_lock(L);
-  luaU_dump(L,f,writer,D,stripping);
+  if (obfuscate_flags)
+   luaU_dump_obfuscated(L,f,writer,D,stripping,obfuscate_flags,0,NULL);
+  else
+   luaU_dump(L,f,writer,D,stripping);
   lua_unlock(L);
   if (ferror(D)) cannot("write");
   if (fclose(D)) cannot("close");
