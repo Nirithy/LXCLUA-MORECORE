@@ -1,8 +1,7 @@
-/*
-** $Id: lvm.h $
-** Lua virtual machine
-** See Copyright Notice in lua.h
-*/
+/**
+ * @file lvm.h
+ * @brief Lua virtual machine.
+ */
 
 #ifndef lvm_h
 #define lvm_h
@@ -37,13 +36,13 @@
 #endif
 
 
-/*
-** Rounding modes for float->integer coercion
+/**
+ * @brief Rounding modes for float->integer coercion.
  */
 typedef enum {
-  F2Ieq,     /* no rounding; accepts only integral values */
-  F2Ifloor,  /* takes the floor of the number */
-  F2Iceil    /* takes the ceiling of the number */
+  F2Ieq,     /**< No rounding; accepts only integral values. */
+  F2Ifloor,  /**< Takes the floor of the number. */
+  F2Iceil    /**< Takes the ceiling of the number. */
 } F2Imod;
 
 
@@ -130,6 +129,11 @@ LUAI_FUNC void luaV_finishget (lua_State *L, const TValue *t, TValue *key,
 LUAI_FUNC void luaV_finishset (lua_State *L, const TValue *t, TValue *key,
                                              TValue *val, const TValue *slot);
 LUAI_FUNC void luaV_finishOp (lua_State *L);
+/**
+ * @brief Main execution loop of the Lua virtual machine.
+ * @param L Lua state.
+ * @param ci Call information.
+ */
 LUAI_FUNC void luaV_execute (lua_State *L, CallInfo *ci);
 LUAI_FUNC void luaV_concat (lua_State *L, int total);
 LUAI_FUNC lua_Integer luaV_idiv (lua_State *L, lua_Integer x, lua_Integer y);

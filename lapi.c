@@ -1,8 +1,7 @@
-/*
-** $Id: lapi.c $
-** Lua API
-** See Copyright Notice in lua.h
-*/
+/**
+ * @file lapi.c
+ * @brief Lua API implementation.
+ */
 
 #define lapi_c
 #define LUA_CORE
@@ -252,13 +251,14 @@ LUA_API void lua_rotate (lua_State *L, int idx, int n) {
   lua_unlock(L);
 }
 
-/*
-** 将栈上指定位置的多个值进行旋转
-** @param L Lua状态机
-** @param idx 栈索引（要旋转的段的起始位置）
-** @param n 旋转的正负数量，正数表示向右旋转，负数表示向左旋转
-** 注意：这个函数会旋转从idx到栈顶的所有值
-*/
+/**
+ * @brief Rotates stack elements between a given index and the top.
+ *
+ * @param L Lua state.
+ * @param idx Stack index (start of the segment to rotate).
+ * @param n Number of positions to rotate. Positive for right, negative for left.
+ * @note This function rotates all values from `idx` to the top of the stack.
+ */
 LUA_API void lua_rotate_multi (lua_State *L, int idx, int n) {
   int top_index;
   lua_lock(L);
@@ -443,15 +443,15 @@ LUA_API lua_Integer lua_tointegerx (lua_State *L, int idx, int *pisnum) {
   return res;
 }
 
-/*
-** 将栈上指定位置的值安全转换为整数
-** @param L Lua状态机
-** @param idx 栈索引
-** @param isnum 如果不为NULL，存储转换是否成功（1=成功，0=失败）
-** @param overflow 如果不为NULL，存储转换是否发生溢出（1=溢出，0=未溢出）
-** @return 转换后的整数值，转换失败时返回0
-** 说明：当值不是数字或转换溢出时，overflow会被设置为1
-*/
+/**
+ * @brief Safely converts a value at a given stack index to an integer.
+ *
+ * @param L Lua state.
+ * @param idx Stack index.
+ * @param isnum Optional output flag: 1 if conversion succeeded, 0 otherwise.
+ * @param overflow Optional output flag: 1 if conversion failed due to overflow or incompatible number.
+ * @return The converted integer value, or 0 on failure.
+ */
 LUA_API lua_Integer lua_tointeger_safe (lua_State *L, int idx, int *isnum, int *overflow) {
   lua_Integer res = 0;
   const TValue *o = index2value(L, idx);
@@ -459,7 +459,7 @@ LUA_API lua_Integer lua_tointeger_safe (lua_State *L, int idx, int *isnum, int *
   if (isnum)
     *isnum = is_success;
   if (overflow)
-    *overflow = is_success ? 0 : 0;
+    *overflow = (is_success == 0 && ttisnumber(o)) ? 1 : 0;
   return res;
 }
 

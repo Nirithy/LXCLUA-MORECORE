@@ -1,3 +1,8 @@
+/**
+ * @file sha256.c
+ * @brief SHA-256 implementation.
+ */
+
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -5,6 +10,13 @@
 #include <stdint.h>
 #include "sha256.h"
 
+/**
+ * @brief Pads the input message according to SHA-256 specification.
+ * @param paddedBinaryMsg Output buffer for the padded message.
+ * @param binary Input message.
+ * @param len Original message length.
+ * @param padLen Number of padding bytes.
+ */
 void padMsg(uint8_t* paddedBinaryMsg,const uint8_t* binary,int len,int padLen) {
   memcpy(paddedBinaryMsg,binary,len*sizeof(uint8_t));
   paddedBinaryMsg[len++] = 0x80;
@@ -14,12 +26,26 @@ void padMsg(uint8_t* paddedBinaryMsg,const uint8_t* binary,int len,int padLen) {
   }
 }
 
+/**
+ * @brief Converts an integer to a big-endian binary representation and appends it to the buffer.
+ * @param paddedBinaryMsg Output buffer.
+ * @param offset Start offset in the buffer.
+ * @param len The value to convert (message length in bits).
+ */
 void intToBin(uint8_t* paddedBinaryMsg, int offset, uint64_t len) {
   for (size_t i = 0; i < 8; i++) {
     paddedBinaryMsg[offset + i] = (len >> (56 - 8 * i)) & 0xFF;
   }
 }
 
+/**
+ * @brief Splits the message into 512-bit blocks.
+ * @param blocks Output array of blocks.
+ * @param noOfBlocks Number of blocks.
+ * @param binMsg Padded binary message.
+ * @param msgLen Length of the padded message.
+ * @return 0 on success, 1 on failure.
+ */
 int getBlocks(uint8_t** blocks,int noOfBlocks,uint8_t* binMsg,int msgLen) {
   for(int i = 0;i < noOfBlocks; i++) {
     blocks[i] = malloc(64 * sizeof(uint8_t));
@@ -34,12 +60,24 @@ int getBlocks(uint8_t** blocks,int noOfBlocks,uint8_t* binMsg,int msgLen) {
   return 0;
 }
 
+/**
+ * @brief Performs a right rotation on a 32-bit word.
+ * @param word The word to rotate.
+ * @param offset Number of bits to rotate.
+ * @return The rotated word.
+ */
 uint32_t rightRotate(const uint32_t word,int offset) {
   uint32_t temp = word;
   offset = offset % 32;
   return (temp >> offset) | (temp << (32 - offset));
 }
 
+/**
+ * @brief Main SHA-256 hashing loop.
+ * @param blocks Input blocks.
+ * @param noOfBlocks Number of blocks.
+ * @param hashedMsg Output buffer for the hash.
+ */
 void hash (uint8_t** blocks,int noOfBlocks,uint8_t* hashedMsg) {
 
   uint32_t H[] = {

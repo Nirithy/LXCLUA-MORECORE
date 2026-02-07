@@ -1,8 +1,7 @@
-/*
-** $Id: lvm.c $
-** Lua virtual machine
-** See Copyright Notice in lua.h
-*/
+/**
+ * @file lvm.c
+ * @brief Lua virtual machine implementation.
+ */
 
 #define lvm_c
 #define LUA_CORE
@@ -1203,6 +1202,9 @@ void luaV_finishOp (lua_State *L) {
 #define vmbreak		break
 
 
+/**
+ * @brief Main virtual machine execution loop.
+ */
 void luaV_execute (lua_State *L, CallInfo *ci) {
   LClosure *cl;
   TValue *k;

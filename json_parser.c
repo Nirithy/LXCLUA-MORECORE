@@ -2,10 +2,15 @@
 #include "lauxlib.h"
 #include <string.h>
 
-/*
-** 简单的JSON到Lua表的转换函数
-** 支持JSON对象，包含字符串、数字、布尔值、嵌套对象和数组
-*/
+/**
+ * @file json_parser.c
+ * @brief Simple JSON parser for Lua.
+ */
+
+/**
+ * @brief Converts JSON to a Lua table.
+ * Supports strings, numbers, booleans, nested objects, and arrays.
+ */
 int json_to_lua(lua_State *L, const char *json, size_t len, char *out, size_t outlen) {
   const char *p = json;
   char *q = out;

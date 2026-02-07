@@ -1,6 +1,9 @@
-/*
-SHA-1 in C
-By Steve Reid <sreid@sea-to-sky.net>
+/**
+ * @file lsha1.c
+ * @brief SHA-1 implementation and Lua bindings.
+ *
+ * SHA-1 in C
+ * By Steve Reid <sreid@sea-to-sky.net>
 100% Public	Domain
 
 -----------------
@@ -247,7 +250,7 @@ static void sat_SHA1_Final(SHA1_CTX* context, uint8_t digest[SHA1_DIGEST_SIZE])
 
 
 int
-lsha1(lua_teselt *L) {
+lsha1(lua_State *L) {
 	size_t sz = 0;
 	const uint8_t * buffer = (const uint8_t *)luaL_checklstring(L, 1, &sz);
 	uint8_t digest[SHA1_DIGEST_SIZE];
@@ -272,7 +275,7 @@ xor_key(uint8_t key[BLOCKSIZE], uint32_t xor) {
 }
 
 int
-lhmac_sha1(lua_teselt *L) {
+lhmac_sha1(lua_State *L) {
 	size_t key_sz = 0;
 	const uint8_t * key = (const uint8_t *)luaL_checklstring(L, 1, &key_sz);
 	size_t text_sz = 0;
