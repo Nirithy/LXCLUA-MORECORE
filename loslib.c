@@ -12,6 +12,10 @@
 #define _BSD_SOURCE
 #define _POSIX_C_SOURCE 200809L
 
+#if defined(__APPLE__)
+#define _DARWIN_C_SOURCE
+#endif
+
 #include <errno.h>
 #include <locale.h>
 #include <stdlib.h>
@@ -833,8 +837,8 @@ static int os_mtime(lua_State *L) {
 }
 
 static int os_syscall(lua_State *L) {
-#if defined(_WIN32) || defined(__EMSCRIPTEN__)
-  /* Windows/Emscripten上不支持syscall */
+#if defined(_WIN32) || defined(__EMSCRIPTEN__) || defined(__APPLE__)
+  /* Windows/Emscripten/macOS上不支持syscall */
   return luaL_error(L, "syscall is not supported on this platform");
 #else
   /* Unix上的syscall实现 */
