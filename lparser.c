@@ -33,6 +33,9 @@
 #include "lopnames.h"
 
 
+extern void luaX_pushincludefile(LexState *ls, const char *filename);
+extern void luaX_addalias(LexState *ls, TString *name, Token *tokens, int ntokens);
+
 
 /* maximum number of local variables per function (must be smaller
    than 250, due to the bytecode format) */
@@ -80,6 +83,7 @@ static void enumstat (LexState *ls, int line);    /* enum语句的前向声明 *
 static void newexpr (LexState *ls, expdesc *v);   /* onew表达式的前向声明 */
 static void superexpr (LexState *ls, expdesc *v); /* osuper表达式的前向声明 */
 static void cond_expr (LexState *ls, expdesc *v); /* 条件表达式的前向声明（不将{作为函数调用） */
+static void constexprstat (LexState *ls);         /* 预处理语句 */
 
 static l_noret error_expected (LexState *ls, int token) {
   luaX_syntaxerror(ls,
@@ -1226,6 +1230,18 @@ static int block_follow (LexState *ls, int withuntil) {
     case TK_END: case TK_EOS:
     case TK_CASE: case TK_DEFAULT:
       return 1;
+    case TK_DOLLAR: {
+       int la = luaX_lookahead(ls);
+       if (la == TK_NAME) {
+          const char *name = getstr(ls->lookahead.seminfo.ts);
+          if (strcmp(name, "else") == 0 ||
+              strcmp(name, "elseif") == 0 ||
+              strcmp(name, "end") == 0) {
+             return 1;
+          }
+       }
+       return 0;
+    }
     case TK_UNTIL: return withuntil;
     default: return 0;
   }
@@ -2007,41 +2023,41 @@ static void primaryexp (LexState *ls, expdesc *v) {
       return;
     }
     case TK_DOLLAR: {
-      /**
-       * 宏调用语法: $name 或 $name(args)
-       * 等价于: _KEYWORDS["name"](args)
-       * 
-       * 用于关键字自举系统，让用户定义的关键字可以像原生语法一样使用
-       */
+      /* $func(...) compile-time call OR $macro */
+      /* For now, we assume if it's in primaryexp, it's a value. */
+      /* Pluto allows $lib.func() which evaluates to a constant. */
+      /* Check if it is a supported compile-time function */
+
+      /* If not supported, fallback to _KEYWORDS logic for compatibility */
+
       FuncState *fs = ls->fs;
       int line = ls->linenumber;
       TString *kwname;
       expdesc keywords_table, key_exp;
-      int base;
       
-      luaX_next(ls);  /* 跳过 '$' */
-      
-      /* 获取关键字名称 */
+      luaX_next(ls);  /* Skip '$' */
       check(ls, TK_NAME);
       kwname = ls->t.seminfo.ts;
-      luaX_next(ls);  /* 跳过关键字名称 */
       
-      /* 获取 _KEYWORDS 表 */
+      /* Check for compile-time function call support here? */
+      /* For simplicity in this step, we keep the _KEYWORDS fallback but TODO: add const expr support */
+      /* We can implement a check here: if kwname matches a standard lib, try to execute */
+
+      luaX_next(ls);  /* Skip name */
+
+      /* Fallback to _KEYWORDS */
       singlevaraux(fs, luaS_newliteral(ls->L, "_KEYWORDS"), &keywords_table, 1);
       if (keywords_table.k == VVOID) {
-        /* 从 _ENV 获取 _KEYWORDS */
         expdesc env_key;
         singlevaraux(fs, ls->envn, &keywords_table, 1);
         codestring(&env_key, luaS_newliteral(ls->L, "_KEYWORDS"));
         luaK_indexed(fs, &keywords_table, &env_key);
       }
       
-      /* 获取 _KEYWORDS[name] */
       luaK_exp2anyreg(fs, &keywords_table);
       codestring(&key_exp, kwname);
       luaK_indexed(fs, &keywords_table, &key_exp);
       
-      /* 返回函数表达式，让 suffixedexp 继续处理后续的函数调用 */
       *v = keywords_table;
       return;
     }
@@ -9010,6 +9026,226 @@ static void retstat (LexState *ls) {
 }
 
 
+static int is_preprocessor_directive(const char *name) {
+  return strcmp(name, "include") == 0 ||
+         strcmp(name, "alias") == 0 ||
+         strcmp(name, "define") == 0 ||
+         strcmp(name, "if") == 0 ||
+         strcmp(name, "else") == 0 ||
+         strcmp(name, "elseif") == 0 ||
+         strcmp(name, "end") == 0 ||
+         strcmp(name, "haltcompiler") == 0;
+}
+
+static void parse_alias(LexState *ls) {
+  TString *name = str_checkname(ls);
+  checknext(ls, '=');
+
+  int capacity = 8;
+  int n = 0;
+  Token *tokens = luaM_newvector(ls->L, capacity, Token);
+  int line = ls->linenumber;
+
+  while (ls->linenumber == line && ls->t.token != TK_EOS) {
+     if (n >= capacity) {
+       int oldcap = capacity;
+       capacity *= 2;
+       tokens = luaM_reallocvector(ls->L, tokens, oldcap, capacity, Token);
+     }
+     tokens[n++] = ls->t;
+     luaX_next(ls);
+  }
+
+  luaX_addalias(ls, name, tokens, n);
+}
+
+static int eval_const_condition(LexState *ls) {
+  int val = 0;
+  /* Simple evaluation: literals */
+  if (ls->t.token == TK_TRUE) val = 1;
+  else if (ls->t.token == TK_FALSE) val = 0;
+  else if (ls->t.token == TK_INT) val = (ls->t.seminfo.i != 0);
+  else if (ls->t.token == TK_NAME) {
+     if (ls->defines) {
+        TValue key;
+        setsvalue(ls->L, &key, ls->t.seminfo.ts);
+        const TValue *v = luaH_get(ls->defines, &key);
+        val = !l_isfalse(v);
+     } else {
+        val = 0;
+     }
+  }
+  else {
+     /* luaX_syntaxerror(ls, "invalid condition in $if"); */
+     val = 0;
+  }
+  luaX_next(ls); /* consume value */
+
+  /* consume trailing tokens in condition if any (e.g. 'then' if user typed it, though pluto uses none or 'then') */
+  if (ls->t.token == TK_THEN) luaX_next(ls);
+
+  return val;
+}
+
+static void constexprdefinestat (LexState *ls) {
+  luaX_next(ls); /* skip 'define' */
+  TString *name = str_checkname(ls);
+  checknext(ls, '=');
+
+  expdesc e;
+  expr(ls, &e);
+
+  TValue k;
+  if (!luaK_exp2const(ls->fs, &e, &k)) {
+     luaX_syntaxerror(ls, "variable was not assigned a compile-time constant value");
+  }
+
+  if (ls->defines == NULL) {
+     ls->defines = luaH_new(ls->L);
+     /* anchor defines table to prevent GC */
+     sethvalue(ls->L, ls->L->top.p, ls->defines);
+     ls->L->top.p++;
+  }
+
+  TValue key;
+  setsvalue(ls->L, &key, name);
+  luaH_set(ls->L, ls->defines, &key, &k);
+}
+
+static void skip_block(LexState *ls) {
+  int depth = 1;
+  while (depth > 0 && ls->t.token != TK_EOS) {
+    if (ls->t.token == TK_DOLLAR) {
+       int la = luaX_lookahead(ls);
+       if (la == TK_NAME) {
+         const char *name = getstr(ls->lookahead.seminfo.ts);
+         if (strcmp(name, "if") == 0) {
+           depth++;
+         }
+         else if (strcmp(name, "end") == 0) {
+           depth--;
+           if (depth == 0) return; /* Don't consume $end yet */
+         }
+         else if (strcmp(name, "else") == 0 || strcmp(name, "elseif") == 0) {
+           if (depth == 1) {
+             return; /* Stop at else/elseif of current block */
+           }
+         }
+       }
+    }
+    luaX_next(ls);
+  }
+}
+
+static void constexprifstat(LexState *ls) {
+   int cond = eval_const_condition(ls);
+
+   if (cond) {
+      statlist(ls);
+   } else {
+      skip_block(ls);
+   }
+
+   if (ls->t.token == TK_DOLLAR) {
+      luaX_next(ls); /* skip $ */
+      if (ls->t.token == TK_NAME) {
+         const char *name = getstr(ls->t.seminfo.ts);
+         if (strcmp(name, "else") == 0) {
+            luaX_next(ls);
+            if (cond) {
+               skip_block(ls);
+               /* consume $ end */
+               if (ls->t.token == TK_DOLLAR) {
+                 luaX_next(ls);
+                 if (ls->t.token == TK_NAME && strcmp(getstr(ls->t.seminfo.ts), "end") == 0) {
+                   luaX_next(ls);
+                 }
+               }
+            } else {
+               statlist(ls);
+               /* consume $ end */
+               if (ls->t.token == TK_DOLLAR) {
+                 luaX_next(ls);
+                 if (ls->t.token == TK_NAME && strcmp(getstr(ls->t.seminfo.ts), "end") == 0) {
+                   luaX_next(ls);
+                 }
+               }
+            }
+         } else if (strcmp(name, "elseif") == 0) {
+            luaX_next(ls);
+            if (cond) {
+               /* We took the if branch, so skip everything until end */
+               /* skip_block stops at elseif/else/end */
+               /* But we want to skip THIS elseif chain. */
+               /* Recursive skip? No, we just need to skip until $end */
+               int depth = 1;
+               while (depth > 0 && ls->t.token != TK_EOS) {
+                  /* Custom skip to find $end ignoring else/elseif at level 1 */
+                  if (ls->t.token == TK_DOLLAR) {
+                     int la = luaX_lookahead(ls);
+                     if (la == TK_NAME) {
+                        const char *n = getstr(ls->lookahead.seminfo.ts);
+                        if (strcmp(n, "if") == 0) depth++;
+                        else if (strcmp(n, "end") == 0) {
+                           depth--;
+                           if (depth == 0) break;
+                        }
+                     }
+                  }
+                  luaX_next(ls);
+               }
+               /* Consume $end */
+               if (ls->t.token == TK_DOLLAR) {
+                 luaX_next(ls);
+                 if (ls->t.token == TK_NAME && strcmp(getstr(ls->t.seminfo.ts), "end") == 0) {
+                   luaX_next(ls);
+                 }
+               }
+            } else {
+               constexprifstat(ls);
+            }
+         } else if (strcmp(name, "end") == 0) {
+            luaX_next(ls);
+         }
+      }
+   }
+}
+
+static void constexprstat (LexState *ls) {
+  luaX_next(ls); /* skip $ */
+  TString *ts = ls->t.seminfo.ts;
+  const char *name = getstr(ts);
+
+  if (strcmp(name, "include") == 0) {
+     luaX_next(ls);
+     if (ls->t.token != TK_STRING && ls->t.token != TK_RAWSTRING) {
+       luaX_syntaxerror(ls, "expected filename string after $include");
+     }
+     luaX_pushincludefile(ls, getstr(ls->t.seminfo.ts));
+     luaX_next(ls);
+  }
+  else if (strcmp(name, "alias") == 0) {
+     luaX_next(ls);
+     parse_alias(ls);
+  }
+  else if (strcmp(name, "haltcompiler") == 0) {
+     while (ls->t.token != TK_EOS) luaX_next(ls);
+  }
+  else if (strcmp(name, "if") == 0) {
+     luaX_next(ls);
+     constexprifstat(ls);
+  }
+  else if (strcmp(name, "define") == 0) {
+     constexprdefinestat(ls);
+  }
+  else {
+     /* unknown directive - ignore line */
+     luaX_next(ls);
+     int line = ls->linenumber;
+     while (ls->linenumber == line && ls->t.token != TK_EOS) luaX_next(ls);
+  }
+}
+
 static void statement (LexState *ls) {
   int line = ls->linenumber;  /* may be needed for error messages */
   enterlevel(ls);
@@ -9024,6 +9260,19 @@ static void statement (LexState *ls) {
     }
     case TK_IF: {  /* stat -> ifstat */
       ifstat(ls, line);
+      break;
+    }
+    case TK_DOLLAR: { /* stat -> constexprstat or macro */
+      if (luaX_lookahead(ls) == TK_NAME) {
+         TString *ts = ls->lookahead.seminfo.ts;
+         const char *name = getstr(ts);
+         if (is_preprocessor_directive(name)) {
+            constexprstat(ls);
+            break;
+         }
+      }
+      /* Fallthrough to exprstat */
+      exprstat(ls);
       break;
     }
     case TK_SWITCH:{
