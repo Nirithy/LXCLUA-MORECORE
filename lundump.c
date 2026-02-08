@@ -24,6 +24,7 @@
 #include "lobject.h"
 #include "lopcodes.h"
 #include "lstring.h"
+#include "ltable.h"
 #include "lundump.h"
 #include "lzio.h"
 
@@ -37,6 +38,14 @@
 #define luai_verifycode(L,f)  /* empty */
 #endif
 
+/*
+** Standard Lua constants
+*/
+#define LUAC_INT_STD	((lua_Integer)(-0x5678))
+#define LUAC_NUM_STD	cast_num(-370.5)
+#define LUAC_VERSION_STD 0x55
+#define LUAC_INST_STD	0x12345678
+
 
 typedef struct {
   lua_State *L;
@@ -46,6 +55,13 @@ typedef struct {
   int opcode_map[NUM_OPCODES];  /* OPcode映射表 */
   int third_opcode_map[NUM_OPCODES];  /* 第三个OPcode映射表 */
   int string_map[256];  /* 字符串映射表（用于动态加密解密） */
+
+  /* Standard Lua compatibility fields */
+  Table *h;  /* list for string reuse */
+  size_t offset;  /* current position relative to beginning of dump */
+  lua_Unsigned nstr;  /* number of strings in the list */
+  lu_byte fixed;  /* dump is fixed in memory */
+  int is_standard; /* flag to indicate standard Lua bytecode */
 } LoadState;
 
 
@@ -648,6 +664,408 @@ static void loadFunction (LoadState *S, Proto *f, TString *psource) {
 }
 
 
+/*
+** Standard Lua loading functions
+*/
+
+#define loadVector_Standard(S,b,n)	loadBlock_Standard(S,b,(n)*sizeof((b)[0]))
+
+static void loadBlock_Standard (LoadState *S, void *b, size_t size) {
+  if (luaZ_read(S->Z, b, size) != 0)
+    error(S, "truncated chunk");
+  S->offset += size;
+}
+
+static void loadAlign_Standard (LoadState *S, unsigned align) {
+  unsigned padding = align - cast_uint(S->offset % align);
+  if (padding < align) {  /* (padding == align) means no padding */
+    lua_Integer paddingContent;
+    loadBlock_Standard(S, &paddingContent, padding);
+    lua_assert(S->offset % align == 0);
+  }
+}
+
+#define getaddr_Standard(S,n,t)	cast(t *, getaddr_Standard_(S,cast_sizet(n) * sizeof(t)))
+
+static const void *getaddr_Standard_ (LoadState *S, size_t size) {
+  const void *block = luaZ_getaddr(S->Z, size);
+  S->offset += size;
+  if (block == NULL)
+    error(S, "truncated fixed buffer");
+  return block;
+}
+
+#define loadVar_Standard(S,x)		loadVector_Standard(S,&x,1)
+
+static lu_byte loadByte_Standard (LoadState *S) {
+  int b = zgetc(S->Z);
+  if (b == EOZ)
+    error(S, "truncated chunk");
+  S->offset++;
+  return cast_byte(b);
+}
+
+static lua_Unsigned loadVarint_Standard (LoadState *S, lua_Unsigned limit) {
+  lua_Unsigned x = 0;
+  int b;
+  limit >>= 7;
+  do {
+    b = loadByte_Standard(S);
+    if (x > limit)
+      error(S, "integer overflow");
+    x = (x << 7) | (b & 0x7f);
+  } while ((b & 0x80) != 0);
+  return x;
+}
+
+static size_t loadSize_Standard (LoadState *S) {
+  return cast_sizet(loadVarint_Standard(S, MAX_SIZET));
+}
+
+static int loadInt_Standard (LoadState *S) {
+  return cast_int(loadVarint_Standard(S, cast_sizet(INT_MAX)));
+}
+
+static lua_Number loadNumber_Standard (LoadState *S) {
+  lua_Number x;
+  loadVar_Standard(S, x);
+  return x;
+}
+
+static lua_Integer loadInteger_Standard (LoadState *S) {
+  lua_Unsigned cx = loadVarint_Standard(S, ((lua_Unsigned)0 - 1));
+  /* decode unsigned to signed */
+  if ((cx & 1) != 0)
+    return l_castU2S(~(cx >> 1));
+  else
+    return l_castU2S(cx >> 1);
+}
+
+static void loadString_Standard (LoadState *S, Proto *p, TString **sl) {
+  lua_State *L = S->L;
+  TString *ts;
+  TValue sv;
+  size_t size = loadSize_Standard(S);
+  if (size == 0) {  /* previously saved string? */
+    lua_Unsigned idx = loadVarint_Standard(S, ((lua_Unsigned)0 - 1));  /* get its index */
+    const TValue *stv;
+    if (idx == 0) {  /* no string? */
+      lua_assert(*sl == NULL);  /* must be prefilled */
+      return;
+    }
+    stv = luaH_getint(S->h, l_castU2S(idx));
+    if (novariant(rawtt(stv)) != LUA_TSTRING)
+      error(S, "invalid string index");
+    *sl = ts = tsvalue(stv);  /* get its value */
+    luaC_objbarrier(L, p, ts);
+    return;  /* do not save it again */
+  }
+  else if ((size -= 1) <= LUAI_MAXSHORTLEN) {  /* short string? */
+    char buff[LUAI_MAXSHORTLEN + 1];  /* extra space for '\0' */
+    loadVector_Standard(S, buff, size + 1);  /* load string into buffer */
+    *sl = ts = luaS_newlstr(L, buff, size);  /* create string */
+    luaC_objbarrier(L, p, ts);
+  }
+  else if (S->fixed) {  /* for a fixed buffer, use a fixed string */
+    const char *s = getaddr_Standard(S, size + 1, char);  /* get content address */
+    *sl = ts = luaS_newextlstr(L, s, size, NULL, NULL);
+    luaC_objbarrier(L, p, ts);
+  }
+  else {  /* create internal copy */
+    *sl = ts = luaS_createlngstrobj(L, size);  /* create string */
+    luaC_objbarrier(L, p, ts);
+    loadVector_Standard(S, getlngstr(ts), size + 1);  /* load directly in final place */
+  }
+  /* add string to list of saved strings */
+  S->nstr++;
+  setsvalue(L, &sv, ts);
+  luaH_setint(L, S->h, l_castU2S(S->nstr), &sv);
+  luaC_objbarrierback(L, obj2gco(S->h), ts);
+}
+
+static void loadFunction_Standard(LoadState *S, Proto *f);
+
+/*
+** Standard Lua 5.4 Instruction Macros
+*/
+#define STD_SIZE_OP		7
+#define STD_SIZE_A		8
+#define STD_SIZE_B		8
+#define STD_SIZE_C		8
+#define STD_SIZE_Bx		17
+#define STD_SIZE_Ax		25
+#define STD_SIZE_sJ		25
+
+#define STD_POS_OP		0
+#define STD_POS_A		(STD_POS_OP + STD_SIZE_OP)
+#define STD_POS_k		(STD_POS_A + STD_SIZE_A)
+#define STD_POS_B		(STD_POS_k + 1)
+#define STD_POS_C		(STD_POS_B + STD_SIZE_B)
+#define STD_POS_Bx		STD_POS_k
+#define STD_POS_Ax		STD_POS_A
+#define STD_POS_sJ		STD_POS_A
+
+#define STD_MAXARG_Bx   ((1<<STD_SIZE_Bx)-1)
+#define STD_OFFSET_sBx  (STD_MAXARG_Bx>>1)
+#define STD_MAXARG_sJ   ((1<<STD_SIZE_sJ)-1)
+#define STD_OFFSET_sJ   (STD_MAXARG_sJ>>1)
+
+#define STD_GET_OPCODE(i)	((i) & ((1<<STD_SIZE_OP)-1))
+#define STD_GETARG_A(i)		(((i)>>STD_POS_A) & ((1<<STD_SIZE_A)-1))
+#define STD_GETARG_B(i)		(((i)>>STD_POS_B) & ((1<<STD_SIZE_B)-1))
+#define STD_GETARG_C(i)		(((i)>>STD_POS_C) & ((1<<STD_SIZE_C)-1))
+#define STD_GETARG_k(i)		(((i)>>STD_POS_k) & 1)
+#define STD_GETARG_Bx(i)	(((i)>>STD_POS_Bx) & ((1<<STD_SIZE_Bx)-1))
+#define STD_GETARG_Ax(i)	(((i)>>STD_POS_Ax) & ((1<<STD_SIZE_Ax)-1))
+#define STD_GETARG_sBx(i)	(STD_GETARG_Bx(i) - STD_OFFSET_sBx)
+#define STD_GETARG_sJ(i)	(STD_GETARG_Ax(i) - STD_OFFSET_sJ)
+
+/* ivABC (Standard 5.5) macros */
+#define STD_SIZE_vB 6
+#define STD_SIZE_vC 10
+#define STD_POS_vB  (STD_POS_k + 1)
+#define STD_POS_vC  (STD_POS_vB + STD_SIZE_vB)
+#define STD_GETARG_vB(i)	(((i)>>STD_POS_vB) & ((1<<STD_SIZE_vB)-1))
+#define STD_GETARG_vC(i)	(((i)>>STD_POS_vC) & ((1<<STD_SIZE_vC)-1))
+
+static Instruction transcodeInstruction(unsigned int inst32, Instruction *code, int i, unsigned int *code32) {
+  int op = STD_GET_OPCODE(inst32);
+  int xop = op;
+
+  /* Map Standard OpCode to XCLUA OpCode */
+  if (op <= 47) { /* 0-47 (OP_SHR) */
+    xop = op;
+  } else if (op >= 48 && op <= 85) { /* OP_MMBIN (48) - OP_VARARGPREP (85) */
+    xop = op + 1;
+  } else if (op == 86) { /* OP_EXTRAARG (86) */
+    xop = OP_EXTRAARG; /* 103 */
+  } else {
+    /* Unknown opcode, keep as is */
+    xop = op;
+  }
+
+  Instruction inst = 0;
+  enum OpMode mode = getOpMode(xop);
+
+  switch (mode) {
+    case iABC: {
+      int a = STD_GETARG_A(inst32);
+      int b = STD_GETARG_B(inst32);
+      int c = STD_GETARG_C(inst32);
+      int k = STD_GETARG_k(inst32);
+      inst = CREATE_ABCk(xop, a, b, c, k);
+      break;
+    }
+    case ivABC: {
+      /* Extract using Standard ivABC macros */
+      int a = STD_GETARG_A(inst32);
+      int vb = STD_GETARG_vB(inst32);
+      int vc = STD_GETARG_vC(inst32);
+      int k = STD_GETARG_k(inst32);
+      inst = CREATE_vABCk(xop, a, vb, vc, k);
+      break;
+    }
+    case iABx: {
+      int a = STD_GETARG_A(inst32);
+      int bx = STD_GETARG_Bx(inst32);
+      inst = CREATE_ABx(xop, a, bx);
+      break;
+    }
+    case iAsBx: {
+      int a = STD_GETARG_A(inst32);
+      int sbx = STD_GETARG_sBx(inst32);
+      inst = CREATE_ABx(xop, a, cast_uint(sbx + OFFSET_sBx));
+      break;
+    }
+    case iAx: {
+      int ax = STD_GETARG_Ax(inst32);
+
+      /* Handle OP_EXTRAARG fixup for OP_SETLIST/OP_NEWTABLE */
+      if (xop == OP_EXTRAARG && i > 0) {
+        Instruction prev_inst = code[i-1];
+        OpCode prev_op = GET_OPCODE(prev_inst);
+        if (prev_op == OP_SETLIST || prev_op == OP_NEWTABLE) {
+           /* Recover previous vC */
+           int prev_vc = GETARG_vC(prev_inst);
+           /* Calculate full value: Standard (Ax << 10) | vC */
+           /* Note: Standard vC is 10 bits. */
+           unsigned int prev_inst32 = code32[i-1];
+           int prev_vc_std = STD_GETARG_vC(prev_inst32);
+           unsigned long long full_val = ((unsigned long long)ax << 10) | prev_vc_std;
+
+           /* Split for XCLUA: Ax' = full_val >> 20, vC' = full_val & 0xFFFFF */
+           int new_vc = (int)(full_val & 0xFFFFF);
+           int new_ax = (int)(full_val >> 20);
+
+           /* Update previous instruction */
+           SETARG_vC(code[i-1], new_vc);
+
+           /* Update current Ax */
+           ax = new_ax;
+        }
+      }
+
+      inst = CREATE_Ax(xop, ax);
+      break;
+    }
+    case isJ: {
+      int sj = STD_GETARG_sJ(inst32);
+      inst = CREATE_sJ(xop, sj, 0);
+      break;
+    }
+  }
+  return inst;
+}
+
+static void loadCode_Standard (LoadState *S, Proto *f) {
+  int n = loadInt_Standard(S);
+  loadAlign_Standard(S, sizeof(unsigned int)); /* Align to 4 bytes */
+
+  f->code = luaM_newvectorchecked(S->L, n, Instruction);
+  f->sizecode = n;
+
+  unsigned int *code32 = luaM_newvector(S->L, n, unsigned int);
+  loadVector_Standard(S, code32, n);
+
+  for (int i = 0; i < n; i++) {
+    f->code[i] = transcodeInstruction(code32[i], f->code, i, code32);
+  }
+
+  luaM_freearray(S->L, code32, n);
+}
+
+static void loadConstants_Standard (LoadState *S, Proto *f) {
+  int i;
+  int n = loadInt_Standard(S);
+  f->k = luaM_newvectorchecked(S->L, n, TValue);
+  f->sizek = n;
+  for (i = 0; i < n; i++)
+    setnilvalue(&f->k[i]);
+  for (i = 0; i < n; i++) {
+    TValue *o = &f->k[i];
+    int t = loadByte_Standard(S);
+    switch (t) {
+      case LUA_VNIL:
+        setnilvalue(o);
+        break;
+      case LUA_VFALSE:
+        setbfvalue(o);
+        break;
+      case LUA_VTRUE:
+        setbtvalue(o);
+        break;
+      case LUA_VNUMFLT:
+        setfltvalue(o, loadNumber_Standard(S));
+        break;
+      case LUA_VNUMINT:
+        setivalue(o, loadInteger_Standard(S));
+        break;
+      case LUA_VSHRSTR:
+      case LUA_VLNGSTR: {
+        lua_assert(f->source == NULL);
+        loadString_Standard(S, f, &f->source);  /* use 'source' to anchor string */
+        if (f->source == NULL)
+          error(S, "bad format for constant string");
+        setsvalue2n(S->L, o, f->source);  /* save it in the right place */
+        f->source = NULL;
+        break;
+      }
+      default: error(S, "invalid constant");
+    }
+  }
+}
+
+static void loadProtos_Standard (LoadState *S, Proto *f) {
+  int i;
+  int n = loadInt_Standard(S);
+  f->p = luaM_newvectorchecked(S->L, n, Proto *);
+  f->sizep = n;
+  for (i = 0; i < n; i++)
+    f->p[i] = NULL;
+  for (i = 0; i < n; i++) {
+    f->p[i] = luaF_newproto(S->L);
+    luaC_objbarrier(S->L, f, f->p[i]);
+    loadFunction_Standard(S, f->p[i]);
+  }
+}
+
+static void loadUpvalues_Standard (LoadState *S, Proto *f) {
+  int i;
+  int n = loadInt_Standard(S);
+  f->upvalues = luaM_newvectorchecked(S->L, n, Upvaldesc);
+  f->sizeupvalues = n;
+  for (i = 0; i < n; i++)  /* make array valid for GC */
+    f->upvalues[i].name = NULL;
+  for (i = 0; i < n; i++) {  /* following calls can raise errors */
+    f->upvalues[i].instack = loadByte_Standard(S);
+    f->upvalues[i].idx = loadByte_Standard(S);
+    f->upvalues[i].kind = loadByte_Standard(S);
+  }
+}
+
+static void loadDebug_Standard (LoadState *S, Proto *f) {
+  int i;
+  int n = loadInt_Standard(S);
+  if (S->fixed) {
+    f->lineinfo = getaddr_Standard(S, n, ls_byte);
+    f->sizelineinfo = n;
+  }
+  else {
+    f->lineinfo = luaM_newvectorchecked(S->L, n, ls_byte);
+    f->sizelineinfo = n;
+    loadVector_Standard(S, f->lineinfo, n);
+  }
+  n = loadInt_Standard(S);
+  if (n > 0) {
+    loadAlign_Standard(S, sizeof(int));
+    if (S->fixed) {
+      f->abslineinfo = getaddr_Standard(S, n, AbsLineInfo);
+      f->sizeabslineinfo = n;
+    }
+    else {
+      f->abslineinfo = luaM_newvectorchecked(S->L, n, AbsLineInfo);
+      f->sizeabslineinfo = n;
+      loadVector_Standard(S, f->abslineinfo, n);
+    }
+  }
+  n = loadInt_Standard(S);
+  f->locvars = luaM_newvectorchecked(S->L, n, LocVar);
+  f->sizelocvars = n;
+  for (i = 0; i < n; i++)
+    f->locvars[i].varname = NULL;
+  for (i = 0; i < n; i++) {
+    loadString_Standard(S, f, &f->locvars[i].varname);
+    f->locvars[i].startpc = loadInt_Standard(S);
+    f->locvars[i].endpc = loadInt_Standard(S);
+  }
+  n = loadInt_Standard(S);
+  if (n != 0)  /* does it have debug information? */
+    n = f->sizeupvalues;  /* must be this many */
+  for (i = 0; i < n; i++)
+    loadString_Standard(S, f, &f->upvalues[i].name);
+}
+
+static void loadFunction_Standard (LoadState *S, Proto *f) {
+  f->linedefined = loadInt_Standard(S);
+  f->lastlinedefined = loadInt_Standard(S);
+  f->numparams = loadByte_Standard(S);
+  /* get only the meaningful flags */
+  f->flag = cast_byte(loadByte_Standard(S) & ~PF_FIXED);
+  if (S->fixed)
+    f->flag |= PF_FIXED;  /* signal that code is fixed */
+
+  /* XCLUA specific: sync is_vararg field from flag */
+  f->is_vararg = (f->flag & (PF_VAHID | PF_VATAB)) != 0;
+
+  f->maxstacksize = loadByte_Standard(S);
+  loadCode_Standard(S, f);
+  loadConstants_Standard(S, f);
+  loadUpvalues_Standard(S, f);
+  loadProtos_Standard(S, f);
+  loadString_Standard(S, f, &f->source);
+  loadDebug_Standard(S, f);
+}
+
 static void checkliteral (LoadState *S, const char *s, const char *msg) {
   char buff[sizeof(LUA_SIGNATURE) + sizeof(LUAC_DATA)]; /* larger than both */
   size_t len = strlen(s);
@@ -669,32 +1087,86 @@ static void checkHeader (LoadState *S) {
   /* skip 1st char (already read and checked) */
   checkliteral(S, &LUA_SIGNATURE[1], "not a binary chunk");
   
-  // 跳过版本号检查，允许随机版本号
-  loadByte(S);
+  lu_byte version = loadByte(S);
+  lu_byte format = loadByte(S);
   
-  if (loadByte(S) != LUAC_FORMAT)
+  if (format != LUAC_FORMAT)
     error(S, "format mismatch");
   
-  // 解密并检查LUAC_DATA
-  // 直接读取并验证 LUAC_DATA（无解密）
+  /* check LUAC_DATA */
   const char *original_data = LUAC_DATA;
   size_t data_len = sizeof(LUAC_DATA) - 1;
   char *read_data = (char *)luaM_malloc_(S->L, data_len, 0);
   
   loadVector(S, read_data, data_len);
   
-  if (memcmp(read_data, original_data, data_len) != 0)
+  if (memcmp(read_data, original_data, data_len) != 0) {
+    luaM_free_(S->L, read_data, data_len);
     error(S, "corrupted chunk");
-  
+  }
   luaM_free_(S->L, read_data, data_len);
   
-  checksize(S, Instruction);
-  checksize(S, lua_Integer);
-  checksize(S, lua_Number);
-  if (loadInteger(S) != LUAC_INT)
-    error(S, "integer format mismatch");
-  if (loadNumber(S) != LUAC_NUM)
-    error(S, "float format mismatch");
+  /* Detect Standard Lua vs XCLUA */
+  int b1 = loadByte(S);
+  int b2 = zgetc(S->Z); /* Peek/Read next byte */
+
+  if (b1 == sizeof(Instruction) && b2 == sizeof(lua_Integer)) {
+    S->is_standard = 0;
+
+    /* Continue verifying XCLUA header */
+    /* b1 (Instruction size) verified by detection */
+    /* b2 (lua_Integer size) verified by detection */
+    /* Note: zgetc consumed b2, so we skip checksize(S, lua_Integer) reading */
+
+    checksize(S, lua_Number);
+    if (loadInteger(S) != LUAC_INT)
+      error(S, "integer format mismatch");
+    if (loadNumber(S) != LUAC_NUM)
+      error(S, "float format mismatch");
+
+  } else {
+    S->is_standard = 1;
+    S->offset = 14; /* Update offset: Sig(4)+Ver(1)+Fmt(1)+Data(6)+b1(1)+b2(1) = 14 */
+
+    if (version != LUAC_VERSION_STD)
+      error(S, "version mismatch");
+
+    if (b1 != sizeof(int))
+      error(S, "int size mismatch");
+
+    /* Check LUAC_INT (int) */
+    /* We read b2 (1st byte). Read remaining sizeof(int)-1 bytes */
+    int i_val;
+    unsigned char *p = (unsigned char *)&i_val;
+    p[0] = b2;
+    loadVector_Standard(S, p+1, sizeof(int)-1);
+    if (i_val != (int)LUAC_INT_STD)
+      error(S, "int format mismatch");
+
+    /* Check Instruction */
+    if (loadByte_Standard(S) != sizeof(unsigned int))
+      error(S, "instruction size mismatch");
+    unsigned int inst;
+    loadVar_Standard(S, inst);
+    if (inst != LUAC_INST_STD)
+      error(S, "instruction format mismatch");
+
+    /* Check lua_Integer */
+    if (loadByte_Standard(S) != sizeof(lua_Integer))
+      error(S, "lua_Integer size mismatch");
+    lua_Integer li;
+    loadVar_Standard(S, li);
+    if (li != LUAC_INT_STD)
+      error(S, "lua_Integer format mismatch");
+
+    /* Check lua_Number */
+    if (loadByte_Standard(S) != sizeof(lua_Number))
+      error(S, "lua_Number size mismatch");
+    lua_Number ln;
+    loadVar_Standard(S, ln);
+    if (ln != LUAC_NUM_STD)
+      error(S, "lua_Number format mismatch");
+  }
 }
 
 
@@ -712,15 +1184,44 @@ LClosure *luaU_undump(lua_State *L, ZIO *Z, const char *name) {
     S.name = name;
   S.L = L;
   S.Z = Z;
+  S.offset = 1;
   checkHeader(&S);
-  cl = luaF_newLclosure(L, loadByte(&S));
+
+  lu_byte nupvalues;
+  if (S.is_standard) {
+      nupvalues = loadByte_Standard(&S);
+  } else {
+      nupvalues = loadByte(&S);
+  }
+
+  cl = luaF_newLclosure(L, nupvalues);
   setclLvalue2s(L, L->top.p, cl);
   luaD_inctop(L);
+
+  if (S.is_standard) {
+      S.h = luaH_new(L);
+      S.nstr = 0;
+      S.fixed = 0;
+      sethvalue2s(L, L->top.p, S.h);
+      luaD_inctop(L);
+  }
+
   cl->p = luaF_newproto(L);
   luaC_objbarrier(L, cl, cl->p);
-  loadFunction(&S, cl->p, NULL);
+
+  if (S.is_standard) {
+      loadFunction_Standard(&S, cl->p);
+  } else {
+      loadFunction(&S, cl->p, NULL);
+  }
+
   lua_assert(cl->nupvalues == cl->p->sizeupvalues);
   luai_verifycode(L, cl->p);
+
+  if (S.is_standard) {
+      L->top.p--; /* pop table */
+  }
+
   return cl;
 }
 
