@@ -12,6 +12,7 @@
 
 #include <locale.h>
 #include <string.h>
+#include <stdio.h>
 
 #include "lua.h"
 
@@ -39,6 +40,86 @@
 
 
 #define currIsNewline(ls)	(ls->current == '\n' || ls->current == '\r')
+
+
+typedef struct LoadF {
+  int n;  /* number of pre-read characters */
+  FILE *f;  /* file being read */
+  char buff[1024];  /* area for reading file */
+} LoadF;
+
+static const char *getF (lua_State *L, void *ud, size_t *size) {
+  LoadF *lf = (LoadF *)ud;
+  (void)L;
+  if (lf->n > 0) {  /* are there pre-read characters to be read? */
+    *size = lf->n;  /* return them (chars already in buffer) */
+    lf->n = 0;  /* no more pre-read characters */
+  }
+  else {
+    if (feof(lf->f)) return NULL;
+    *size = fread(lf->buff, 1, sizeof(lf->buff), lf->f);
+  }
+  return lf->buff;
+}
+
+static void luaX_pushincludefile(LexState *ls, const char *filename) {
+  FILE *f = fopen(filename, "r");
+  if (f == NULL) {
+    luaX_syntaxerror(ls, luaO_pushfstring(ls->L, "cannot open file '%s'", filename));
+  }
+
+  IncludeState *inc = luaM_new(ls->L, IncludeState);
+  inc->z = ls->z;
+  inc->buff = ls->buff;
+  inc->linenumber = ls->linenumber;
+  inc->lastline = ls->lastline;
+  inc->source = ls->source;
+  inc->prev = ls->inc_stack;
+  ls->inc_stack = inc;
+
+  LoadF *lf = luaM_new(ls->L, LoadF);
+  lf->n = 0;
+  lf->f = f;
+
+  ZIO *z = luaM_new(ls->L, ZIO);
+  luaZ_init(ls->L, z, getF, lf);
+
+  ls->z = z;
+  ls->linenumber = 1;
+  ls->lastline = 1;
+  ls->source = luaS_new(ls->L, filename);
+
+  next(ls); /* Read first char */
+}
+
+static void luaX_popincludefile(LexState *ls) {
+  IncludeState *inc = ls->inc_stack;
+  if (inc) {
+    /* Free current ZIO resources */
+    LoadF *lf = (LoadF *)ls->z->data;
+    fclose(lf->f);
+    luaM_free(ls->L, lf);
+    luaM_free(ls->L, ls->z);
+
+    /* Restore state */
+    ls->z = inc->z;
+    ls->linenumber = inc->linenumber;
+    ls->lastline = inc->lastline;
+    ls->source = inc->source;
+    ls->inc_stack = inc->prev;
+
+    luaM_free(ls->L, inc);
+  }
+}
+
+static void luaX_addalias(LexState *ls, TString *name, Token *tokens, int ntokens) {
+  Alias *a = luaM_new(ls->L, Alias);
+  a->name = name;
+  a->tokens = tokens;
+  a->ntokens = ntokens;
+  a->next = ls->aliases;
+  ls->aliases = a;
+}
 
 
 /* ORDER RESERVED */
@@ -239,6 +320,13 @@ void luaX_setinput (lua_State *L, LexState *ls, ZIO *z, TString *source,
   ls->lastline = 1;
   ls->source = source;
   ls->envn = luaS_newliteral(L, LUA_ENV);  /* get env name */
+
+  /* Initialize preprocessor fields */
+  ls->aliases = NULL;
+  ls->inc_stack = NULL;
+  ls->pending_tokens = NULL;
+  ls->npending = 0;
+  ls->defines = NULL;
 
 #if defined(LUA_COMPAT_GLOBAL)
   /* compatibility mode: "global" is not a reserved word */
@@ -624,6 +712,16 @@ static void read_raw_long_string (LexState *ls, SemInfo *seminfo, size_t sep) {
 
 
 static int llex (LexState *ls, SemInfo *seminfo) {
+  if (ls->pending_tokens) {
+    if (ls->pending_idx < ls->npending) {
+      Token *t = &ls->pending_tokens[ls->pending_idx++];
+      *seminfo = t->seminfo;
+      return t->token;
+    }
+    ls->pending_tokens = NULL;
+    ls->npending = 0;
+  }
+
   luaZ_resetbuffer(ls->buff);
   for (;;) {
     switch (ls->current) {
@@ -804,6 +902,10 @@ static int llex (LexState *ls, SemInfo *seminfo) {
         return read_numeral(ls, seminfo);
       }
       case EOZ: {
+        if (ls->inc_stack) {
+          luaX_popincludefile(ls);
+          continue;
+        }
         return TK_EOS;
       }
       default: {
@@ -850,6 +952,21 @@ static int llex (LexState *ls, SemInfo *seminfo) {
           if (isreserved(ts))  /* reserved word? */
             return ts->extra - 1 + FIRST_RESERVED;
           else {
+            /* Check for alias */
+            Alias *a = ls->aliases;
+            while (a) {
+              if (a->name == ts) {
+                if (a->ntokens > 0) {
+                  ls->pending_tokens = a->tokens;
+                  ls->npending = a->ntokens;
+                  ls->pending_idx = 1;
+                  *seminfo = a->tokens[0].seminfo;
+                  return a->tokens[0].token;
+                }
+                break;
+              }
+              a = a->next;
+            }
             return TK_NAME;
           }
         }

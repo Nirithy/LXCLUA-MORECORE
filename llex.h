@@ -81,6 +81,23 @@ typedef struct Token {
 } Token;
 
 
+typedef struct Alias {
+  TString *name;
+  Token *tokens;
+  int ntokens;
+  struct Alias *next;
+} Alias;
+
+typedef struct IncludeState {
+  ZIO *z;
+  Mbuffer *buff;
+  int linenumber;
+  int lastline;
+  TString *source;
+  struct IncludeState *prev;
+} IncludeState;
+
+
 /* state of the lexer plus state of the parser when shared by all
    functions */
 typedef struct LexState {
@@ -102,6 +119,14 @@ typedef struct LexState {
   struct Dyndata *dyd;  /* dynamic structures used by the parser */
   TString *source;  /* current source name */
   TString *envn;  /* environment variable name */
+
+  /* Preprocessor additions */
+  Alias *aliases;
+  IncludeState *inc_stack;
+  Token *pending_tokens; /* For alias expansion */
+  int npending;
+  int pending_idx;
+  Table *defines; /* Compile-time constants */
 } LexState;
 
 
