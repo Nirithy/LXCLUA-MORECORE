@@ -6,7 +6,7 @@
 
 English | [中文](README.md)
 
-A high-performance embedded scripting engine based on **Lua 5.5** with enhanced security features, extended libraries, and optimized bytecode compilation.
+A high-performance embedded scripting engine based on **Lua 5.5 (Custom)** with enhanced security features, extended libraries, and optimized bytecode compilation.
 
 ## Tested Platforms
 
@@ -51,7 +51,7 @@ A high-performance embedded scripting engine based on **Lua 5.5** with enhanced 
 
 ## System Requirements
 
-- **Compiler**: GCC (with C23 standard support)
+- **Compiler**: GCC (with C11/C23 standard support)
 - **Platform**: Windows / Linux / Android (Termux)
 
 ## Quick Start

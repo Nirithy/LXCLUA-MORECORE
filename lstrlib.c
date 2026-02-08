@@ -1240,6 +1240,207 @@ static int str_gsub (lua_State *L) {
 
 /* }=========================================== */
 
+/*
+** {===========================================
+** UTILS AND EXTENDED FUNCTIONS
+** ============================================
+*/
+
+static int str_split (lua_State *L) {
+  size_t l, sep_l;
+  const char *s = luaL_checklstring(L, 1, &l);
+  const char *sep = luaL_optlstring(L, 2, "", &sep_l);
+  const char *e = s + l;
+  int i = 1;
+
+  lua_newtable(L);
+
+  if (sep_l == 0) {  /* empty separator: return characters */
+    while (s < e) {
+      lua_pushlstring(L, s++, 1);
+      lua_rawseti(L, -2, i++);
+    }
+  }
+  else {
+    while (s < e) {
+      const char *p = lmemfind(s, e - s, sep, sep_l);
+      if (p == NULL) {
+        lua_pushlstring(L, s, e - s);
+        lua_rawseti(L, -2, i++);
+        break;
+      }
+      lua_pushlstring(L, s, p - s);
+      lua_rawseti(L, -2, i++);
+      s = p + sep_l;
+    }
+    if (s == e && l > 0) { /* trailing empty string if separator was at the end */
+        /* Logic check: if string is "a,b," and sep is ",", we want {"a", "b", ""} */
+        /* lmemfind returns pointer to start of sep. */
+        /* loop breaks when s >= e. */
+        /* If the last char was sep, then s will equal e after s = p + sep_l. */
+        /* But we need to check if the loop condition covers this. */
+        /* Actually, if s == e, it means we finished exactly at end. */
+        /* If original string ended with sep, we pushed the part before sep. */
+        /* Example: "a," split by ",". */
+        /* 1. lmemfind finds "," at offset 1. p points to ",". */
+        /* 2. push "a". i=2. s becomes "," + 1 = end. */
+        /* 3. loop terminates. */
+        /* We need to push empty string? Python's split("a,") -> ['a', '']. */
+        /* Lua's common implementations usually do this. */
+
+        /* Let's refine the loop logic. */
+    }
+  }
+
+  /* Re-implementation for correct behavior matching common split */
+  if (sep_l > 0) {
+      /* Reset stack and table */
+      lua_pop(L, 1);
+      lua_newtable(L);
+      i = 1;
+      s = lua_tostring(L, 1); /* reset s */
+
+      while (s < e) {
+        const char *p = lmemfind(s, e - s, sep, sep_l);
+        if (p == NULL) {
+          lua_pushlstring(L, s, e - s);
+          lua_rawseti(L, -2, i++);
+          s = e; /* done */
+        } else {
+          lua_pushlstring(L, s, p - s);
+          lua_rawseti(L, -2, i++);
+          s = p + sep_l;
+        }
+      }
+      /* If the string ended with separator, push empty string */
+      /* Check original string length to avoid pushing "" for empty string input if desired,
+         but "split" usually returns {""} for "" input with any separator. */
+      if (l == 0) {
+          lua_pushliteral(L, "");
+          lua_rawseti(L, -2, 1);
+      }
+      else if (s == e) {
+          /* If s reached e exactly after a separator, it means last part is empty. */
+          /* We need to know if the last operation was a separator skip. */
+          /* Compare s with previous pointer? */
+          /* Easier way: check if original string ends with separator */
+          if (l >= sep_l && memcmp(e - sep_l, sep, sep_l) == 0) {
+              lua_pushliteral(L, "");
+              lua_rawseti(L, -2, i);
+          }
+      }
+  }
+
+  return 1;
+}
+
+static int str_trim (lua_State *L) {
+  size_t l;
+  const char *s = luaL_checklstring(L, 1, &l);
+  while (l > 0 && isspace(uchar(*s))) {
+    s++; l--;
+  }
+  while (l > 0 && isspace(uchar(s[l - 1]))) {
+    l--;
+  }
+  lua_pushlstring(L, s, l);
+  return 1;
+}
+
+static int str_ltrim (lua_State *L) {
+  size_t l;
+  const char *s = luaL_checklstring(L, 1, &l);
+  while (l > 0 && isspace(uchar(*s))) {
+    s++; l--;
+  }
+  lua_pushlstring(L, s, l);
+  return 1;
+}
+
+static int str_rtrim (lua_State *L) {
+  size_t l;
+  const char *s = luaL_checklstring(L, 1, &l);
+  while (l > 0 && isspace(uchar(s[l - 1]))) {
+    l--;
+  }
+  lua_pushlstring(L, s, l);
+  return 1;
+}
+
+static int str_startswith (lua_State *L) {
+  size_t ls, lp;
+  const char *s = luaL_checklstring(L, 1, &ls);
+  const char *p = luaL_checklstring(L, 2, &lp);
+  if (lp > ls)
+    lua_pushboolean(L, 0);
+  else
+    lua_pushboolean(L, memcmp(s, p, lp) == 0);
+  return 1;
+}
+
+static int str_endswith (lua_State *L) {
+  size_t ls, lp;
+  const char *s = luaL_checklstring(L, 1, &ls);
+  const char *p = luaL_checklstring(L, 2, &lp);
+  if (lp > ls)
+    lua_pushboolean(L, 0);
+  else
+    lua_pushboolean(L, memcmp(s + ls - lp, p, lp) == 0);
+  return 1;
+}
+
+static int str_contains (lua_State *L) {
+  size_t ls, lp;
+  const char *s = luaL_checklstring(L, 1, &ls);
+  const char *p = luaL_checklstring(L, 2, &lp);
+  lua_pushboolean(L, lmemfind(s, ls, p, lp) != NULL);
+  return 1;
+}
+
+static int str_hex (lua_State *L) {
+  size_t l, i;
+  const char *s = luaL_checklstring(L, 1, &l);
+  luaL_Buffer b;
+  char *h = luaL_buffinitsize(L, &b, l * 2);
+  for (i = 0; i < l; i++) {
+    sprintf(h + i * 2, "%02x", uchar(s[i]));
+  }
+  luaL_pushresultsize(&b, l * 2);
+  return 1;
+}
+
+static int str_fromhex (lua_State *L) {
+  size_t l, i;
+  const char *s = luaL_checklstring(L, 1, &l);
+  luaL_Buffer b;
+  if (l % 2 != 0) return luaL_error(L, "invalid hex string length");
+  char *p = luaL_buffinitsize(L, &b, l / 2);
+  for (i = 0; i < l; i += 2) {
+    unsigned int c;
+    if (sscanf(s + i, "%02x", &c) != 1)
+      return luaL_error(L, "invalid hex string");
+    p[i / 2] = cast_char(c);
+  }
+  luaL_pushresultsize(&b, l / 2);
+  return 1;
+}
+
+static int str_escape (lua_State *L) {
+  size_t l;
+  const char *s = luaL_checklstring(L, 1, &l);
+  luaL_Buffer b;
+  luaL_buffinit(L, &b);
+  for (size_t i = 0; i < l; i++) {
+    if (strchr(SPECIALS, s[i]))
+      luaL_addchar(&b, '%');
+    luaL_addchar(&b, s[i]);
+  }
+  luaL_pushresult(&b);
+  return 1;
+}
+
+/* }=========================================== */
+
 
 
 /*
@@ -2566,28 +2767,38 @@ static int str_data (lua_State *L) {
 static const luaL_Reg strlib[] = {
   {"byte", str_byte},
   {"char", str_char},
+  {"contains", str_contains},
   {"data", str_data},
   {"data2png", str_data2png},
   {"dump", str_dump},
+  {"endswith", str_endswith},
+  {"escape", str_escape},
   {"file", str_file},
   {"file2png", str_file2png},
   {"find", str_find},
-  {"gfind", gfind},
   {"format", str_format},
+  {"fromhex", str_fromhex},
+  {"gfind", gfind},
   {"gmatch", gmatch},
   {"gsub", str_gsub},
+  {"hex", str_hex},
   {"len", str_len},
   {"lower", str_lower},
+  {"ltrim", str_ltrim},
   {"match", str_match},
+  {"pack", str_pack},
+  {"packsize", str_packsize},
   {"png2data", str_png2data},
   {"png2file", str_png2file},
   {"rep", str_rep},
   {"reverse", str_reverse},
+  {"rtrim", str_rtrim},
+  {"split", str_split},
+  {"startswith", str_startswith},
   {"sub", str_sub},
-  {"upper", str_upper},
-  {"pack", str_pack},
-  {"packsize", str_packsize},
+  {"trim", str_trim},
   {"unpack", str_unpack},
+  {"upper", str_upper},
   {NULL, NULL}
 };
 
