@@ -28,6 +28,9 @@ jobs:
           name: linux-release
           path: "*.tar.gz"
 
+      - name: Cleanup compiled content
+        run: make clean
+
   build-windows:
     name: Build Windows
     runs-on: windows-latest
@@ -35,10 +38,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Cache MSYS2 packages
+        uses: actions/cache@v4
+        with:
+          path: C:\msys64\var\cache\pacman\pkg
+          key: msys2-${{ runner.os }}-${{ hashFiles('.github/workflows/build-release.yml') }}
+          restore-keys: |
+            msys2-${{ runner.os }}-
+
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
+          location: C:\msys64
           update: true
           install: >-
             git
@@ -58,6 +70,10 @@ jobs:
           name: windows-release
           path: "*.zip"
 
+      - name: Cleanup compiled content
+        shell: msys2 {0}
+        run: make clean
+
   build-macos:
     name: Build macOS
     runs-on: macos-latest
@@ -74,6 +90,9 @@ jobs:
         with:
           name: macos-release
           path: "*.tar.gz"
+
+      - name: Cleanup compiled content
+        run: make clean
 
   release:
     name: Create Release
