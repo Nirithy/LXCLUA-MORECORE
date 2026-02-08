@@ -17,9 +17,20 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-linux-${{ github.sha }}
+          restore-keys: |
+            ccache-linux-
+
       - name: Build Linux Release
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
         run: |
-          sudo apt-get update && sudo apt-get install -y gcc make
+          sudo apt-get update && sudo apt-get install -y gcc make ccache
+          export PATH="/usr/lib/ccache:$PATH"
           make linux-release
 
       - name: Upload Artifact
@@ -46,6 +57,14 @@ jobs:
           restore-keys: |
             msys2-${{ runner.os }}-
 
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-windows-${{ github.sha }}
+          restore-keys: |
+            ccache-windows-
+
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
         with:
@@ -56,13 +75,16 @@ jobs:
             git
             make
             mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-ccache
             tar
             zip
 
       - name: Build Windows Release
         shell: msys2 {0}
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
         run: |
-          make mingw-release
+          make mingw-release CC="ccache gcc"
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
