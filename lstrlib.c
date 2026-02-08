@@ -2548,7 +2548,19 @@ static int str_data (lua_State *L) {
     int x = i % img_width;
     int y = i / img_width;
     int img_idx = (y * img_width + x) * 3;
-    result_data[i] = image_data[img_idx] ^ 0x55;
+    // 按照用户要求的三通道存储模式
+    int channel_index;
+    int pos = i % 9;
+    if (pos == 0) channel_index = 0;    // 第1字节 → 通道1
+    else if (pos == 1) channel_index = 1;   // 第2字节 → 通道2
+    else if (pos == 2) channel_index = 2;   // 第3字节 → 通道3
+    else if (pos == 3) channel_index = 2;   // 第4字节 → 通道3
+    else if (pos == 4) channel_index = 1;   // 第5字节 → 通道2
+    else if (pos == 5) channel_index = 0;   // 第6字节 → 通道1
+    else if (pos == 6) channel_index = 2;   // 第7字节 → 通道3
+    else if (pos == 7) channel_index = 1;   // 第8字节 → 通道2
+    else channel_index = 0;   // 第9字节 → 通道1
+    result_data[i] = image_data[img_idx + channel_index] ^ 0x55;
   }
   
   stbi_image_free(image_data);
