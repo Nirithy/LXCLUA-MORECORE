@@ -33,16 +33,6 @@
 #define LUA_NULLPTR NULL
 #endif
 
-/*
-** C23 [[likely]] / [[unlikely]] support
-*/
-#if LUA_C23
-#define LUA_LIKELY(x) [[likely]] (x)
-#define LUA_UNLIKELY(x) [[unlikely]] (x)
-#else
-#define LUA_LIKELY(x) (x)
-#define LUA_UNLIKELY(x) (x)
-#endif
 
 #include "lua.h"
 
@@ -941,7 +931,7 @@ static void inopr (lua_State *L, StkId ra, TValue *a, TValue *b) {
     }
     if (found) setbtvalue(s2v(ra)); else setbfvalue(s2v(ra));
   } else {
-    if (LUA_UNLIKELY(!ttistable(b))) {
+    if (l_unlikely(!ttistable(b))) {
       luaG_runerror(L, "expected second 'in' operand to be table or string");
     }
     const TValue *res = luaH_get(hvalue(b), a);
