@@ -2445,6 +2445,10 @@ static int str_data2png (lua_State *L) {
   PngWriteContext ctx = {0};
   ctx.max_len = img_width * img_height * 4;
   ctx.data = (unsigned char *)malloc(ctx.max_len);
+  if (!ctx.data) {
+    free(image_data);
+    return luaL_error(L, "内存分配失败");
+  }
   
   int result = stbi_write_png_to_func(png_write_callback, &ctx, img_width, img_height, 3, image_data, img_width * 3);
   free(image_data);
