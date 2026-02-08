@@ -1477,9 +1477,15 @@ LUAMOD_API int luaopen_io (lua_State *L) {
   
   lua_pushinteger(L, MAP_SHARED); lua_setfield(L, -2, "MAP_SHARED");
   lua_pushinteger(L, MAP_PRIVATE); lua_setfield(L, -2, "MAP_PRIVATE");
+#ifdef MAP_ANONYMOUS
   lua_pushinteger(L, MAP_ANONYMOUS); lua_setfield(L, -2, "MAP_ANONYMOUS");
+#elif defined(MAP_ANON)
+  lua_pushinteger(L, MAP_ANON); lua_setfield(L, -2, "MAP_ANONYMOUS");
+#endif
   lua_pushinteger(L, MAP_FIXED); lua_setfield(L, -2, "MAP_FIXED");
+#ifdef MAP_FIXED_NOREPLACE
   lua_pushinteger(L, MAP_FIXED_NOREPLACE); lua_setfield(L, -2, "MAP_FIXED_NOREPLACE");
+#endif
 #endif
   
   lua_pushinteger(L, SEEK_SET); lua_setfield(L, -2, "SEEK_SET");
