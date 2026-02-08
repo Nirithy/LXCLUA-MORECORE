@@ -5070,7 +5070,7 @@ static lu_byte getglobalattribute (LexState *ls, lu_byte df) {
       luaK_semerror(ls, "global variables cannot be to-be-closed");
       return kind;  /* to avoid warnings */
     case RDKCONST:
-      return RDKCONST;  /* adjust kind for global variable */
+      return GDKCONST;  /* adjust kind for global variable */
     default:
       return kind;
   }
@@ -5102,12 +5102,16 @@ static void initglobal (LexState *ls, int nvars, int firstidx, int n,
     int nexps = explist(ls, &e);  /* read list of expressions */
     adjust_assign(ls, nvars, nexps, &e);
   }
-  else {
-    /* for global variables, we don't need to do anything special during initialization */
-    /* just recursively process the next variable */
+  else {  /* handle variable 'n' */
+    FuncState *fs = ls->fs;
+    expdesc var;
+    TString *varname = getlocalvardesc(fs, firstidx + n)->vd.name;
+    buildglobal(ls, varname, &var);  /* create global variable in 'var' */
     enterlevel(ls);  /* control recursion depth */
     initglobal(ls, nvars, firstidx, n + 1, line);
     leavelevel(ls);
+    checkglobal(ls, varname, line);
+    storevartop(fs, &var);
   }
 }
 
@@ -5115,35 +5119,16 @@ static void initglobal (LexState *ls, int nvars, int firstidx, int n,
 static void globalnames (LexState *ls, lu_byte defkind) {
   FuncState *fs = ls->fs;
   int nvars = 0;
-  TString *vnames[MAXVARS];  /* array to hold variable names */
-  
-  /* Collect variable names */
-  do {
+  int lastidx;  /* index of last registered variable */
+  do {  /* for each name */
     TString *vname = str_checkname(ls);
-    vnames[nvars++] = vname;
+    lu_byte kind = getglobalattribute(ls, defkind);
+    lastidx = new_varkind(ls, vname, kind);
+    nvars++;
   } while (testnext(ls, ','));
-  
-  /* Check for initialization */
-  if (testnext(ls, '=')) {
-    expdesc e;
-    int i;
-    
-    /* Read initialization expressions */
-    int nexps = explist(ls, &e);
-    
-    /* Adjust assignment to handle multiple variables and expressions */
-    adjust_assign(ls, nvars, nexps, &e);
-    
-    /* For each variable, generate assignment to global */
-     /* Start from the first expression register and move forward */
-     for (i = nvars-1; i >= 0; i--) {
-       expdesc var;
-       buildglobal(ls, vnames[i], &var);
-       /* Store the value from the current top of the stack to the global variable */
-       storevartop(fs, &var);
-     }
-  }
-  /* No need to activate global variables like local variables */
+  if (testnext(ls, '='))  /* initialization? */
+    initglobal(ls, nvars, lastidx - nvars + 1, 0, ls->linenumber);
+  fs->nactvar = cast_short(fs->nactvar + nvars);  /* activate declaration */
 }
 
 
@@ -5168,8 +5153,11 @@ static void globalfunc (LexState *ls, int line) {
   expdesc var, b;
   FuncState *fs = ls->fs;
   TString *fname = str_checkname(ls);
+  new_varkind(ls, fname, GDKREG);  /* declare global variable */
+  fs->nactvar++;  /* enter its scope */
   buildglobal(ls, fname, &var);
   body(ls, &b, 0, ls->linenumber);  /* compile and return closure in 'b' */
+  checkglobal(ls, fname, line);
   luaK_storevar(fs, &var, &b);
   luaK_fixline(fs, line);  /* definition "happens" in the first line */
 }
