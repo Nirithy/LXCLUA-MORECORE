@@ -1597,12 +1597,19 @@ int luaC_instanceof(lua_State *L, int obj_idx, int class_idx) {
   lua_rawget(L, obj_idx);
   
   /* 沿继承链检查（使用rawget访问类表） */
+  int loop_limit = 1000;
   while (lua_istable(L, -1)) {
     if (lua_rawequal(L, -1, class_idx)) {
       lua_pop(L, 1);
       return 1;
     }
     
+    if (--loop_limit == 0) {
+      /* 防止无限循环 */
+      lua_pop(L, 1);
+      return 0;
+    }
+
     lua_pushstring(L, CLASS_KEY_PARENT);
     lua_rawget(L, -2);
     lua_remove(L, -2);  /* 移除旧的类引用 */

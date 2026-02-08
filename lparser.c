@@ -8358,7 +8358,7 @@ static void newexpr(LexState *ls, expdesc *v) {
   int line = ls->linenumber;
   expdesc class_exp, args_exp;
   
-  luaX_next(ls);  /* 跳过 'new' */
+  luaX_next(ls);  /* 跳过 'onew' */
   
   /* 只解析主表达式（类名），不解析后面的函数调用 */
   primaryexp(ls, &class_exp);
@@ -8399,7 +8399,7 @@ static void superexpr(LexState *ls, expdesc *v) {
   FuncState *fs = ls->fs;
   int line = ls->linenumber;
   
-  luaX_next(ls);  /* 跳过 'super' */
+  luaX_next(ls);  /* 跳过 'osuper' */
   
   /* 查找当前作用域中的self变量 */
   expdesc self_exp;

@@ -1892,17 +1892,29 @@ void luaK_posfix (FuncState *fs, BinOpr opr,
       break;
     }
     case OPR_IS: {
-      /* 类型判断运算符：expr is "typename" */
+      /* 类型判断运算符：expr is "typename" 或 expr is Class */
       /* 将左侧表达式转换为寄存器 */
       int r1 = luaK_exp2anyreg(fs, e1);
-      /* 将右侧类型名转换为常量索引 */
-      int r2;
-      lua_assert(e2->k == VKSTR);  /* 右侧必须是字符串常量 */
-      r2 = luaK_stringK(fs, e2->u.strval);
-      freeexps(fs, e1, e2);
-      /* 生成 OP_IS 指令并跳转 */
-      e1->u.info = condjump(fs, OP_IS, r1, r2, 0, 1);
-      e1->k = VJMP;
+
+      /* 检查右侧表达式类型 */
+      if (e2->k == VKSTR) {
+        /* expr is "typename" - 字符串常量，使用 OP_IS */
+        int r2 = luaK_stringK(fs, e2->u.strval);
+        freeexps(fs, e1, e2);
+        /* 生成 OP_IS 指令并跳转 */
+        e1->u.info = condjump(fs, OP_IS, r1, r2, 0, 1);
+        e1->k = VJMP;
+      }
+      else {
+        /* expr is Class - 表达式，使用 OP_INSTANCEOF */
+        /* 将右侧表达式转换为寄存器 */
+        int r2 = luaK_exp2anyreg(fs, e2);
+        freeexps(fs, e1, e2);
+        /* 生成 OP_INSTANCEOF 指令并跳转 */
+        /* OP_INSTANCEOF A B C k: if ((R[A] instanceof R[B]) != k) pc++ */
+        e1->u.info = condjump(fs, OP_INSTANCEOF, r1, r2, 0, 1);
+        e1->k = VJMP;
+      }
       break;
     }
     case OPR_PIPE: {
