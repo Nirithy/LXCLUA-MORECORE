@@ -12,7 +12,7 @@
 
 #include "lobject.h"
 
-#define VM_MAP_SIZE 1024
+#define VM_MAP_SIZE 256
 #include "lopcodes.h"
 #include "lstate.h"
 

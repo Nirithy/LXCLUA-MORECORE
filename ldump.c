@@ -565,9 +565,9 @@ static void dumpFunction (DumpState *D, const Proto *f, TString *psource) {
   /* 首先写入时间戳，确保字符串解密时能正确使用 */
   dumpVar(D, D->timestamp);
   
-  /* 如果启用了控制流扁平化，先对函数进行扁平化处理 */
+  /* 如果启用了控制流扁平化或VM保护，先对函数进行处理 */
   Proto *work_proto = (Proto *)f;  /* 转换为非const指针以便修改 */
-  if (D->obfuscate_flags & OBFUSCATE_CFF) {
+  if (D->obfuscate_flags & (OBFUSCATE_CFF | OBFUSCATE_VM_PROTECT)) {
     luaO_flatten(D->L, work_proto, D->obfuscate_flags, D->obfuscate_seed, D->log_path);
     /* 更新种子，使每个函数使用不同的种子 */
     D->obfuscate_seed = D->obfuscate_seed * 1664525 + 1013904223;
