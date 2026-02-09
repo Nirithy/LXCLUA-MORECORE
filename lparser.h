@@ -86,6 +86,7 @@ typedef struct expdesc {
   } u;
   int t;  /* patch list of 'exit when true' */
   int f;  /* patch list of 'exit when false' */
+  unsigned int nodiscard:1; /* Result is from a nodiscard function */
 } expdesc;
 
 
@@ -157,6 +158,7 @@ typedef union Vardesc {
     short pidx;  /* index of the variable in the Proto's 'locvars' array */
     TString *name;  /* variable name */
     lu_byte used;
+    lu_byte nodiscard; /* Variable (function) is nodiscard */
   } vd;
   TValue k;  /* constant value (if any) */
 } Vardesc;

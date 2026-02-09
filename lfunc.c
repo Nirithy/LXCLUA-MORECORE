@@ -277,6 +277,7 @@ Proto *luaF_newproto (lua_State *L) {
   f->numparams = 0;
   f->is_vararg = 0;
   f->maxstacksize = 0;
+  f->nodiscard = 0;
   f->difierline_mode = 0;
   f->difierline_magicnum = 0;
   f->difierline_data = 0;

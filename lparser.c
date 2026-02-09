@@ -573,6 +573,7 @@ static void init_exp (expdesc *e, expkind k, int i) {
   e->f = e->t = NO_JUMP;
   e->k = k;
   e->u.info = i;
+  e->nodiscard = 0;
 }
 
 
@@ -718,6 +719,7 @@ static void init_var (FuncState *fs, expdesc *e, int vidx) {
   e->k = VLOCAL;
   e->u.var.vidx = vidx;
   e->u.var.ridx = getlocalvardesc(fs, vidx)->vd.ridx;
+  e->nodiscard = getlocalvardesc(fs, vidx)->vd.nodiscard;
 }
 
 
@@ -928,6 +930,19 @@ static void singlevar (LexState *ls, expdesc *var) {
     lua_assert(var->k != VVOID);  /* this one must exist */
     codestring(&key, varname);  /* key is variable name */
     luaK_indexed(fs, var, &key);  /* env[varname] */
+    if (ls->declared_globals) {
+       TValue k;
+       setsvalue(ls->L, &k, varname);
+       const TValue *decl_v = luaH_get(ls->declared_globals, &k);
+       if (!ttisnil(decl_v) && ttistable(decl_v)) {
+          Table *decl = hvalue(decl_v);
+          TValue nd_k;
+          setsvalue(ls->L, &nd_k, luaS_newliteral(ls->L, "nodiscard"));
+          if (!ttisnil(luaH_get(decl, &nd_k))) {
+             var->nodiscard = 1;
+          }
+       }
+    }
   }
 }
 
@@ -1953,6 +1968,17 @@ static void body (LexState *ls, expdesc *e, int ismethod, int line) {
             }
         }
     }
+    if (ls->t.token == '<') {
+        luaX_next(ls);
+        if (ls->t.token == TK_NAME) {
+           const char *attr = getstr(ls->t.seminfo.ts);
+           if (strcmp(attr, "nodiscard") == 0) {
+              new_fs.f->nodiscard = 1;
+           }
+           luaX_next(ls);
+        }
+        checknext(ls, '>');
+    }
     if (varargname) namedvararg(ls, varargname);
     statlist(ls);  /* 标准语法使用 statlist */
   }
@@ -2055,6 +2081,8 @@ static void funcargs (LexState *ls, expdesc *f, int line) {
   FuncState *fs = ls->fs;
   expdesc args;
   int base, nparams;
+  int nodiscard = f->nodiscard;
+
   switch (ls->t.token) {
     case '(': {  /* funcargs -> '(' [ explist ] ')' */
       luaX_next(ls);
@@ -2114,6 +2142,7 @@ static void funcargs (LexState *ls, expdesc *f, int line) {
     nparams = fs->freereg - (base+1);
   }
   init_exp(f, VCALL, luaK_codeABC(fs, OP_CALL, base, nparams+1, 2));
+  f->nodiscard = nodiscard;
   luaK_fixline(fs, line);
   fs->freereg = base+1;  /* call remove function and arguments and leaves
                             (unless changed) one result */
@@ -4953,6 +4982,9 @@ static void localfunc (LexState *ls, int isexport) {
   if (isexport) add_export(ls, name);
   adjustlocalvars(ls, 1);  /* enter its scope */
   body(ls, &b, 0, ls->linenumber);  /* function created in next register */
+  if (fs->f->p[fs->np - 1]->nodiscard) {
+     getlocalvardesc(fs, fvar)->vd.nodiscard = 1;
+  }
   /* debug information will only see the variable after this point! */
   localdebuginfo(fs, fvar)->startpc = fs->pc;
 }
@@ -5426,8 +5458,16 @@ static void checktypehint (LexState *ls, TypeHint *th) {
       continue;
     }
     
-    TString *ts = str_checkname(ls);
-    const char *tname = getstr(ts);
+    const char *tname;
+    TString *ts = NULL;
+    if (ls->t.token == TK_FUNCTION) {
+       tname = "function";
+       luaX_next(ls);
+    } else {
+       ts = str_checkname(ls);
+       tname = getstr(ts);
+    }
+
     TypeDesc td;
     td.type = VT_NONE;
     
@@ -9408,6 +9448,9 @@ static void exprstat (LexState *ls) {
     check_condition(ls, v.v.k == VCALL, "syntax error");
     inst = &getinstruction(fs, &v.v);
     SETARG_C(*inst, 1);  /* call statement uses no results */
+    if (v.v.nodiscard) {
+       luaX_warning(ls, "discarding return value of function declared '<nodiscard>'", WT_DISCARDED_RETURN);
+    }
   }
 }
 
@@ -9710,7 +9753,8 @@ static int is_preprocessor_directive(const char *name) {
          strcmp(name, "elseif") == 0 ||
          strcmp(name, "end") == 0 ||
          strcmp(name, "haltcompiler") == 0 ||
-         strcmp(name, "type") == 0;
+         strcmp(name, "type") == 0 ||
+         strcmp(name, "declare") == 0;
 }
 
 static void parse_alias(LexState *ls) {
@@ -9949,6 +9993,55 @@ static void constexprstat (LexState *ls) {
      luaH_set(ls->L, ls->named_types, &key, &val);
      /* printf("DEBUG: defined type '%s'\n", getstr(name)); */
   }
+  else if (strcmp(name, "declare") == 0) {
+     luaX_next(ls); /* skip 'declare' */
+     TString *name = str_checkname(ls);
+     TypeHint *th = NULL;
+     int nodiscard = 0;
+
+     if (testnext(ls, ':')) {
+        th = typehint_new(ls);
+        checktypehint(ls, th);
+     }
+
+     if (testnext(ls, '<')) {
+        if (ls->t.token == TK_NAME) {
+           const char *attr = getstr(ls->t.seminfo.ts);
+           if (strcmp(attr, "nodiscard") == 0) {
+              nodiscard = 1;
+           }
+           luaX_next(ls);
+        }
+        checknext(ls, '>');
+     }
+
+     TValue key, val;
+     setsvalue(ls->L, &key, name);
+
+     Table *decl = luaH_new(ls->L);
+     sethvalue2s(ls->L, ls->L->top.p, decl);
+     ls->L->top.p++;
+
+     if (nodiscard) {
+        TValue k, v;
+        setsvalue(ls->L, &k, luaS_newliteral(ls->L, "nodiscard"));
+        setbtvalue(&v);
+        luaH_set(ls->L, decl, &k, &v);
+     }
+
+     if (th) {
+        TValue k, v;
+        setsvalue(ls->L, &k, luaS_newliteral(ls->L, "type"));
+        setpvalue(&v, th);
+        luaH_set(ls->L, decl, &k, &v);
+     }
+
+     sethvalue(ls->L, &val, decl);
+
+     luaH_set(ls->L, ls->declared_globals, &key, &val);
+
+     ls->L->top.p--; /* pop decl */
+  }
   else {
      /* unknown directive - ignore line */
      luaX_next(ls);
@@ -9978,9 +10071,7 @@ static void statement (LexState *ls) {
       if (la == TK_NAME) {
          TString *ts = ls->lookahead.seminfo.ts;
          const char *name = getstr(ts);
-         /* printf("DEBUG: TK_DOLLAR followed by NAME '%s'\n", name); */
          if (is_preprocessor_directive(name)) {
-            /* printf("DEBUG: calling constexprstat for '%s'\n", name); */
             constexprstat(ls);
             break;
          }
@@ -10267,6 +10358,9 @@ LClosure *luaY_parser (lua_State *L, ZIO *z, Mbuffer *buff,
   lexstate.named_types = luaH_new(L);  /* create table for named types */
   sethvalue2s(L, L->top.p, lexstate.named_types);  /* anchor it */
   luaD_inctop(L);
+  lexstate.declared_globals = luaH_new(L); /* create table for declared globals */
+  sethvalue2s(L, L->top.p, lexstate.declared_globals); /* anchor it */
+  luaD_inctop(L);
   lexstate.all_type_hints = NULL;
   funcstate.f = cl->p = luaF_newproto(L);
   luaC_objbarrier(L, cl, cl->p);
@@ -10283,6 +10377,7 @@ LClosure *luaY_parser (lua_State *L, ZIO *z, Mbuffer *buff,
   /* all scopes should be correctly finished */
   lua_assert(dyd->actvar.n == 0 && dyd->gt.n == 0 && dyd->label.n == 0);
   typehint_free(&lexstate);
+  L->top.p--;  /* remove declared globals table */
   L->top.p--;  /* remove named types table */
   L->top.p--;  /* remove scanner's table */
   return cl;  /* closure is on the stack, too */

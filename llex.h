@@ -159,6 +159,7 @@ typedef struct LexState {
   int pending_idx;
   Table *defines; /* Compile-time constants */
   Table *named_types; /* Named types */
+  Table *declared_globals; /* Declared global variables */
   struct TypeHint *all_type_hints; /* List of allocated type hints */
 
   /* Warnings */
