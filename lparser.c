@@ -4276,118 +4276,169 @@ static void whenstat (LexState *ls, int line) {
 
 
 //===================================== SWITCH =============================================
-static expdesc clone(expdesc e2){
-  expdesc e1;
-  e1.f=e2.f;
-  e1.k=e2.k;
-  e1.t=e2.t;
-  e1.u.ind.t=e2.u.ind.t;
-  e1.u.ind.idx=e2.u.ind.idx;
-  e1.u.var.vidx=e2.u.var.vidx;
-  e1.u.var.ridx=e2.u.var.ridx;
-  e1.u.info=e2.u.info;
-  e1.u.nval=e2.u.nval;
-  e1.u.ival=e2.u.ival;
-  e1.u.strval=e2.u.strval;
-  return e1;
-}
-
-static void switch_read_var (LexState *ls, expdesc *v) {
-    enterlevel(ls);
-    subexpr(ls, v, 0);
-    //simpleexp(ls, v);
-    leavelevel(ls);
-}
-
-static void test_case_block (LexState *ls, int *escapelist, expdesc *control) {
-    /* test_case_block -> [CASE] var DO block */
-    BlockCnt bl;
-    FuncState *fs = ls->fs;
-    int jf;  /* instruction to skip 'case' code (if condition is false) */
-    luaX_next(ls);  /* skip CASE */
-    expdesc v;
-    expdesc gv = clone(*control);
-    enterlevel(ls);
-    cond_expr(ls, &v);  /* 使用 cond_expr 避免 { 被误解为函数调用 */
-    luaK_posfix(ls->fs, OPR_EQ, control, &v, ls->linenumber);
-
-    while(testnext(ls,',')|| testnext(ls,TK_CASE)){
-      expdesc c = clone(gv);
-      expdesc v2;
-      luaK_infix(ls->fs, OPR_EQ, &c);
-      cond_expr(ls, &v2);  /* 使用 cond_expr 避免 { 被误解为函数调用 */
-      luaK_posfix(ls->fs, OPR_EQ, &c, &v2, ls->linenumber);
-      luaK_infix(ls->fs, OPR_OR, control);
-      luaK_posfix(ls->fs, OPR_OR, control, &c, ls->linenumber);
-    }
-
-    leavelevel(ls);
-
-    if(!testnext(ls, TK_DO)){
-      if(!testnext(ls, TK_THEN)){
-        if(!testnext(ls, ':')){
-          testnext(ls, '{');
-        }
-      }
-    }
-
-  if (ls->t.token == TK_BREAK||ls->t.token==TK_CONTINUE) {  /* 'if x then break' ? */
-    int line = ls->linenumber;
-    luaK_goiffalse(ls->fs, &v);  /* will jump if condition is true */
-    if(ls->t.token==TK_BREAK) {
-      luaX_next(ls);  /* skip 'break' */
-      enterblock(fs, &bl, 0);  /* must enter block before 'goto' */
-      newgotoentry(ls, luaS_newliteral(ls->L, "break"), line, v.t);
-    }else{
-      enterblock(fs, &bl, 0);  /* must enter block before 'goto' */
-      newgotoentry(ls, luaS_newliteral(ls->L, "continue"), line, v.t);
-    }
-    while (testnext(ls, ';')) {}  /* skip semicolons */
-    if (block_follow(ls, 0)) {  /* jump is the entire block? */
-      leaveblock(fs);
-      return;  /* and that is it */
-    }
-    else  /* must skip over 'then' part if condition is false */
-      jf = luaK_jump(fs);
-  }else {
-    luaK_goiftrue(ls->fs, control);  /* skip over block if condition is false */
-    enterblock(fs, &bl, 0);
-    jf = control->f;
-  }
-
-      statlist(ls);  /* `CASE' part */
-      leaveblock(fs);
-
-      if (ls->t.token == TK_CASE ||
-          ls->t.token == TK_DEFAULT)
-        luaK_concat(fs, escapelist, luaK_jump(fs));
-      //check_match(ls, TK_END, TK_CASE, ls->linenumber);
-      luaK_patchtohere(fs, jf);
-}
-
 static void switchstat (LexState *ls, int line) {
-    /* switchstat -> SWITCH var {CASE var DO block} [DEFAULT block] END */
-    expdesc v, buf;
-    luaX_next(ls);
-    switch_read_var(ls, &v);
-    if(!testnext(ls, TK_DO)){
+  FuncState *fs = ls->fs;
+  BlockCnt bl;
+  expdesc ctrl;
+  int jump_to_check;
+  int fallthrough_jump = -1;
+  int default_label = -1;
+  int previous_body_active = 0; /* To track if we need to generate fallthrough jump */
+
+  luaX_next(ls);  /* skip SWITCH */
+
+  enterblock(fs, &bl, 1); /* isloop=1 to support break */
+
+  expr(ls, &ctrl); /* parse control expression */
+
+  /* Save control value to a local variable to ensure register safety */
+  luaK_exp2nextreg(fs, &ctrl);
+  new_localvarliteral(ls, "(switch control)");
+  adjustlocalvars(ls, 1);
+
+  if(!testnext(ls, TK_DO)){
       if(!testnext(ls, TK_THEN)){
         if (!testnext(ls, ':')){
           testnext(ls, '{');
         }
       }
-    }
+  }
 
-    FuncState *fs = ls->fs;
-    int escapelist = NO_JUMP;
-    while (ls->t.token == TK_CASE) {
-        buf = v;
-        test_case_block(ls, &escapelist, &buf);  /* CASE var DO block */
+  /* Initial jump to first check */
+  jump_to_check = luaK_jump(fs);
+
+  while (ls->t.token != TK_END && ls->t.token != TK_EOS && ls->t.token != '}') {
+    if (ls->t.token == TK_CASE) {
+      int to_body_jump = NO_JUMP;
+      int next_check_jump;
+
+      /* Handle fallthrough from previous body */
+      if (previous_body_active) {
+         int skip = luaK_jump(fs);
+         if (fallthrough_jump == -1)
+            fallthrough_jump = skip;
+         else
+            luaK_concat(fs, &fallthrough_jump, skip);
+      }
+
+      /* Now generating check code */
+      luaK_patchtohere(fs, jump_to_check);
+
+      luaX_next(ls); /* skip CASE */
+
+      /* Parse conditions */
+      do {
+        expdesc e;
+        expdesc c = ctrl; /* Copy ctrl expdesc */
+        expr(ls, &e);
+
+        luaK_infix(fs, OPR_EQ, &c);
+        luaK_posfix(fs, OPR_EQ, &c, &e, ls->linenumber);
+
+        luaK_goiftrue(fs, &c);
+        /* If false, it jumps to c.f. */
+        /* If true, it is here. Generate jump to body. */
+        {
+           int j = luaK_jump(fs);
+           luaK_concat(fs, &to_body_jump, j);
+        }
+        /* Patch c.f to here (next check/condition) */
+        luaK_patchtohere(fs, c.f);
+
+      } while (testnext(ls, ','));
+
+      /* If we fall through here, it means all checks failed. */
+      /* Jump to next check block */
+      next_check_jump = luaK_jump(fs);
+      jump_to_check = next_check_jump;
+
+      /* Body Start */
+      luaK_patchtohere(fs, to_body_jump);
+      if (fallthrough_jump != -1) {
+        luaK_patchtohere(fs, fallthrough_jump);
+        fallthrough_jump = -1;
+      }
+
+      /* Parse Body */
+      if (testnext(ls, TK_ARROW)) {
+         expdesc e;
+         expr(ls, &e);
+         luaK_exp2nextreg(fs, &e);
+         luaK_ret(fs, e.u.info, 1);
+         previous_body_active = 0; /* Returns, so no fallthrough */
+      } else {
+         testnext(ls, ':');
+         testnext(ls, TK_DO);
+         testnext(ls, TK_THEN);
+         /* checknext(ls, '{');  optional brace? */
+
+         statlist(ls);
+         previous_body_active = 1;
+      }
+
+    } else if (ls->t.token == TK_DEFAULT) {
+      if (default_label != -1) luaX_syntaxerror(ls, "multiple default blocks");
+
+      /* Handle fallthrough from previous body */
+      if (previous_body_active) {
+         int skip = luaK_jump(fs);
+         if (fallthrough_jump == -1)
+            fallthrough_jump = skip;
+         else
+            luaK_concat(fs, &fallthrough_jump, skip);
+      }
+
+      /* Do NOT patch checks to skip here. Let them skip this block entirely. */
+
+      /* Default Body Start */
+      default_label = luaK_getlabel(fs);
+
+      /* Patch fallthrough to here */
+      if (fallthrough_jump != -1) {
+        luaK_patchtohere(fs, fallthrough_jump);
+        fallthrough_jump = -1;
+      }
+
+      luaX_next(ls); /* skip DEFAULT */
+
+      if (testnext(ls, TK_ARROW)) {
+         expdesc e;
+         expr(ls, &e);
+         luaK_exp2nextreg(fs, &e);
+         luaK_ret(fs, e.u.info, 1);
+         previous_body_active = 0;
+      } else {
+         testnext(ls, ':');
+         testnext(ls, TK_DO);
+         testnext(ls, TK_THEN);
+         statlist(ls);
+         previous_body_active = 1;
+      }
+    } else {
+       luaX_syntaxerror(ls, "expected 'case' or 'default'");
     }
-    if (testnext(ls, TK_DEFAULT))
-        block(ls);      /* `default' part */
-    check_match(ls, TK_END, TK_SWITCH, line);
-  luaK_patchtohere(fs, escapelist);
+  }
+
+  /* End of switch */
+
+  /* Patch dangling checks */
+  if (default_label != -1) {
+    luaK_patchlist(fs, jump_to_check, default_label);
+  } else {
+    luaK_patchtohere(fs, jump_to_check); /* Falls through to end */
+  }
+
+  if (fallthrough_jump != -1) {
+    luaK_patchtohere(fs, fallthrough_jump);
+  }
+
+  if (ls->t.token == TK_END) {
+    luaX_next(ls);
+  } else {
+    check_match(ls, '}', '{', line);
+  }
+
+  leaveblock(fs);
 }
 
 
