@@ -1441,7 +1441,7 @@ LUA_API int lua_gc (lua_State *L, int what, ...) {
         luaC_step(L);
       }
       else {  /* add 'data' to total debt */
-        debt = cast(l_mem, data) * 1024 + g->GCdebt;
+        debt = cast(l_mem, data) * 1024 + l_atomic_load(&g->GCdebt);
         luaE_setdebt(g, debt);
         luaC_checkGC(L);
       }

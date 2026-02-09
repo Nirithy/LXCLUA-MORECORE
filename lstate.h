@@ -305,7 +305,7 @@ typedef struct global_State {
   lua_Alloc frealloc;  /**< function to reallocate memory */
   void *ud;         /**< auxiliary data to 'frealloc' */
   l_mem GCtotalbytes;  /**< number of bytes currently allocated - GCdebt */
-  l_mem GCdebt;  /* bytes allocated not yet compensated by the collector */
+  _Atomic l_mem GCdebt;  /* bytes allocated not yet compensated by the collector */
   lu_mem GCestimate;  /* an estimate of the non-garbage memory in use */
   l_mutex_t lock;       /* global lock for shared resources (strings, registry) */
   lu_mem lastatomic;  /* see function 'genstep' in file 'lgc.c' */
@@ -450,7 +450,7 @@ union GCUnion {
 
 
 /* actual number of total bytes allocated */
-#define gettotalbytes(g)	cast(lu_mem, (g)->GCtotalbytes + (g)->GCdebt)
+#define gettotalbytes(g)	cast(lu_mem, (g)->GCtotalbytes + l_atomic_load(&(g)->GCdebt))
 
 
 

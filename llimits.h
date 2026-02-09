@@ -13,7 +13,14 @@
 
 
 #include "lua.h"
+#ifdef __cplusplus
+extern "C++"
+{
+#include <atomic>
+}
+#else
 #include <stdatomic.h>
+#endif
 
 
 /*
@@ -35,7 +42,9 @@ typedef long l_mem;
 #define l_atomic_add(a, n) atomic_fetch_add(a, n)
 #define l_atomic_sub(a, n) atomic_fetch_sub(a, n)
 #define l_atomic_get(a) atomic_load(a)
+#define l_atomic_load(a) atomic_load(a)
 #define l_atomic_set(a, n) atomic_store(a, n)
+#define l_atomic_store(a, n) atomic_store(a, n)
 typedef _Atomic l_mem l_atomic_mem;
 typedef _Atomic int l_atomic;
 

@@ -10,6 +10,7 @@
 
 #include "lobject.h"
 #include "lstate.h"
+#include "llimits.h"
 
 /*
 ** Collectable objects may have one of three colors: white, which means
@@ -165,7 +166,7 @@
 ** GC cycle on every opportunity)
 */
 #define luaC_condGC(L,pre,pos) \
-	{ if (G(L)->GCdebt > 0) { pre; luaC_step(L); pos;}; \
+	{ if (l_atomic_load(&G(L)->GCdebt) > 0) { pre; luaC_step(L); pos;}; \
 	  condchangemem(L,pre,pos); }
 
 /* more often than not, 'pre'/'pos' are empty */

@@ -877,9 +877,9 @@ static GCObject **sweeptolive (lua_State *L, GCObject **p) {
 static void checkSizes (lua_State *L, global_State *g) {
   if (!g->gcemergency) {
     if (g->strt.nuse < g->strt.size / 4) {  /* string table too big? */
-      l_mem olddebt = g->GCdebt;
+      l_mem olddebt = l_atomic_load(&g->GCdebt);
       luaS_resize(L, g->strt.size / 2);
-      g->GCestimate += g->GCdebt - olddebt;  /* correct estimate */
+      g->GCestimate += l_atomic_load(&g->GCdebt) - olddebt;  /* correct estimate */
     }
   }
 }
@@ -1451,7 +1451,7 @@ static void genstep (lua_State *L, global_State *g) {
   else {
     lu_mem majorbase = g->GCestimate;  /* memory after last major collection */
     lu_mem majorinc = (majorbase / 100) * getgcparam(g->genmajormul);
-    if (g->GCdebt > 0 && gettotalbytes(g) > majorbase + majorinc) {
+    if (l_atomic_load(&g->GCdebt) > 0 && gettotalbytes(g) > majorbase + majorinc) {
       lu_mem numobjs = fullgen(L, g);  /* do a major collection */
       if (gettotalbytes(g) < majorbase + (majorinc / 2)) {
         /* collected at least half of memory growth since last major
@@ -1574,10 +1574,10 @@ static lu_mem atomic (lua_State *L) {
 static int sweepstep (lua_State *L, global_State *g,
                       int nextstate, GCObject **nextlist) {
   if (g->sweepgc) {
-    l_mem olddebt = g->GCdebt;
+    l_mem olddebt = l_atomic_load(&g->GCdebt);
     int count;
     g->sweepgc = sweeplist(L, g->sweepgc, GCSWEEPMAX, &count);
-    g->GCestimate += g->GCdebt - olddebt;  /* update estimate */
+    g->GCestimate += l_atomic_load(&g->GCdebt) - olddebt;  /* update estimate */
     return count;
   }
   else {  /* enter next state */
@@ -1673,7 +1673,7 @@ void luaC_runtilstate (lua_State *L, int statesmask) {
 */
 static void incstep (lua_State *L, global_State *g) {
   int stepmul = (getgcparam(g->gcstepmul) | 1);  /* avoid division by 0 */
-  l_mem debt = (g->GCdebt / WORK2MEM) * stepmul;
+  l_mem debt = (l_atomic_load(&g->GCdebt) / WORK2MEM) * stepmul;
   l_mem stepsize = (g->gcstepsize <= log2maxs(l_mem))
                  ? ((cast(l_mem, 1) << g->gcstepsize) / WORK2MEM) * stepmul
                  : MAX_LMEM;  /* overflow; keep maximum value */

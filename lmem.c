@@ -151,7 +151,7 @@ void luaM_free_ (lua_State *L, void *block, size_t osize) {
   global_State *g = G(L);
   lua_assert((osize == 0) == (block == NULL));
   callfrealloc(g, block, osize, 0);
-  g->GCdebt -= osize;
+  l_atomic_sub(&g->GCdebt, osize);
 }
 
 
@@ -184,7 +184,7 @@ void *luaM_realloc_ (lua_State *L, void *block, size_t osize, size_t nsize) {
       return NULL;  /* do not update 'GCdebt' */
   }
   lua_assert((nsize == 0) == (newblock == NULL));
-  g->GCdebt = (g->GCdebt + nsize) - osize;
+  l_atomic_add(&g->GCdebt, (l_mem)(nsize - osize));
   return newblock;
 }
 
@@ -209,7 +209,7 @@ void *luaM_malloc_ (lua_State *L, size_t size, int tag) {
       if (newblock == NULL)
         luaM_error(L);
     }
-    g->GCdebt += size;
+    l_atomic_add(&g->GCdebt, size);
     return newblock;
   }
 }
@@ -305,7 +305,7 @@ void *luaM_poolalloc (lua_State *L, size_t size) {
   if (block == NULL)
     return NULL;
 
-  g->GCdebt += pool->object_size;
+  l_atomic_add(&g->GCdebt, pool->object_size);
   return block;
 }
 

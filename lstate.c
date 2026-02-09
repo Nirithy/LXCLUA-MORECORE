@@ -86,7 +86,7 @@ void luaE_setdebt (global_State *g, l_mem debt) {
   if (debt < tb - MAX_LMEM)
     debt = tb - MAX_LMEM;  /* will make 'GCtotalbytes == MAX_LMEM' */
   g->GCtotalbytes = tb - debt;
-  g->GCdebt = debt;
+  l_atomic_store(&g->GCdebt, debt);
 }
 
 
@@ -394,7 +394,7 @@ LUA_API lua_State *lua_newstate (lua_Alloc f, void *ud, unsigned seed) {
   g->weak = g->ephemeron = g->allweak = NULL;
   g->twups = NULL;
   g->GCtotalbytes = sizeof(LG);
-  g->GCdebt = 0;
+  l_atomic_store(&g->GCdebt, 0);
   g->lastatomic = 0;
   setivalue(&g->nilvalue, 0);  /* to signal that state is not yet built */
   setgcparam(g->gcpause, LUAI_GCPAUSE);
