@@ -478,9 +478,17 @@ unsigned luaO_tostringbuff (const TValue *obj, char *buff) {
 ** Convert a number object to a Lua string, replacing the value at 'obj'
 */
 void luaO_tostring (lua_State *L, TValue *obj) {
-  char buff[LUA_N2SBUFFSZ];
-  unsigned len = luaO_tostringbuff(obj, buff);
-  setsvalue(L, obj, luaS_newlstr(L, buff, len));
+  if (ttisboolean(obj)) {
+    if (ttistrue(obj)) {
+      setsvalue(L, obj, luaS_newliteral(L, "true"));
+    } else {
+      setsvalue(L, obj, luaS_newliteral(L, "false"));
+    }
+  } else {
+    char buff[LUA_N2SBUFFSZ];
+    unsigned len = luaO_tostringbuff(obj, buff);
+    setsvalue(L, obj, luaS_newlstr(L, buff, len));
+  }
 }
 
 

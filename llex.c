@@ -13,6 +13,7 @@
 #include <locale.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "lua.h"
 
@@ -30,7 +31,7 @@
 
 
 
-#define next(ls)	(ls->current = zgetc(ls->z))
+#define next(ls)	(ls->curpos++, ls->current = zgetc(ls->z))
 
 
 /* minimum size for string buffer */
@@ -236,10 +237,72 @@ static const char *txtToken (LexState *ls, int token) {
   }
 }
 
+static char *get_source_line(LexState *ls, int line, int *col) {
+  if (getstr(ls->source)[0] != '@') return NULL;
+  FILE *f = fopen(getstr(ls->source) + 1, "rb");
+  if (f == NULL) return NULL;
+
+  int current_line = 1;
+  long line_start_offset = 0;
+  int c;
+  long offset = 0;
+
+  while (current_line < line) {
+     while ((c = fgetc(f)) != EOF && c != '\n') {
+        offset++;
+     }
+     if (c == EOF) { fclose(f); return NULL; }
+     offset++; /* newline */
+     current_line++;
+     line_start_offset = offset;
+  }
+
+  size_t bufsize = 128;
+  char *buffer = (char*)malloc(bufsize);
+  if (!buffer) { fclose(f); return NULL; }
+
+  size_t len = 0;
+  while ((c = fgetc(f)) != EOF && c != '\n' && c != '\r') {
+      if (len + 1 >= bufsize) {
+          bufsize *= 2;
+          char *newbuf = (char*)realloc(buffer, bufsize);
+          if (!newbuf) { free(buffer); fclose(f); return NULL; }
+          buffer = newbuf;
+      }
+      buffer[len++] = (char)c;
+  }
+  buffer[len] = '\0';
+  fclose(f);
+
+  if (col) {
+      *col = ls->tokpos - (int)line_start_offset;
+      if (*col < 0) *col = 0;
+      if (*col > (int)len) *col = (int)len;
+  }
+
+  return buffer;
+}
 
 static l_noret lexerror (LexState *ls, const char *msg, int token) {
   msg = luaG_addinfo(ls->L, msg, ls->source, ls->linenumber);
-  if (token) {
+
+  int col = 0;
+  char *line_content = get_source_line(ls, ls->linenumber, &col);
+  if (line_content) {
+      luaO_pushfstring(ls->L, "%s\n    %d | %s\n      | ", msg, ls->linenumber, line_content);
+      char *spaces = (char*)malloc(col + 1);
+      if (spaces) {
+        memset(spaces, ' ', col);
+        spaces[col] = '\0';
+        lua_pushstring(ls->L, spaces);
+        free(spaces);
+      } else {
+        lua_pushstring(ls->L, "");
+      }
+      luaO_pushfstring(ls->L, "^ here");
+      lua_concat(ls->L, 3);
+      free(line_content);
+  } else if (token) {
     luaO_pushfstring(ls->L,
                      "=============================\n"
                      "[X] [Lua语法错误]\n\n"
