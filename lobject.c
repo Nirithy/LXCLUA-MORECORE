@@ -350,6 +350,22 @@ static const char *l_str2int (const char *s, lua_Integer *result) {
       empty = 0;
     }
   }
+  else if (s[0] == '0' &&
+      (s[1] == 'b' || s[1] == 'B')) {  /* binary? */
+    s += 2;  /* skip '0b' */
+    for (; cast_uchar(*s) == '0' || cast_uchar(*s) == '1'; s++) {
+      a = a * 2 + (*s - '0');
+      empty = 0;
+    }
+  }
+  else if (s[0] == '0' &&
+      (s[1] == 'o' || s[1] == 'O')) {  /* octal? */
+    s += 2;  /* skip '0o' */
+    for (; cast_uchar(*s) >= '0' && cast_uchar(*s) <= '7'; s++) {
+      a = a * 8 + (*s - '0');
+      empty = 0;
+    }
+  }
   else {  /* decimal */
     for (; lisdigit(cast_uchar(*s)); s++) {
       int d = *s - '0';

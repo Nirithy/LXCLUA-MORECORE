@@ -1210,8 +1210,8 @@ static void close_func (LexState *ls) {
   lua_State *L = ls->L;
   FuncState *fs = ls->fs;
   Proto *f = fs->f;
-  luaK_ret(fs, luaY_nvarstack(fs), 0);  /* final return */
   leaveblock(fs);
+  luaK_ret(fs, luaY_nvarstack(fs), 0);  /* final return */
   lua_assert(fs->bl == NULL);
   luaK_finish(fs);
   luaM_shrinkvector(L, f->code, f->sizecode, fs->pc, Instruction);
@@ -9422,6 +9422,12 @@ static void statement (LexState *ls) {
       else if (ls->t.token == TK_ENUM) {
         enumstat(ls, line, 1);
       }
+      else if (testnext(ls, TK_CONST)) {
+        if (testnext(ls, TK_FUNCTION))
+          luaK_semerror(ls, "function cannot be declared as const");
+        else
+          localstat(ls, 1);
+      }
       else {
         SoftKWID skw = softkw_check(ls, SOFTKW_CTX_STMT_BEGIN);
         if (skw == SKW_CLASS) {
@@ -9447,6 +9453,9 @@ static void statement (LexState *ls) {
              classstat(ls, line, CLASS_FLAG_SEALED, 1);
           else
              luaX_syntaxerror(ls, "'sealed' export must be followed by 'class'");
+        }
+        else if (ls->t.token == TK_NAME) {
+          localstat(ls, 1);
         }
         else {
           luaX_syntaxerror(ls, "unexpected token after export");

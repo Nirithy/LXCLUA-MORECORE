@@ -389,8 +389,12 @@ static int read_numeral (LexState *ls, SemInfo *seminfo) {
   save_and_next(ls);
   if (first == '0' && check_next2(ls, "xX"))  /* hexadecimal? */
     expo = "Pp";
+  else if (first == '0' && check_next2(ls, "bB"))  /* binary? */
+    expo = NULL;
+  else if (first == '0' && check_next2(ls, "oO"))  /* octal? */
+    expo = NULL;
   for (;;) {
-    if (check_next2(ls, expo))  /* exponent mark? */
+    if (expo && check_next2(ls, expo))  /* exponent mark? */
       check_next2(ls, "-+");  /* optional exponent sign */
     else if (ls->current == '_')  /* underscore as visual separator? */
       next(ls);  /* skip underscore, don't save it */

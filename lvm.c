@@ -314,6 +314,18 @@ void luaV_finishget (lua_State *L, const TValue *t, TValue *key, StkId val,
   for (loop = 0; loop < MAXTAGLOOP; loop++) {
     if (slot == LUA_NULLPTR) {  /* 't' is not a table? */
       lua_assert(!ttistable(t));
+      if (ttisstring(t) && ttisinteger(key)) {
+        size_t l = tsslen(tsvalue(t));
+        lua_Integer idx = ivalue(key);
+        if (idx < 0) idx += l + 1;
+        if (idx >= 1 && idx <= (lua_Integer)l) {
+          setsvalue2s(L, val, luaS_newlstr(L, getstr(tsvalue(t)) + idx - 1, 1));
+          return;
+        } else {
+          setnilvalue(s2v(val));
+          return;
+        }
+      }
       tm = luaT_gettmbyobj(L, t, TM_INDEX);
       if (l_unlikely(notm(tm)))
         luaG_typeerror(L, t, "index");  /* no metamethod */
