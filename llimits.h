@@ -13,6 +13,7 @@
 
 
 #include "lua.h"
+#include <stdatomic.h>
 
 
 /*
@@ -30,6 +31,13 @@ typedef ptrdiff_t l_mem;
 typedef unsigned long lu_mem;
 typedef long l_mem;
 #endif				/* } */
+
+#define l_atomic_add(a, n) atomic_fetch_add(a, n)
+#define l_atomic_sub(a, n) atomic_fetch_sub(a, n)
+#define l_atomic_get(a) atomic_load(a)
+#define l_atomic_set(a, n) atomic_store(a, n)
+typedef _Atomic l_mem l_atomic_mem;
+typedef _Atomic int l_atomic;
 
 
 /* chars used as small naturals (so that 'char' is reserved for characters) */

@@ -25,6 +25,7 @@
 #include "lstring.h"
 #include "ltable.h"
 #include "ltm.h"
+#include "lthread.h"
 
 
 /*
@@ -261,8 +262,10 @@ GCObject *luaC_newobjdt (lua_State *L, int tt, size_t sz, size_t offset) {
   GCObject *o = cast(GCObject *, p + offset);
   o->marked = luaC_white(g);
   o->tt = tt;
+  l_mutex_lock(&g->lock);
   o->next = g->allgc;
   g->allgc = o;
+  l_mutex_unlock(&g->lock);
   return o;
 }
 
@@ -541,8 +544,10 @@ static void traversestrongtable (global_State *g, Table *h) {
 
 static lu_mem traversetable (global_State *g, Table *h) {
   const char *weakkey, *weakvalue;
-  const TValue *mode = gfasttm(g, h->metatable, TM_MODE);
+  const TValue *mode;
   TString *smode;
+  l_rwlock_rdlock(&h->lock); /* Lock table for traversal */
+  mode = gfasttm(g, h->metatable, TM_MODE);
   markobjectN(g, h->metatable);
   if (mode && ttisshrstring(mode) &&  /* is there a weak mode? */
       (cast_void(smode = tsvalue(mode)),
@@ -558,6 +563,7 @@ static lu_mem traversetable (global_State *g, Table *h) {
   }
   else  /* not weak */
     traversestrongtable(g, h);
+  l_rwlock_unlock(&h->lock);
   return 1 + h->alimit + 2 * allocsizenode(h);
 }
 
@@ -1690,6 +1696,7 @@ static void incstep (lua_State *L, global_State *g) {
 */
 void luaC_step (lua_State *L) {
   global_State *g = G(L);
+  l_mutex_lock(&g->lock);
   if (!gcrunning(g))  /* not running? */
     luaE_setdebt(g, -2000);
   else {
@@ -1698,6 +1705,7 @@ void luaC_step (lua_State *L) {
     else
       incstep(L, g);
   }
+  l_mutex_unlock(&g->lock);
 }
 
 
@@ -1730,6 +1738,7 @@ static void fullinc (lua_State *L, global_State *g) {
 */
 void luaC_fullgc (lua_State *L, int isemergency) {
   global_State *g = G(L);
+  l_mutex_lock(&g->lock);
   lua_assert(!g->gcemergency);
   g->gcemergency = isemergency;  /* set flag */
   if (g->gckind == KGC_INC)
@@ -1738,6 +1747,7 @@ void luaC_fullgc (lua_State *L, int isemergency) {
     fullgen(L, g);
   luaM_poolgc(L);  /* 完整GC后回收内存池缓存 */
   g->gcemergency = 0;
+  l_mutex_unlock(&g->lock);
 }
 
 /* }=========================================== */

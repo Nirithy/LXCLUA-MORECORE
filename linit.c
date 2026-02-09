@@ -41,6 +41,9 @@ int luaopen_libc(lua_State *L);
 /* 声明logtable库的初始化函数 */
 int luaopen_logtable(lua_State *L);
 
+/* 声明thread库的初始化函数 */
+int luaopen_thread(lua_State *L);
+
 // clang and ffi libraries
 
 /*
@@ -69,6 +72,7 @@ static const luaL_Reg stdlibs[] = {
   {LUA_BITLIBNAME, luaopen_bit},
   {LUA_PTRLIBNAME, luaopen_ptr},
   {"bit32", luaopen_bit},
+  {"thread", luaopen_thread},
 
 #ifndef _WIN32
   {LUA_SMGRNAME, luaopen_smgr},
@@ -127,6 +131,7 @@ static const luaL_Reg loadedlibs[] = {
   {LUA_BITLIBNAME, luaopen_bit},
   {LUA_PTRLIBNAME, luaopen_ptr},
   {"bit32", luaopen_bit},
+  {"thread", luaopen_thread},
 
 #ifndef _WIN32
   {LUA_SMGRNAME, luaopen_smgr},

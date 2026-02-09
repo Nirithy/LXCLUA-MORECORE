@@ -15,6 +15,7 @@
 #include "llimits.h"
 #include <stdint.h>
 #include "lua.h"
+#include "lthread.h"
 
 
 /*
@@ -849,6 +850,7 @@ typedef struct Table {
   struct Table *metatable; /**< Metatable pointer. */
   GCObject *gclist;
   lu_byte type;    /**< Custom type flag. */
+  l_rwlock_t lock; /**< Lock for thread safety. */
 } Table;
 
 

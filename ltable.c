@@ -1178,6 +1178,7 @@ Table *luaH_new (lua_State *L) {
   t->flags = cast_byte(maskflags);  /* table has no metamethod fields */
   t->array = NULL;
   t->alimit = 0;
+  l_rwlock_init(&t->lock);
   setnodevector(L, t, 0);
   return t;
 }
@@ -1189,6 +1190,7 @@ Table *luaH_new (lua_State *L) {
 void luaH_free (lua_State *L, Table *t) {
   freehash(L, t);
   luaM_freearray(L, t->array, luaH_realasize(t));
+  l_rwlock_destroy(&t->lock);
   luaM_free(L, t);
 }
 

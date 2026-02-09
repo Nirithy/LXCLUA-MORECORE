@@ -19,6 +19,7 @@
 #include "lobject.h"
 #include "lstate.h"
 #include "lstring.h"
+#include "lthread.h"
 
 
 /*
@@ -92,11 +93,29 @@ static void tablerehash (TString **vect, int osize, int nsize) {
 ** correctly.)
 */
 void luaS_resize (lua_State *L, int nsize) {
-  stringtable *tb = &G(L)->strt;
+  global_State *g = G(L);
+  l_mutex_lock(&g->lock);
+  stringtable *tb = &g->strt;
   int osize = tb->size;
   TString **newvect;
   if (nsize < osize)  /* shrinking table? */
     tablerehash(tb->hash, osize, nsize);  /* depopulate shrinking part */
+  /* Unlock during allocation to avoid holding lock? No, realloc might be safe, but rehash touches table. */
+  /* We must hold lock. But realloc might trigger GC? */
+  /* If GC runs, it might deadlock if it tries to take g->lock. */
+  /* luaM_reallocvector calls luaM_realloc_ calls luaC_fullgc if alloc fails. */
+  /* luaC_fullgc takes g->lock? */
+  /* If I lock here, and luaC_fullgc tries to lock, DEADLOCK! */
+  /* I must use recursive lock or check if locked? */
+  /* Or make GC assume lock is held? */
+
+  /* Assuming GC handles its own locking or we use recursive mutex. */
+  /* Standard pthreads mutex is NOT recursive by default. */
+  /* lthread implementation: depends. Windows CRITICAL_SECTION is recursive. */
+  /* pthread_mutex can be recursive if initialized with PTHREAD_MUTEX_RECURSIVE. */
+
+  /* I should make g->lock recursive. */
+
   newvect = luaM_reallocvector(L, tb->hash, osize, nsize, TString*);
   if (l_unlikely(newvect == NULL)) {  /* reallocation failed? */
     if (nsize < osize)  /* was it shrinking table? */
@@ -109,6 +128,7 @@ void luaS_resize (lua_State *L, int nsize) {
     if (nsize > osize)
       tablerehash(newvect, osize, nsize);  /* rehash for new size */
   }
+  l_mutex_unlock(&g->lock);
 }
 
 
@@ -213,6 +233,9 @@ static void growstrtab (lua_State *L, stringtable *tb) {
 static TString *internshrstr (lua_State *L, const char *str, size_t l) {
   TString *ts;
   global_State *g = G(L);
+
+  l_mutex_lock(&g->lock);
+
   stringtable *tb = &g->strt;
   unsigned int h = luaS_hash(str, l, g->seed);
   TString **list = &tb->hash[lmod(h, tb->size)];
@@ -223,13 +246,15 @@ static TString *internshrstr (lua_State *L, const char *str, size_t l) {
       /* found! */
       if (isdead(g, ts))  /* dead (but not collected yet)? */
         changewhite(ts);  /* resurrect it */
+      l_mutex_unlock(&g->lock);
       return ts;
     }
   }
   /* else must create a new string */
   if (tb->nuse >= tb->size) {  /* need to grow string table? */
     growstrtab(L, tb);
-    list = &tb->hash[lmod(h, tb->size)];  /* rehash with new size */
+    /* Re-fetch list because resize might have changed table size/hash */
+    list = &tb->hash[lmod(h, tb->size)];
   }
   ts = createstrobj(L, l, LUA_VSHRSTR, h);
   ts->shrlen = cast(ls_byte, l);
@@ -238,6 +263,8 @@ static TString *internshrstr (lua_State *L, const char *str, size_t l) {
   ts->u.hnext = *list;
   *list = ts;
   tb->nuse++;
+
+  l_mutex_unlock(&g->lock);
   return ts;
 }
 
