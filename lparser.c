@@ -1946,8 +1946,19 @@ static void body (LexState *ls, expdesc *e, int ismethod, int line) {
     /* 标准语法: (parlist) block end */
     checknext(ls, '(');
     if (ismethod) {
-      new_localvarliteral(ls, "self");  /* 为方法创建 'self' 参数 */
-      adjustlocalvars(ls, 1);
+      /* 检查是否显式定义了 'self' 参数 */
+      int has_self = 0;
+      if (ls->t.token == TK_NAME) {
+        const char *name = getstr(ls->t.seminfo.ts);
+        if (strcmp(name, "self") == 0) {
+          has_self = 1;
+        }
+      }
+
+      if (!has_self) {
+        new_localvarliteral(ls, "self");  /* 为方法创建 'self' 参数 */
+        adjustlocalvars(ls, 1);
+      }
     }
     TString *varargname = NULL;
     parlist(ls, &varargname);
