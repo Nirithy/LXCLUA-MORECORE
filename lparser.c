@@ -89,6 +89,9 @@ static void newexpr (LexState *ls, expdesc *v);   /* onew表达式的前向声�
 static void superexpr (LexState *ls, expdesc *v); /* osuper表达式的前向声明 */
 static void cond_expr (LexState *ls, expdesc *v); /* 条件表达式的前向声明（不将{作为函数调用） */
 static void constexprstat (LexState *ls);         /* 预处理语句 */
+static void ifexpr (LexState *ls, expdesc *v);    /* if表达式前向声明 */
+static int cond (LexState *ls);                   /* cond前向声明 */
+static Vardesc *getlocalvardesc (FuncState *fs, int vidx); /* getlocalvardesc前向声明 */
 
 static l_noret error_expected (LexState *ls, int token) {
   luaX_syntaxerror(ls,
@@ -581,6 +584,34 @@ static void codename (LexState *ls, expdesc *e) {
 }
 
 
+static void checkforshadowing (LexState *ls, FuncState *fs, TString *name) {
+  /*
+  FuncState *f = fs;
+  while (f) {
+    int i;
+    for (i = cast_int(f->nactvar) - 1; i >= 0; i--) {
+      Vardesc *vd = getlocalvardesc(f, i);
+      if (eqstr(name, vd->vd.name)) {
+        const char *msg = luaO_pushfstring(ls->L, "local '%s' shadows previous declaration", getstr(name));
+        luaX_warning(ls, msg, WT_VAR_SHADOW);
+        goto check_global;
+      }
+    }
+    f = f->prev;
+  }
+
+check_global:
+  {
+    const char *s = getstr(name);
+    if (strcmp(s, "table") == 0 || strcmp(s, "string") == 0 || strcmp(s, "arg") == 0 ||
+        strcmp(s, "io") == 0 || strcmp(s, "os") == 0 || strcmp(s, "math") == 0) {
+       const char *msg = luaO_pushfstring(ls->L, "local '%s' shadows global", s);
+       luaX_warning(ls, msg, WT_GLOBAL_SHADOW);
+    }
+  }
+  */
+}
+
 /*
 ** Register a new local variable in the active 'Proto' (for debug
 ** information).
@@ -608,6 +639,7 @@ static int new_localvar (LexState *ls, TString *name) {
   FuncState *fs = ls->fs;
   Dyndata *dyd = ls->dyd;
   Vardesc *var;
+  checkforshadowing(ls, fs, name);
   checklimit(fs, dyd->actvar.n + 1 - fs->firstlocal,
                  MAXVARS, "local variables");
   luaM_growvector(L, dyd->actvar.arr, dyd->actvar.n + 1,
@@ -615,6 +647,7 @@ static int new_localvar (LexState *ls, TString *name) {
   var = &dyd->actvar.arr[dyd->actvar.n++];
   var->vd.kind = VDKREG;  /* default */
   var->vd.name = name;
+  var->vd.used = 0;
   return dyd->actvar.n - 1 - fs->firstlocal;
 }
 
@@ -744,6 +777,13 @@ static void removevars (FuncState *fs, int tolevel) {
     LocVar *var = localdebuginfo(fs, --fs->nactvar);
     if (var)  /* does it have debug information? */
       var->endpc = fs->pc;
+
+    Vardesc *vd = getlocalvardesc(fs, fs->nactvar);
+    if (!vd->vd.used && vd->vd.kind == VDKREG && getstr(vd->vd.name)[0] != '_') {
+       const char *msg = luaO_pushfstring(fs->ls->L, "unused local variable '%s'", getstr(vd->vd.name));
+       luaX_warning(fs->ls, msg, WT_UNUSED_VAR);
+       lua_pop(fs->ls->L, 1);
+    }
   }
 }
 
@@ -809,6 +849,7 @@ static int searchvar (FuncState *fs, TString *n, expdesc *var) {
         init_exp(var, VCONST, fs->firstlocal + i);
       else  /* real variable */
         init_var(fs, var, i);
+      vd->vd.used = 1;
       return var->k;
     }
   }
@@ -1249,6 +1290,7 @@ static int new_varkind (LexState *ls, TString *name, lu_byte kind) {
   FuncState *fs = ls->fs;
   Dyndata *dyd = ls->dyd;
   Vardesc *var;
+  checkforshadowing(ls, fs, name);
   checklimit(fs, dyd->actvar.n + 1 - fs->firstlocal,
                  MAXVARS, "local variables");
   luaM_growvector(L, dyd->actvar.arr, dyd->actvar.n + 1,
@@ -1256,6 +1298,7 @@ static int new_varkind (LexState *ls, TString *name, lu_byte kind) {
   var = &dyd->actvar.arr[dyd->actvar.n++];
   var->vd.kind = kind;
   var->vd.name = name;
+  var->vd.used = 0;
   return dyd->actvar.n - 1 - fs->firstlocal;
 }
 
@@ -2042,12 +2085,15 @@ static void funcargs (LexState *ls, expdesc *f, int line) {
 ** ============================================================
 */
 
+#define E_NO_COLON 1
 
 static void primaryexp (LexState *ls, expdesc *v) {
   /* primaryexp -> NAME | '(' expr ')' | STRING | constructor | NEW | SUPER */
   switch (ls->t.token) {
     case '(': {
       int line = ls->linenumber;
+      int old_flags = ls->expr_flags;
+      ls->expr_flags = 0;
       luaX_next(ls);
       if (ls->t.token == TK_NAME) {
         if (luaX_lookahead(ls) == TK_WALRUS) {
@@ -2057,6 +2103,7 @@ static void primaryexp (LexState *ls, expdesc *v) {
           luaX_next(ls);
           expdesc e;
           expr(ls, &e);
+          ls->expr_flags = old_flags;
           check_match(ls, ')', '(', save);
           luaK_dischargevars(ls->fs, &e);
           singlevaraux(ls->fs, varname, v, 1);
@@ -2073,6 +2120,7 @@ static void primaryexp (LexState *ls, expdesc *v) {
         }
       }
       expr(ls, v);
+      ls->expr_flags = old_flags;
       check_match(ls, ')', '(', line);
       luaK_dischargevars(ls->fs, v);
       return;
@@ -2427,6 +2475,7 @@ static void suffixedexp (LexState *ls, expdesc *v) {
         break;
       }
       case ':': {  /* ':' NAME funcargs */
+        if (ls->expr_flags & E_NO_COLON) return;
         expdesc key;
         luaX_next(ls);
         codename(ls, &key);
@@ -2631,10 +2680,35 @@ static void suffixedexp (LexState *ls, expdesc *v) {
 }
 
 
+static void ifexpr (LexState *ls, expdesc *v) {
+  FuncState *fs = ls->fs;
+  int condition;
+  int escape = NO_JUMP;
+  int reg;
+
+  luaX_next(ls); /* skip IF */
+  condition = cond(ls);
+  checknext(ls, TK_THEN);
+  expr(ls, v);
+  luaK_exp2nextreg(fs, v);
+  reg = v->u.info;
+  luaK_concat(fs, &escape, luaK_jump(fs));
+  luaK_patchtohere(fs, condition);
+  checknext(ls, TK_ELSE);
+  expr(ls, v);
+  checknext(ls, TK_END);
+  luaK_exp2reg(fs, v, reg);
+  luaK_patchtohere(fs, escape);
+}
+
 static void simpleexp (LexState *ls, expdesc *v) {
   /* simpleexp -> FLT | INT | NIL | TRUE | FALSE | ... |
                   constructor | FUNCTION body | suffixedexp */
   switch (ls->t.token) {
+    case TK_IF: {
+      ifexpr(ls, v);
+      return;
+    }
     case TK_FLT: {
       init_exp(v, VKFLT, 0);
       v->u.nval = ls->t.seminfo.r;
@@ -3584,6 +3658,39 @@ static BinOpr subexpr (LexState *ls, expdesc *v, int limit) {
 
 static void expr (LexState *ls, expdesc *v) {
   subexpr(ls, v, 0);
+  if (ls->t.token == '?') {
+    /* printf("DEBUG: Ternary found at line %d\n", ls->linenumber); */
+    int escape = NO_JUMP;
+    int condition;
+    int reg;
+    FuncState *fs = ls->fs;
+
+    luaX_next(ls); /* skip '?' */
+
+    /* condition is in v */
+    if (v->k == VNIL) v->k = VFALSE;
+    luaK_goiftrue(fs, v);
+    condition = v->f;
+
+    /* true branch */
+    int old_flags = ls->expr_flags;
+    ls->expr_flags |= E_NO_COLON;
+    expr(ls, v);
+    ls->expr_flags = old_flags;
+    luaK_exp2nextreg(fs, v);
+    reg = v->u.info;
+
+    luaK_concat(fs, &escape, luaK_jump(fs));
+    luaK_patchtohere(fs, condition);
+
+    checknext(ls, ':');
+
+    /* false branch */
+    expr(ls, v);
+    luaK_exp2reg(fs, v, reg);
+
+    luaK_patchtohere(fs, escape);
+  }
 }
 
 

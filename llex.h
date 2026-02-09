@@ -68,6 +68,38 @@ enum RESERVED {
 #define NUM_RESERVED	(cast_int(TK_WITH-FIRST_RESERVED + 1))
 
 
+/* Pluto Warning System */
+typedef enum {
+  WT_ALL = 0,
+  WT_VAR_SHADOW,
+  WT_GLOBAL_SHADOW,
+  WT_TYPE_MISMATCH,
+  WT_UNREACHABLE_CODE,
+  WT_EXCESSIVE_ARGUMENTS,
+  WT_BAD_PRACTICE,
+  WT_POSSIBLE_TYPO,
+  WT_NON_PORTABLE_CODE,
+  WT_NON_PORTABLE_BYTECODE,
+  WT_NON_PORTABLE_NAME,
+  WT_IMPLICIT_GLOBAL,
+  WT_UNANNOTATED_FALLTHROUGH,
+  WT_DISCARDED_RETURN,
+  WT_FIELD_SHADOW,
+  WT_UNUSED_VAR,
+  WT_COUNT
+} WarningType;
+
+typedef enum {
+  WS_OFF,
+  WS_ON,
+  WS_ERROR
+} WarningState;
+
+typedef struct {
+  WarningState states[WT_COUNT];
+} WarningConfig;
+
+
 typedef union {
   lua_Number r;
   lua_Integer i;
@@ -127,10 +159,18 @@ typedef struct LexState {
   int npending;
   int pending_idx;
   Table *defines; /* Compile-time constants */
+
+  /* Warnings */
+  WarningConfig warnings;
+  int disable_warnings_next_line;
+
+  /* Expression parsing flags */
+  int expr_flags;
 } LexState;
 
 
 LUAI_FUNC void luaX_init (lua_State *L);
+LUAI_FUNC void luaX_warning (LexState *ls, const char *msg, WarningType wt);
 LUAI_FUNC void luaX_setinput (lua_State *L, LexState *ls, ZIO *z,
                               TString *source, int firstchar);
 LUAI_FUNC TString *luaX_newstring (LexState *ls, const char *str, size_t l);

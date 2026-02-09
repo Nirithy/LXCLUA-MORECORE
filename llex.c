@@ -124,6 +124,26 @@ void luaX_addalias(LexState *ls, TString *name, Token *tokens, int ntokens) {
 
 
 /* ORDER RESERVED */
+static const char* const luaX_warnNames[] = {
+  "all",
+  "var-shadow",
+  "global-shadow",
+  "type-mismatch",
+  "unreachable-code",
+  "excessive-arguments",
+  "bad-practice",
+  "possible-typo",
+  "non-portable-code",
+  "non-portable-bytecode",
+  "non-portable-name",
+  "implicit-global",
+  "unannotated-fallthrough",
+  "discarded-return",
+  "field-shadow",
+  "unused",
+  NULL
+};
+
 static const char *const luaX_tokens [] = {
     "and", "asm", "break", "case", "catch", "command", "const", "continue", "default", "do", "else", "elseif",
     "end", "enum", "export", "false", "finally", "for", "function", "global", "goto", "if", "in", "is", "keyword", "lambda", "local", "nil", "not", "operator", "or",
@@ -144,6 +164,72 @@ static const char *const luaX_tokens [] = {
 
 static l_noret lexerror (LexState *ls, const char *msg, int token);
 
+static void process_warning_comment(LexState *ls, const char *comment) {
+  /* Skip @pluto_warnings */
+  if (strncmp(comment, "@pluto_warnings", 15) != 0) return;
+  comment += 15;
+
+  if (*comment == ':') comment++;
+  else if (*comment == ' ') comment++;
+  else return;
+
+  /* Skip spaces */
+  while (*comment == ' ') comment++;
+
+  if (strstr(comment, "disable-next")) {
+    ls->disable_warnings_next_line = ls->linenumber + 1;
+    return;
+  }
+
+  /* Split by comma */
+  char buffer[256];
+  const char *start = comment;
+  while (*start) {
+    const char *end = strchr(start, ',');
+    if (!end) end = start + strlen(start);
+
+    size_t len = end - start;
+    if (len >= sizeof(buffer)) len = sizeof(buffer) - 1;
+    memcpy(buffer, start, len);
+    buffer[len] = '\0';
+
+    /* Trim spaces from buffer */
+    char *p = buffer;
+    while (*p == ' ') p++;
+    char *endp = p + strlen(p) - 1;
+    while (endp > p && *endp == ' ') *endp-- = '\0';
+
+    /* Process directive: enable-TYPE, disable-TYPE, error-TYPE */
+    WarningState state = WS_ON;
+    const char *name = p;
+    if (strncmp(p, "enable-", 7) == 0) {
+      state = WS_ON;
+      name = p + 7;
+    } else if (strncmp(p, "disable-", 8) == 0) {
+      state = WS_OFF;
+      name = p + 8;
+    } else if (strncmp(p, "error-", 6) == 0) {
+      state = WS_ERROR;
+      name = p + 6;
+    }
+
+    int i;
+    for (i = 0; i < WT_COUNT; i++) {
+      if (strcmp(name, luaX_warnNames[i]) == 0) {
+        if (i == WT_ALL) {
+          int j;
+          for (j = 0; j < WT_COUNT; j++) ls->warnings.states[j] = state;
+        } else {
+          ls->warnings.states[i] = state;
+        }
+        break;
+      }
+    }
+
+    if (*end == '\0') break;
+    start = end + 1;
+  }
+}
 
 static void save (LexState *ls, int c) {
   Mbuffer *b = ls->buff;
@@ -181,6 +267,21 @@ void luaX_init (lua_State *L) {
   }
 }
 
+void luaX_warning (LexState *ls, const char *msg, WarningType wt) {
+  if (ls->linenumber == ls->disable_warnings_next_line) return;
+  if (ls->warnings.states[wt] == WS_OFF) return;
+
+  const char *warnName = luaX_warnNames[wt];
+  if (ls->warnings.states[wt] == WS_ERROR) {
+    const char *err = luaO_pushfstring(ls->L, "%s [error: %s]", msg, warnName);
+    luaX_syntaxerror(ls, err);
+  } else {
+    const char *formatted = luaO_pushfstring(ls->L, "%s:%d: warning: %s [%s]\n",
+                                             getstr(ls->source), ls->linenumber, msg, warnName);
+    lua_warning(ls->L, formatted, 0);
+    lua_pop(ls->L, 1);
+  }
+}
 
 const char *luaX_token2str (LexState *ls, int token) {
   if (token < FIRST_RESERVED) {  /* single-byte symbols? */
@@ -390,6 +491,19 @@ void luaX_setinput (lua_State *L, LexState *ls, ZIO *z, TString *source,
   ls->pending_tokens = NULL;
   ls->npending = 0;
   ls->defines = NULL;
+
+  /* Initialize warnings */
+  ls->disable_warnings_next_line = -1;
+  {
+    int i;
+    for (i = 0; i < WT_COUNT; i++) ls->warnings.states[i] = WS_ON;
+    ls->warnings.states[WT_GLOBAL_SHADOW] = WS_OFF;
+    ls->warnings.states[WT_NON_PORTABLE_CODE] = WS_OFF;
+    ls->warnings.states[WT_NON_PORTABLE_BYTECODE] = WS_OFF;
+    ls->warnings.states[WT_NON_PORTABLE_NAME] = WS_OFF;
+    ls->warnings.states[WT_IMPLICIT_GLOBAL] = WS_OFF;
+    ls->warnings.states[WT_ALL] = WS_OFF;
+  }
 
 #if defined(LUA_COMPAT_GLOBAL)
   /* compatibility mode: "global" is not a reserved word */
@@ -823,8 +937,19 @@ static int llex (LexState *ls, SemInfo *seminfo) {
           }
         }
         /* else short comment */
-        while (!currIsNewline(ls) && ls->current != EOZ)
+        luaZ_resetbuffer(ls->buff);
+        while (!currIsNewline(ls) && ls->current != EOZ) {
+          save(ls, ls->current);
           next(ls);  /* skip until end of line (or end of file) */
+        }
+        /* Parse buffer for @pluto_warnings */
+        save(ls, '\0');
+        const char *comment = luaZ_buffer(ls->buff);
+        const char *directive = strstr(comment, "@pluto_warnings");
+        if (directive) {
+           process_warning_comment(ls, directive);
+        }
+        luaZ_resetbuffer(ls->buff); /* Reset for next token */
         break;
       }
       case '[': {  /* long string or simply '[' */
