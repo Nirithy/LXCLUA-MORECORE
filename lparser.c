@@ -76,6 +76,10 @@ typedef struct BlockCnt {
 static void statement (LexState *ls);
 static void expr (LexState *ls, expdesc *v);
 static void retstat (LexState *ls);
+static TypeHint *gettypehint (LexState *ls);
+static void check_type_compatibility(LexState *ls, TypeHint *target, expdesc *e);
+static TypeHint *typehint_new(LexState *ls);
+static void checktypehint (LexState *ls, TypeHint *th);
 static void breakstat (LexState *ls);
 static void buildglobal (LexState *ls, TString *varname, expdesc *var);
 static int new_varkind (LexState *ls, TString *name, lu_byte kind);
@@ -1858,7 +1862,8 @@ static void parlist (LexState *ls, TString **varargname) {
     do {
       switch (ls->t.token) {
         case TK_NAME: {
-          new_localvar(ls, str_checkname(ls));
+          int vidx = new_localvar(ls, str_checkname(ls));
+          getlocalvardesc(fs, vidx)->vd.hint = gettypehint(ls);
           nparams++;
           break;
         }
@@ -1932,6 +1937,22 @@ static void body (LexState *ls, expdesc *e, int ismethod, int line) {
     TString *varargname = NULL;
     parlist(ls, &varargname);
     checknext(ls, ')');
+    if (testnext(ls, ':')) {
+        if (testnext(ls, '(')) {
+            do {
+                TypeHint *th = typehint_new(ls);
+                checktypehint(ls, th);
+            } while (testnext(ls, ','));
+            checknext(ls, ')');
+        } else {
+            if (ls->t.token == TK_NAME && strcmp(getstr(ls->t.seminfo.ts), "void") == 0) {
+                luaX_next(ls);
+            } else {
+                TypeHint *th = typehint_new(ls);
+                checktypehint(ls, th);
+            }
+        }
+    }
     if (varargname) namedvararg(ls, varargname);
     statlist(ls);  /* 标准语法使用 statlist */
   }
@@ -2040,7 +2061,29 @@ static void funcargs (LexState *ls, expdesc *f, int line) {
       if (ls->t.token == ')')  /* arg list is empty? */
         args.k = VVOID;
       else {
-        explist(ls, &args);
+        TypeHint *f_hint = NULL;
+        if (f->k == VLOCAL) {
+           f_hint = getlocalvardesc(fs, f->u.var.vidx)->vd.hint;
+        }
+        
+        int n = 0;
+        do {
+           if (n > 0) {
+              luaK_exp2nextreg(ls->fs, &args);
+           }
+           expr(ls, &args);
+           
+           if (f_hint) {
+              for (int i=0; i<MAX_TYPE_DESCS; i++) {
+                 if (f_hint->descs[i].type == VT_FUNC) {
+                    if (n < f_hint->descs[i].nparam)
+                       check_type_compatibility(ls, f_hint->descs[i].params[n], &args);
+                 }
+              }
+           }
+           n++;
+        } while (testnext(ls, ','));
+        
         if (hasmultret(args.k))
           luaK_setmultret(fs, &args);
       }
@@ -2153,13 +2196,6 @@ static void primaryexp (LexState *ls, expdesc *v) {
       return;
     }
     case TK_DOLLAR: {
-      /* $func(...) compile-time call OR $macro */
-      /* For now, we assume if it's in primaryexp, it's a value. */
-      /* Pluto allows $lib.func() which evaluates to a constant. */
-      /* Check if it is a supported compile-time function */
-
-      /* If not supported, fallback to _KEYWORDS logic for compatibility */
-
       FuncState *fs = ls->fs;
       int line = ls->linenumber;
       TString *kwname;
@@ -5309,7 +5345,321 @@ static void takestat_full(LexState *ls) {
   adjustlocalvars(ls, nvars);
 }
 
+/* ========================================================================= */
+/* TYPE HINTING AND DESTRUCTURING SUPPORT                                   */
+/* ========================================================================= */
+
+static TypeHint *typehint_new(LexState *ls) {
+  TypeHint *th = luaM_new(ls->L, TypeHint);
+  for (int i = 0; i < MAX_TYPE_DESCS; i++) {
+    th->descs[i].type = VT_NONE;
+    th->descs[i].nparam = -1;
+    th->descs[i].nret = -1;
+    th->descs[i].proto = NULL;
+    th->descs[i].nfields = -1;
+  }
+  th->next = ls->all_type_hints;
+  ls->all_type_hints = th;
+  return th;
+}
+
+static void typehint_free(LexState *ls) {
+  TypeHint *curr = ls->all_type_hints;
+  while (curr) {
+    TypeHint *next = curr->next;
+    luaM_free(ls->L, curr);
+    curr = next;
+  }
+  ls->all_type_hints = NULL;
+}
+
+static void th_emplace_desc(TypeHint *th, TypeDesc td) {
+  for (int i = 0; i < MAX_TYPE_DESCS; i++) {
+    if (th->descs[i].type == td.type) return; /* Already present */
+    if (th->descs[i].type == VT_NONE) {
+      th->descs[i] = td;
+      return;
+    }
+  }
+  /* Full: degrade to ANY */
+  th->descs[0].type = VT_ANY;
+  th->descs[1].type = VT_NONE;
+  th->descs[2].type = VT_NONE;
+}
+
+static void checktypehint (LexState *ls, TypeHint *th);
+
+static TypeHint* get_named_type_opt(LexState* ls, const TString* name) {
+  const TValue *o = luaH_getstr(ls->named_types, name);
+  if (!ttisnil(o)) {
+    return (TypeHint*)pvalue(o);
+  }
+  /* printf("DEBUG: named type '%s' not found\n", getstr(name)); */
+  return NULL;
+}
+
+static void checktypehint (LexState *ls, TypeHint *th) {
+  if (testnext(ls, '?')) {
+    TypeDesc td; td.type = VT_NULL;
+    th_emplace_desc(th, td);
+  }
+  do {
+    if (ls->t.token == '{') { /* Table type */
+      luaX_next(ls);
+      TypeDesc td;
+      td.type = VT_TABLE;
+      td.nfields = 0;
+      while (ls->t.token != '}') {
+        TString *ts = str_checkname(ls);
+        checknext(ls, ':');
+        TypeHint *fieldth = typehint_new(ls);
+        checktypehint(ls, fieldth);
+        if (td.nfields < MAX_TYPED_FIELDS) {
+          td.names[td.nfields] = ts;
+          td.hints[td.nfields] = fieldth;
+          td.nfields++;
+        }
+        if (!testnext(ls, ',') && !testnext(ls, ';')) break;
+      }
+      checknext(ls, '}');
+      th_emplace_desc(th, td);
+      continue;
+    }
+    
+    TString *ts = str_checkname(ls);
+    const char *tname = getstr(ts);
+    TypeDesc td;
+    td.type = VT_NONE;
+    
+    if (strcmp(tname, "number") == 0) td.type = VT_NUMBER;
+    else if (strcmp(tname, "int") == 0 || strcmp(tname, "integer") == 0) td.type = VT_INT;
+    else if (strcmp(tname, "float") == 0) td.type = VT_FLT;
+    else if (strcmp(tname, "table") == 0) td.type = VT_TABLE;
+    else if (strcmp(tname, "string") == 0) td.type = VT_STR;
+    else if (strcmp(tname, "boolean") == 0 || strcmp(tname, "bool") == 0) td.type = VT_BOOL;
+    else if (strcmp(tname, "function") == 0) {
+      td.type = VT_FUNC;
+      td.nparam = -1;
+      td.nret = -1;
+      if (testnext(ls, '(')) {
+         /* Parse params */
+         td.nparam = 0;
+         if (ls->t.token != ')') {
+           do {
+             if (ls->t.token == TK_NAME && luaX_lookahead(ls) == ':') {
+               checknext(ls, TK_NAME); /* name */
+               checknext(ls, ':');
+             }
+             if (td.nparam < MAX_TYPED_PARAMS) {
+               td.params[td.nparam] = typehint_new(ls);
+               checktypehint(ls, td.params[td.nparam]);
+               td.nparam++;
+             } else {
+               TypeHint *ign = typehint_new(ls);
+               checktypehint(ls, ign);
+             }
+           } while (testnext(ls, ','));
+         }
+         checknext(ls, ')');
+      }
+      if (ls->t.token == ':') {
+         luaX_next(ls);
+         td.nret = 0;
+         if (testnext(ls, '(')) {
+             do {
+                 if (td.nret < MAX_TYPED_RETURNS) {
+                     td.returns[td.nret] = typehint_new(ls);
+                     checktypehint(ls, td.returns[td.nret]);
+                     td.nret++;
+                 } else {
+                     TypeHint *ign = typehint_new(ls);
+                     checktypehint(ls, ign);
+                 }
+             } while (testnext(ls, ','));
+             checknext(ls, ')');
+         } else {
+             /* Single return type or void */
+             if (ls->t.token == TK_NAME && strcmp(getstr(ls->t.seminfo.ts), "void") == 0) {
+                 luaX_next(ls);
+                 td.nret = 0;
+             } else {
+                 td.nret = 1;
+                 td.returns[0] = typehint_new(ls);
+                 checktypehint(ls, td.returns[0]);
+             }
+         }
+      }
+    }
+    else if (strcmp(tname, "any") == 0) td.type = VT_ANY;
+    else if (strcmp(tname, "nil") == 0) td.type = VT_NIL;
+    else if (strcmp(tname, "void") == 0) {
+       td.type = VT_NULL;
+    }
+    else if (strcmp(tname, "userdata") == 0) td.type = VT_USERDATA;
+    else {
+      TypeHint *named = get_named_type_opt(ls, ts);
+      if (named) {
+        /* Merge named type */
+        for (int i=0; i<MAX_TYPE_DESCS; i++) {
+           if (named->descs[i].type != VT_NONE)
+             th_emplace_desc(th, named->descs[i]);
+        }
+        td.type = VT_NONE; /* processed */
+      } else {
+        luaX_syntaxerror(ls, luaO_pushfstring(ls->L, "unknown type hint '%s'", tname));
+      }
+    }
+    
+    if (td.type != VT_NONE) th_emplace_desc(th, td);
+    
+  } while (testnext(ls, '|'));
+  
+  if (testnext(ls, '?')) {
+     TypeDesc td; td.type = VT_NULL;
+     th_emplace_desc(th, td);
+  }
+}
+
+static TypeHint *gettypehint (LexState *ls) {
+  if (testnext(ls, ':')) {
+    TypeHint *th = typehint_new(ls);
+    checktypehint(ls, th);
+    return th;
+  }
+  return NULL;
+}
+
+static void check_type_compatibility(LexState *ls, TypeHint *target, expdesc *e) {
+  /* Very basic check for literals */
+  if (!target || !e) return;
+  
+  ValType e_type = VT_NONE;
+  if (e->k == VKINT) e_type = VT_INT;
+  else if (e->k == VKFLT) e_type = VT_FLT;
+  else if (e->k == VKSTR) e_type = VT_STR;
+  else if (e->k == VTRUE || e->k == VFALSE) e_type = VT_BOOL;
+  else if (e->k == VNIL) e_type = VT_NIL;
+  
+  if (e_type == VT_NONE) return; /* Unknown compile time type */
+  
+  int compatible = 0;
+  for (int i=0; i<MAX_TYPE_DESCS; i++) {
+    ValType t = target->descs[i].type;
+    if (t == VT_ANY) { compatible = 1; break; }
+    if (t == e_type) { compatible = 1; break; }
+    if (t == VT_NUMBER && (e_type == VT_INT || e_type == VT_FLT)) { compatible = 1; break; }
+    if (t == VT_BOOL && (e_type == VT_BOOL)) { compatible = 1; break; }
+    if (t == VT_NULL && e_type == VT_NIL) { compatible = 1; break; }
+  }
+  
+  if (!compatible) {
+    luaX_warning(ls, "type mismatch", WT_TYPE_MISMATCH);
+  }
+}
+
+/* Destructuring support */
+static void destructuring (LexState *ls) {
+   /* local {a, b} = t */
+   TString *names[MAXVARS];
+   int nnames = 0;
+   luaX_next(ls); /* skip { */
+   do {
+     names[nnames++] = str_checkname(ls);
+   } while (testnext(ls, ',') && nnames < MAXVARS);
+   checknext(ls, '}');
+   
+   checknext(ls, '=');
+   expdesc e;
+   expr(ls, &e);
+   
+   int base = luaY_nvarstack(ls->fs);
+   
+   /* Move table to safe reg */
+   luaK_exp2reg(ls->fs, &e, base + nnames);
+   int tbl_reg = base + nnames;
+   /* Reserve registers for locals + table temp */
+   if (ls->fs->freereg < tbl_reg + 1)
+       ls->fs->freereg = tbl_reg + 1;
+   
+   for (int i=0; i<nnames; i++) {
+     new_localvar(ls, names[i]);
+     
+     expdesc t;
+     init_exp(&t, VNONRELOC, tbl_reg); 
+     expdesc k;
+     init_exp(&k, VKSTR, 0);
+     k.u.strval = names[i];
+     
+     luaK_indexed(ls->fs, &t, &k); 
+     /* 't' now contains the indexed variable expression */
+     
+     expdesc lvar;
+     init_exp(&lvar, VLOCAL, 0);
+     lvar.u.var.vidx = 0;
+     lvar.u.var.ridx = base + i;
+     
+     luaK_storevar(ls->fs, &lvar, &t);
+   }
+   
+   adjustlocalvars(ls, nnames);
+   ls->fs->freereg = base + nnames;
+}
+
+static void arraydestructuring (LexState *ls) {
+   /* local [a, b] = t */
+   TString *names[MAXVARS];
+   int nnames = 0;
+   luaX_next(ls); /* skip [ */
+   do {
+     names[nnames++] = str_checkname(ls);
+   } while (testnext(ls, ',') && nnames < MAXVARS);
+   checknext(ls, ']');
+   
+   checknext(ls, '=');
+   expdesc e;
+   expr(ls, &e);
+   
+   int base = luaY_nvarstack(ls->fs);
+   
+   /* Move table to safe reg */
+   luaK_exp2reg(ls->fs, &e, base + nnames);
+   int tbl_reg = base + nnames;
+   /* Reserve registers for locals + table temp */
+   if (ls->fs->freereg < tbl_reg + 1)
+       ls->fs->freereg = tbl_reg + 1;
+   
+   for (int i=0; i<nnames; i++) {
+     new_localvar(ls, names[i]);
+     expdesc t;
+     init_exp(&t, VNONRELOC, tbl_reg); 
+     expdesc k;
+     init_exp(&k, VKINT, 0);
+     k.u.ival = i + 1;
+     
+     luaK_indexed(ls->fs, &t, &k); 
+     /* 't' now contains the indexed variable expression */
+     
+     expdesc lvar;
+     init_exp(&lvar, VLOCAL, 0);
+     lvar.u.var.vidx = 0;
+     lvar.u.var.ridx = base + i;
+     
+     luaK_storevar(ls->fs, &lvar, &t);
+   }
+   
+   adjustlocalvars(ls, nnames);
+   ls->fs->freereg = base + nnames;
+}
+
 static void localstat (LexState *ls, int isexport) {
+  if (ls->t.token == '{') {
+    destructuring(ls);
+    return;
+  }
+  if (ls->t.token == '[') {
+    arraydestructuring(ls);
+    return;
+  }
   /* stat -> LOCAL ATTRIB NAME ATTRIB { ',' NAME ATTRIB } ['=' explist] */
   /* stat -> CONST NAME ATTRIB { ',' NAME ATTRIB } ['=' explist] */
   FuncState *fs = ls->fs;
@@ -5342,6 +5692,7 @@ static void localstat (LexState *ls, int isexport) {
       }
     }
     vidx = new_localvar(ls, varname);
+    getlocalvardesc(fs, vidx)->vd.hint = gettypehint(ls);
     if (isexport) {
         add_export(ls, varname);
     }
@@ -5349,8 +5700,13 @@ static void localstat (LexState *ls, int isexport) {
     getlocalvardesc(fs, vidx)->vd.kind = kind;
     nvars++;
   } while (testnext(ls, ','));
-  if (testnext(ls, '='))
+  if (testnext(ls, '=')) {
     nexps = explist(ls, &e);
+    if (nvars == nexps) {
+       Vardesc *lastvar = getlocalvardesc(fs, vidx);
+       check_type_compatibility(ls, lastvar->vd.hint, &e);
+    }
+  }
   else {
     e.k = VVOID;
     nexps = 0;
@@ -9353,7 +9709,8 @@ static int is_preprocessor_directive(const char *name) {
          strcmp(name, "else") == 0 ||
          strcmp(name, "elseif") == 0 ||
          strcmp(name, "end") == 0 ||
-         strcmp(name, "haltcompiler") == 0;
+         strcmp(name, "haltcompiler") == 0 ||
+         strcmp(name, "type") == 0;
 }
 
 static void parse_alias(LexState *ls) {
@@ -9399,8 +9756,6 @@ static int eval_const_condition(LexState *ls) {
      val = 0;
   }
   luaX_next(ls); /* consume value */
-
-  /* consume trailing tokens in condition if any (e.g. 'then' if user typed it, though pluto uses none or 'then') */
   if (ls->t.token == TK_THEN) luaX_next(ls);
 
   return val;
@@ -9581,6 +9936,19 @@ static void constexprstat (LexState *ls) {
   else if (strcmp(name, "define") == 0) {
      constexprdefinestat(ls);
   }
+  else if (strcmp(name, "type") == 0) {
+     luaX_next(ls); /* skip 'type' */
+     TString *name = str_checkname(ls);
+     checknext(ls, '=');
+     TypeHint *th = typehint_new(ls);
+     checktypehint(ls, th);
+     
+     TValue key, val;
+     setsvalue(ls->L, &key, name);
+     setpvalue(&val, th);
+     luaH_set(ls->L, ls->named_types, &key, &val);
+     /* printf("DEBUG: defined type '%s'\n", getstr(name)); */
+  }
   else {
      /* unknown directive - ignore line */
      luaX_next(ls);
@@ -9610,7 +9978,9 @@ static void statement (LexState *ls) {
       if (la == TK_NAME) {
          TString *ts = ls->lookahead.seminfo.ts;
          const char *name = getstr(ts);
+         /* printf("DEBUG: TK_DOLLAR followed by NAME '%s'\n", name); */
          if (is_preprocessor_directive(name)) {
+            /* printf("DEBUG: calling constexprstat for '%s'\n", name); */
             constexprstat(ls);
             break;
          }
@@ -9894,6 +10264,10 @@ LClosure *luaY_parser (lua_State *L, ZIO *z, Mbuffer *buff,
   lexstate.h = luaH_new(L);  /* create table for scanner */
   sethvalue2s(L, L->top.p, lexstate.h);  /* anchor it */
   luaD_inctop(L);
+  lexstate.named_types = luaH_new(L);  /* create table for named types */
+  sethvalue2s(L, L->top.p, lexstate.named_types);  /* anchor it */
+  luaD_inctop(L);
+  lexstate.all_type_hints = NULL;
   funcstate.f = cl->p = luaF_newproto(L);
   luaC_objbarrier(L, cl, cl->p);
   funcstate.f->source = luaS_new(L, name);  /* create and anchor TString */
@@ -9908,6 +10282,8 @@ LClosure *luaY_parser (lua_State *L, ZIO *z, Mbuffer *buff,
   lua_assert(!funcstate.prev && funcstate.nups == 1 && !lexstate.fs);
   /* all scopes should be correctly finished */
   lua_assert(dyd->actvar.n == 0 && dyd->gt.n == 0 && dyd->label.n == 0);
+  typehint_free(&lexstate);
+  L->top.p--;  /* remove named types table */
   L->top.p--;  /* remove scanner's table */
   return cl;  /* closure is on the stack, too */
 }

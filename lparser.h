@@ -103,11 +103,56 @@ typedef struct expdesc {
 /* test for global variables */
 #define varglobal(v)	((v)->vd.kind >= GDKREG)
 
+/* types of values, for type hinting and propagation */
+typedef enum {
+  VT_NONE = 0,
+  VT_ANY,
+  VT_NULL,  /* used to represent an implicit nil (when the assignment has too few values) */
+  VT_NIL,
+  VT_NUMBER,
+  VT_INT,
+  VT_FLT,
+  VT_BOOL,
+  VT_STR,
+  VT_TABLE,
+  VT_FUNC,
+  VT_USERDATA,
+} ValType;
+
+struct TypeHint;
+
+#define MAX_TYPED_RETURNS 3
+#define MAX_TYPED_PARAMS 7
+#define MAX_TYPED_FIELDS 5
+
+typedef struct TypeDesc {
+  ValType type;
+  /* function info */
+  int8_t nparam;
+  int8_t nret;
+  Proto* proto;
+  struct TypeHint* returns[MAX_TYPED_RETURNS];
+  struct TypeHint* params[MAX_TYPED_PARAMS];
+
+  /* table info */
+  int8_t nfields;
+  TString* names[MAX_TYPED_FIELDS];
+  struct TypeHint* hints[MAX_TYPED_FIELDS];
+} TypeDesc;
+
+#define MAX_TYPE_DESCS 3
+
+typedef struct TypeHint {
+  TypeDesc descs[MAX_TYPE_DESCS];
+  struct TypeHint *next; /* For memory management */
+} TypeHint;
+
 /* description of an active local variable */
 typedef union Vardesc {
   struct {
     TValuefields;  /* constant value (if it is a compile-time constant) */
     lu_byte kind;
+    struct TypeHint *hint; /* type hint */
     lu_byte ridx;  /* register holding the variable */
     short pidx;  /* index of the variable in the Proto's 'locvars' array */
     TString *name;  /* variable name */

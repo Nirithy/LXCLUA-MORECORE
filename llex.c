@@ -165,8 +165,7 @@ static const char *const luaX_tokens [] = {
 static l_noret lexerror (LexState *ls, const char *msg, int token);
 
 static void process_warning_comment(LexState *ls, const char *comment) {
-  /* Skip @pluto_warnings */
-  if (strncmp(comment, "@pluto_warnings", 15) != 0) return;
+  if (strncmp(comment, "@warnings", 15) != 0) return;
   comment += 15;
 
   if (*comment == ':') comment++;
@@ -942,10 +941,10 @@ static int llex (LexState *ls, SemInfo *seminfo) {
           save(ls, ls->current);
           next(ls);  /* skip until end of line (or end of file) */
         }
-        /* Parse buffer for @pluto_warnings */
+     
         save(ls, '\0');
         const char *comment = luaZ_buffer(ls->buff);
-        const char *directive = strstr(comment, "@pluto_warnings");
+        const char *directive = strstr(comment, "@warnings");
         if (directive) {
            process_warning_comment(ls, directive);
         }

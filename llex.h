@@ -68,7 +68,6 @@ enum RESERVED {
 #define NUM_RESERVED	(cast_int(TK_WITH-FIRST_RESERVED + 1))
 
 
-/* Pluto Warning System */
 typedef enum {
   WT_ALL = 0,
   WT_VAR_SHADOW,
@@ -159,6 +158,8 @@ typedef struct LexState {
   int npending;
   int pending_idx;
   Table *defines; /* Compile-time constants */
+  Table *named_types; /* Named types */
+  struct TypeHint *all_type_hints; /* List of allocated type hints */
 
   /* Warnings */
   WarningConfig warnings;
