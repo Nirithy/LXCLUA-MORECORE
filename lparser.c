@@ -3645,6 +3645,7 @@ static UnOpr getunopr (int op) {
     case '-': return OPR_MINUS;
     case '~': return OPR_BNOT;
     case '#': return OPR_LEN;
+    case TK_AWAIT: return OPR_AWAIT;
     default: return OPR_NOUNOPR;
   }
 }
@@ -3723,7 +3724,34 @@ static BinOpr subexpr (LexState *ls, expdesc *v, int limit) {
     int line = ls->linenumber;
     luaX_next(ls);  /* skip operator */
     subexpr(ls, v, UNARY_PRIORITY);
-    luaK_prefix(ls->fs, uop, v, line);
+    if (uop == OPR_AWAIT) {
+        FuncState *fs = ls->fs;
+        expdesc f;
+        /* Get coroutine.yield */
+        singlevaraux(fs, luaS_newliteral(ls->L, "coroutine"), &f, 1);
+        if (f.k == VVOID) {
+            expdesc key;
+            singlevaraux(fs, ls->envn, &f, 1);
+            codestring(&key, luaS_newliteral(ls->L, "coroutine"));
+            luaK_indexed(fs, &f, &key);
+        }
+        luaK_exp2anyreg(fs, &f);
+        expdesc key;
+        codestring(&key, luaS_newliteral(ls->L, "yield"));
+        luaK_indexed(fs, &f, &key);
+
+        luaK_exp2nextreg(fs, &f);
+        int func_reg = f.u.info;
+
+        luaK_exp2nextreg(fs, v);
+        int arg_reg = v->u.info;
+
+        init_exp(v, VCALL, luaK_codeABC(fs, OP_CALL, func_reg, 2, 2));
+        fs->freereg = func_reg + 1;
+        luaK_fixline(fs, line);
+    } else {
+        luaK_prefix(ls->fs, uop, v, line);
+    }
   }
   else simpleexp(ls, v);
   /* expand while operators have priorities higher than 'limit' */
@@ -4996,7 +5024,7 @@ static void withstat (LexState *ls, int line) {
 //========================================================================================
 
 
-static void localfunc (LexState *ls, int isexport) {
+static void localfunc (LexState *ls, int isexport, int isasync) {
   expdesc b;
   FuncState *fs = ls->fs;
   int fvar = fs->nactvar;  /* function's variable index */
@@ -5005,6 +5033,29 @@ static void localfunc (LexState *ls, int isexport) {
   if (isexport) add_export(ls, name);
   adjustlocalvars(ls, 1);  /* enter its scope */
   body(ls, &b, 0, ls->linenumber);  /* function created in next register */
+
+  if (isasync) {
+      expdesc wrap;
+      singlevaraux(fs, luaS_newliteral(ls->L, "__async_wrap"), &wrap, 1);
+      if (wrap.k == VVOID) {
+          expdesc key;
+          singlevaraux(fs, ls->envn, &wrap, 1);
+          codestring(&key, luaS_newliteral(ls->L, "__async_wrap"));
+          luaK_indexed(fs, &wrap, &key);
+      }
+
+      int func_reg = fs->freereg;
+      luaK_reserveregs(fs, 1);
+      luaK_exp2reg(fs, &wrap, func_reg);
+
+      int arg_reg = fs->freereg;
+      luaK_reserveregs(fs, 1);
+      luaK_exp2reg(fs, &b, arg_reg);
+
+      init_exp(&b, VCALL, luaK_codeABC(fs, OP_CALL, func_reg, 2, 2));
+      fs->freereg = func_reg + 1;
+  }
+
   if (fs->f->p[fs->np - 1]->nodiscard) {
      getlocalvardesc(fs, fvar)->vd.nodiscard = 1;
   }
@@ -8333,7 +8384,7 @@ static void operatorstat (LexState *ls, int line) {
 }
 
 
-static void funcstat (LexState *ls, int line) {
+static void funcstat (LexState *ls, int line, int isasync) {
   /* funcstat -> FUNCTION funcname body */
   int ismethod;
   expdesc v, b;
@@ -8341,6 +8392,29 @@ static void funcstat (LexState *ls, int line) {
   ismethod = funcname(ls, &v);
   check_readonly(ls, &v);
   body(ls, &b, ismethod, line);
+
+  if (isasync) {
+      expdesc wrap;
+      FuncState *fs = ls->fs;
+      singlevaraux(fs, luaS_newliteral(ls->L, "__async_wrap"), &wrap, 1);
+      if (wrap.k == VVOID) {
+          expdesc key;
+          singlevaraux(fs, ls->envn, &wrap, 1);
+          codestring(&key, luaS_newliteral(ls->L, "__async_wrap"));
+          luaK_indexed(fs, &wrap, &key);
+      }
+
+      int func_reg = fs->freereg;
+      luaK_reserveregs(fs, 1);
+      luaK_exp2reg(fs, &wrap, func_reg);
+
+      int arg_reg = fs->freereg;
+      luaK_reserveregs(fs, 1);
+      luaK_exp2reg(fs, &b, arg_reg);
+
+      init_exp(&b, VCALL, luaK_codeABC(fs, OP_CALL, func_reg, 2, 2));
+      fs->freereg = func_reg + 1;
+  }
 
   luaK_storevar(ls->fs, &v, &b);
   luaK_fixline(ls->fs, line);  /* definition "happens" in the first line */
@@ -10140,8 +10214,17 @@ static void statement (LexState *ls) {
       asmstat(ls, line);
       break;
     }
+    case TK_ASYNC: {  /* stat -> async function */
+      luaX_next(ls);
+      if (ls->t.token == TK_FUNCTION) {
+          funcstat(ls, line, 1);
+      } else {
+          luaX_syntaxerror(ls, "expected 'function' after 'async'");
+      }
+      break;
+    }
     case TK_FUNCTION: {  /* stat -> funcstat */
-      funcstat(ls, line);
+      funcstat(ls, line, 0);
       break;
     }
     case TK_ENUM: {  /* stat -> enumstat */
@@ -10151,7 +10234,7 @@ static void statement (LexState *ls) {
     case TK_EXPORT: {
       luaX_next(ls);
       if (testnext(ls, TK_FUNCTION)) {
-        localfunc(ls, 1);
+        localfunc(ls, 1, 0);
       }
       else if (testnext(ls, TK_LOCAL)) {
         localstat(ls, 1);
@@ -10215,7 +10298,12 @@ static void statement (LexState *ls) {
     case TK_LOCAL: {  /* stat -> localstat */
       luaX_next(ls);  /* skip LOCAL */
       if (testnext(ls, TK_FUNCTION))  /* local function? */
-        localfunc(ls, 0);
+        localfunc(ls, 0, 0);
+      else if (ls->t.token == TK_ASYNC) {
+          luaX_next(ls);
+          checknext(ls, TK_FUNCTION);
+          localfunc(ls, 0, 1);
+      }
       else if (testnext(ls, TK_TAKE))  /* local take {...} = expr 解构? */
         takestat_full(ls);
       else
