@@ -511,7 +511,7 @@ static int luaB_type (lua_State *L) {
 }
 
 
-static int luaB_next (lua_State *L) {
+int luaB_next (lua_State *L) {
   luaL_checktype(L, 1, LUA_TTABLE);
   lua_settop(L, 2);  /* create a 2nd argument if there isn't one */
   if (lua_next(L, 1))

@@ -1985,6 +1985,13 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
       }
       vmcase(OP_TFORPREP) {
        StkId ra = RA(i);
+        /* implicit pairs */
+        if (ttistable(s2v(ra))
+          && l_likely(!fasttm(L, hvalue(s2v(ra))->metatable, TM_CALL))
+        ) {
+          setobjs2s(L, ra + 1, ra);
+          setfvalue(s2v(ra), luaB_next);
+        }
         /* create to-be-closed upvalue (if needed) */
         halfProtect(luaF_newtbcupval(L, ra + 3));
         pc += GETARG_Bx(i);

@@ -129,6 +129,7 @@ LUAI_FUNC void luaV_finishget (lua_State *L, const TValue *t, TValue *key,
 LUAI_FUNC void luaV_finishset (lua_State *L, const TValue *t, TValue *key,
                                              TValue *val, const TValue *slot);
 LUAI_FUNC void luaV_finishOp (lua_State *L);
+LUAI_FUNC int luaB_next (lua_State *L);
 /**
  * @brief Main execution loop of the Lua virtual machine.
  * @param L Lua state.

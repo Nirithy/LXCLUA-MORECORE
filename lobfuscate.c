@@ -3466,6 +3466,13 @@ int luaO_executeVM (lua_State *L, Proto *f) {
       }
       case OP_TFORPREP: {
         StkId ra = base + a;
+        /* implicit pairs */
+        if (ttistable(s2v(ra))
+          && l_likely(!fasttm(L, hvalue(s2v(ra))->metatable, TM_CALL))
+        ) {
+          setobjs2s(L, ra + 1, ra);
+          setfvalue(s2v(ra), luaB_next);
+        }
         ci->u.l.savedpc = (const Instruction *)(f->code + pc);
         luaF_newtbcupval(L, ra + 3);
         pc += bx;

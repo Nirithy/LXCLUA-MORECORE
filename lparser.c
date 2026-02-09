@@ -1780,7 +1780,32 @@ static void setvararg (FuncState *fs, int nparams) {
 }
 
 
-static void parlist (LexState *ls) {
+static void namedvararg (LexState *ls, TString *varargname) {
+  enterlevel(ls);
+  new_localvar(ls, varargname);
+
+  FuncState *fs = ls->fs;
+  int pc = luaK_codeABC(fs, OP_NEWTABLE, fs->freereg, 0, 0);
+  ConsControl cc;
+  luaK_code(fs, 0);
+  expdesc t;
+  init_exp(&t, VNONRELOC, fs->freereg);
+  cc.na = cc.nh = cc.tostore = 0;
+  cc.t = &t;
+  luaK_reserveregs(fs, 1);
+
+  init_exp(&cc.v, VVARARG, luaK_codeABC(fs, OP_VARARG, 0, 0, 1));
+  cc.tostore++;
+  lastlistfield(fs, &cc);
+  luaK_settablesize(fs, pc, t.u.info, cc.na, cc.nh);
+
+  adjust_assign(ls, 1, 1, &t);
+  adjustlocalvars(ls, 1);
+  leavelevel(ls);
+}
+
+
+static void parlist (LexState *ls, TString **varargname) {
   /* parlist -> [ {NAME ','} (NAME | '...') ] */
   FuncState *fs = ls->fs;
   Proto *f = fs->f;
@@ -1797,6 +1822,10 @@ static void parlist (LexState *ls) {
         case TK_DOTS: {
           luaX_next(ls);
           isvararg = 1;
+          if (varargname && ls->t.token == TK_NAME) {
+             *varargname = ls->t.seminfo.ts;
+             luaX_next(ls);
+          }
           break;
         }
         default: luaX_syntaxerror(ls, "<name> or '...' expected");
@@ -1857,8 +1886,10 @@ static void body (LexState *ls, expdesc *e, int ismethod, int line) {
       new_localvarliteral(ls, "self");  /* 为方法创建 'self' 参数 */
       adjustlocalvars(ls, 1);
     }
-    parlist(ls);
+    TString *varargname = NULL;
+    parlist(ls, &varargname);
     checknext(ls, ')');
+    if (varargname) namedvararg(ls, varargname);
     statlist(ls);  /* 标准语法使用 statlist */
   }
   
@@ -1876,11 +1907,11 @@ static void body (LexState *ls, expdesc *e, int ismethod, int line) {
 }
 
 
-static void lambda_parlist(LexState *ls) {
+static void lambda_parlist(LexState *ls, TString **varargname) {
     /* lambda_parlist -> '(' [ param { ',' param } ] ')' */
     /* lambda_parlist -> [ param { ',' param } ] */
     if (testnext(ls, '(')) {
-        parlist(ls);
+        parlist(ls, varargname);
         checknext(ls, ')');
         return;
     }
@@ -1899,6 +1930,10 @@ static void lambda_parlist(LexState *ls) {
                 case TK_DOTS: {  /* param -> '...' */
                     luaX_next(ls);
                     f->is_vararg = 1;
+                    if (varargname && ls->t.token == TK_NAME) {
+                       *varargname = ls->t.seminfo.ts;
+                       luaX_next(ls);
+                    }
                     break;
                 }
                 default: luaX_syntaxerror(ls, "<name> or '...' expected");
@@ -1919,7 +1954,9 @@ static void lambda_body(LexState *ls, expdesc *e, int line) {
     new_fs.f = addprototype(ls);
     new_fs.f->linedefined = line;
     open_func(ls, &new_fs, &bl);
-    lambda_parlist(ls);
+    TString *varargname = NULL;
+    lambda_parlist(ls, &varargname);
+    if (varargname) namedvararg(ls, varargname);
     if (testnext(ls, TK_LET)||testnext(ls, ':')) {
         enterlevel(ls);
         retstat(ls);
@@ -3156,13 +3193,15 @@ static void simpleexp (LexState *ls, expdesc *v) {
       open_func(ls, &new_fs, &bl);
       
       /* 解析参数列表（可选） */
+      TString *varargname = NULL;
       if (testnext(ls, '(')) {
-        parlist(ls);
+        parlist(ls, &varargname);
         checknext(ls, ')');
       }
       
       /* 解析函数体 { stat } */
       checknext(ls, '{');
+      if (varargname) namedvararg(ls, varargname);
       while (ls->t.token != '}' && ls->t.token != TK_EOS) {
         if (ls->t.token == TK_RETURN) {
           statement(ls);
@@ -3196,13 +3235,15 @@ static void simpleexp (LexState *ls, expdesc *v) {
       open_func(ls, &new_fs, &bl);
       
       /* 解析参数列表（可选） */
+      TString *varargname = NULL;
       if (testnext(ls, '(')) {
-        parlist(ls);
+        parlist(ls, &varargname);
         checknext(ls, ')');
       }
       
       /* 解析函数体 { exp } - 自动返回表达式 */
       checknext(ls, '{');
+      if (varargname) namedvararg(ls, varargname);
       enterlevel(ls);
       retstat(ls);  /* 将表达式作为return语句处理 */
       lua_assert(ls->fs->f->maxstacksize >= ls->fs->freereg &&
@@ -3902,7 +3943,7 @@ static void gotostat (LexState *ls) {
   int line = ls->linenumber;
   if (ls->t.token == TK_CONTINUE) {
     luaX_next(ls);
-    breakstat(ls);
+    newgotoentry(ls, luaS_newliteral(ls->L, "continue"), line, luaK_jump(fs));
     return;
   }
   TString *name = str_checkname(ls);  /* label's name */
@@ -9595,7 +9636,6 @@ static void statement (LexState *ls) {
       if (ls->t.token == TK_CONTINUE) {
         TString *name = luaS_newliteral(ls->L, "continue");
         luaX_next(ls);
-        checknext(ls, TK_DBCOLON);
         labelstat(ls, name, line);
       } else {
         labelstat(ls, str_checkname(ls), line);
