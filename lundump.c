@@ -62,6 +62,7 @@ typedef struct {
   lua_Unsigned nstr;  /* number of strings in the list */
   lu_byte fixed;  /* dump is fixed in memory */
   int is_standard; /* flag to indicate standard Lua bytecode */
+  int force_standard; /* flag to force standard Lua bytecode */
 } LoadState;
 
 
@@ -1110,7 +1111,7 @@ static void checkHeader (LoadState *S) {
   int b1 = loadByte(S);
   int b2 = zgetc(S->Z); /* Peek/Read next byte */
 
-  if (b1 == sizeof(Instruction) && b2 == sizeof(lua_Integer)) {
+  if (!S->force_standard && b1 == sizeof(Instruction) && b2 == sizeof(lua_Integer)) {
     S->is_standard = 0;
 
     /* Continue verifying XCLUA header */
@@ -1173,7 +1174,7 @@ static void checkHeader (LoadState *S) {
 /*
 ** Load precompiled chunk.
 */
-LClosure *luaU_undump(lua_State *L, ZIO *Z, const char *name) {
+LClosure *luaU_undump(lua_State *L, ZIO *Z, const char *name, int force_standard) {
   LoadState S;
   LClosure *cl;
   if (*name == '@' || *name == '=')
@@ -1185,6 +1186,7 @@ LClosure *luaU_undump(lua_State *L, ZIO *Z, const char *name) {
   S.L = L;
   S.Z = Z;
   S.offset = 1;
+  S.force_standard = force_standard;
   checkHeader(&S);
 
   lu_byte nupvalues;

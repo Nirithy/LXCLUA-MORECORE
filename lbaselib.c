@@ -599,6 +599,21 @@ static int luaB_loadfile (lua_State *L) {
   return load_aux(L, status, env);
 }
 
+static int luaB_loadsfile (lua_State *L) {
+  const char *fname = luaL_optstring(L, 1, NULL);
+  const char *mode = luaL_optstring(L, 2, NULL);
+  char new_mode[16];
+  if (mode) {
+    if (strlen(mode) > 10) return luaL_error(L, "mode string too long");
+    snprintf(new_mode, sizeof(new_mode), "%sS", mode);
+  } else {
+    strcpy(new_mode, "btS");
+  }
+  int env = (!lua_isnone(L, 3) ? 3 : 0);  /* 'env' index or 0 if no 'env' */
+  int status = luaL_loadfilex(L, fname, new_mode);
+  return load_aux(L, status, env);
+}
+
 
 /*
 ** {===========================================
@@ -1308,6 +1323,7 @@ static const luaL_Reg env_funcs[] = {
   {"getmetatable", luaB_getmetatable},
   {"ipairs", luaB_ipairs},
   {"loadfile", luaB_loadfile},
+  {"loadsfile", luaB_loadsfile},
   {"load", luaB_load},
   {"loadstring", luaB_load},
   {"next", luaB_next},

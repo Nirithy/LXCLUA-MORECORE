@@ -9197,9 +9197,27 @@ static void skip_block(LexState *ls) {
              return; /* Stop at else/elseif of current block */
            }
          }
+       } else if (la == TK_IF) {
+         depth++;
+       } else if (la == TK_END) {
+         depth--;
+         if (depth == 0) return;
+       } else if (la == TK_ELSE || la == TK_ELSEIF) {
+         if (depth == 1) return;
        }
     }
     luaX_next(ls);
+  }
+}
+
+static void consume_end_tag(LexState *ls) {
+  if (ls->t.token == TK_DOLLAR) {
+    luaX_next(ls);
+    if (ls->t.token == TK_END) {
+      luaX_next(ls);
+    } else if (ls->t.token == TK_NAME && strcmp(getstr(ls->t.seminfo.ts), "end") == 0) {
+      luaX_next(ls);
+    }
   }
 }
 
@@ -9214,71 +9232,77 @@ static void constexprifstat(LexState *ls) {
 
    if (ls->t.token == TK_DOLLAR) {
       luaX_next(ls); /* skip $ */
-      if (ls->t.token == TK_NAME) {
+      int is_else = 0;
+      int is_elseif = 0;
+      int is_end = 0;
+
+      if (ls->t.token == TK_ELSE) is_else = 1;
+      else if (ls->t.token == TK_ELSEIF) is_elseif = 1;
+      else if (ls->t.token == TK_END) is_end = 1;
+      else if (ls->t.token == TK_NAME) {
          const char *name = getstr(ls->t.seminfo.ts);
-         if (strcmp(name, "else") == 0) {
-            luaX_next(ls);
-            if (cond) {
-               skip_block(ls);
-               /* consume $ end */
-               if (ls->t.token == TK_DOLLAR) {
-                 luaX_next(ls);
-                 if (ls->t.token == TK_NAME && strcmp(getstr(ls->t.seminfo.ts), "end") == 0) {
-                   luaX_next(ls);
-                 }
-               }
-            } else {
-               statlist(ls);
-               /* consume $ end */
-               if (ls->t.token == TK_DOLLAR) {
-                 luaX_next(ls);
-                 if (ls->t.token == TK_NAME && strcmp(getstr(ls->t.seminfo.ts), "end") == 0) {
-                   luaX_next(ls);
-                 }
-               }
-            }
-         } else if (strcmp(name, "elseif") == 0) {
-            luaX_next(ls);
-            if (cond) {
-               /* We took the if branch, so skip everything until end */
-               /* skip_block stops at elseif/else/end */
-               /* But we want to skip THIS elseif chain. */
-               /* Recursive skip? No, we just need to skip until $end */
-               int depth = 1;
-               while (depth > 0 && ls->t.token != TK_EOS) {
-                  /* Custom skip to find $end ignoring else/elseif at level 1 */
-                  if (ls->t.token == TK_DOLLAR) {
-                     int la = luaX_lookahead(ls);
-                     if (la == TK_NAME) {
-                        const char *n = getstr(ls->lookahead.seminfo.ts);
-                        if (strcmp(n, "if") == 0) depth++;
-                        else if (strcmp(n, "end") == 0) {
-                           depth--;
-                           if (depth == 0) break;
-                        }
-                     }
-                  }
-                  luaX_next(ls);
-               }
-               /* Consume $end */
-               if (ls->t.token == TK_DOLLAR) {
-                 luaX_next(ls);
-                 if (ls->t.token == TK_NAME && strcmp(getstr(ls->t.seminfo.ts), "end") == 0) {
-                   luaX_next(ls);
-                 }
-               }
-            } else {
-               constexprifstat(ls);
-            }
-         } else if (strcmp(name, "end") == 0) {
-            luaX_next(ls);
+         if (strcmp(name, "else") == 0) is_else = 1;
+         else if (strcmp(name, "elseif") == 0) is_elseif = 1;
+         else if (strcmp(name, "end") == 0) is_end = 1;
+      }
+
+      if (is_else) {
+         luaX_next(ls);
+         if (cond) {
+            skip_block(ls);
+            consume_end_tag(ls);
+         } else {
+            statlist(ls);
+            consume_end_tag(ls);
          }
+      } else if (is_elseif) {
+         luaX_next(ls);
+         if (cond) {
+            /* We took the if branch, so skip everything until end */
+            int depth = 1;
+            while (depth > 0 && ls->t.token != TK_EOS) {
+               if (ls->t.token == TK_DOLLAR) {
+                  int la = luaX_lookahead(ls);
+                  if (la == TK_NAME) {
+                     const char *n = getstr(ls->lookahead.seminfo.ts);
+                     if (strcmp(n, "if") == 0) depth++;
+                     else if (strcmp(n, "end") == 0) {
+                        depth--;
+                        if (depth == 0) break;
+                     }
+                  } else if (la == TK_IF) depth++;
+                  else if (la == TK_END) {
+                     depth--;
+                     if (depth == 0) break;
+                  }
+               }
+               luaX_next(ls);
+            }
+            consume_end_tag(ls);
+         } else {
+            constexprifstat(ls);
+         }
+      } else if (is_end) {
+         luaX_next(ls);
       }
    }
 }
 
 static void constexprstat (LexState *ls) {
   luaX_next(ls); /* skip $ */
+
+  if (ls->t.token == TK_IF) {
+     luaX_next(ls);
+     constexprifstat(ls);
+     return;
+  }
+
+  /* Fallback for other directives that are names */
+  if (ls->t.token != TK_NAME) {
+     /* Should not happen if statement() checked correctly, but for safety */
+     return;
+  }
+
   TString *ts = ls->t.seminfo.ts;
   const char *name = getstr(ts);
 
@@ -9329,13 +9353,17 @@ static void statement (LexState *ls) {
       break;
     }
     case TK_DOLLAR: { /* stat -> constexprstat or macro */
-      if (luaX_lookahead(ls) == TK_NAME) {
+      int la = luaX_lookahead(ls);
+      if (la == TK_NAME) {
          TString *ts = ls->lookahead.seminfo.ts;
          const char *name = getstr(ts);
          if (is_preprocessor_directive(name)) {
             constexprstat(ls);
             break;
          }
+      } else if (la == TK_IF || la == TK_ELSE || la == TK_ELSEIF || la == TK_END) {
+         constexprstat(ls);
+         break;
       }
       /* Fallthrough to exprstat */
       exprstat(ls);

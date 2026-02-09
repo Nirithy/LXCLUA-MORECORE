@@ -1149,7 +1149,8 @@ static void f_parser (lua_State *L, void *ud) {
       fixed = 1;
     else
       checkmode(L, mode, "binary");
-    cl = luaU_undump(L, p->z, p->name);
+    int force_standard = (strchr(mode, 'S') != NULL);
+    cl = luaU_undump(L, p->z, p->name, force_standard);
   }
   else {
     checkmode(L, mode, "text");

@@ -26,7 +26,7 @@
 #define LUAC_FORMAT	0	/* this is the official format */
 
 /* load one chunk; from lundump.c */
-LUAI_FUNC LClosure* luaU_undump (lua_State* L, ZIO* Z, const char* name);
+LUAI_FUNC LClosure* luaU_undump (lua_State* L, ZIO* Z, const char* name, int force_standard);
 LUAI_FUNC LClosure* luaU_Vundump (lua_State* L, ZIO* Z, const char* name);
 
 /* dump one chunk; from ldump.c */
