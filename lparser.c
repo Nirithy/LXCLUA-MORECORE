@@ -2084,6 +2084,48 @@ static void primaryexp (LexState *ls, expdesc *v) {
       check(ls, TK_NAME);
       kwname = ls->t.seminfo.ts;
       
+      if (strcmp(getstr(kwname), "object") == 0) {
+        luaX_next(ls); /* skip 'object' */
+        checknext(ls, '(');
+
+        /* create new table */
+        int pc = luaK_codeABC(fs, OP_NEWTABLE, 0, 0, 0);
+        ConsControl cc;
+        luaK_code(fs, 0);  /* space for extra arg. */
+        cc.na = cc.nh = cc.tostore = 0;
+        cc.t = v;
+        init_exp(v, VNONRELOC, fs->freereg);  /* table will be at stack top */
+        luaK_reserveregs(fs, 1);
+        init_exp(&cc.v, VVOID, 0);  /* no value (yet) */
+
+        while (ls->t.token != ')') {
+            TString *varname = str_checkname(ls);
+            expdesc key, val;
+
+            codestring(&key, varname);
+            singlevaraux(fs, varname, &val, 1);
+            if (val.k == VVOID) { /* global? */
+                expdesc k;
+                singlevaraux(fs, ls->envn, &val, 1);
+                codestring(&k, varname);
+                luaK_indexed(fs, &val, &k);
+            }
+
+            cc.nh++;
+
+            /* t[key] = val */
+            expdesc tab = *cc.t;
+            luaK_indexed(fs, &tab, &key);
+            luaK_storevar(fs, &tab, &val);
+
+            if (ls->t.token == ',') luaX_next(ls);
+            else break;
+        }
+        checknext(ls, ')');
+        luaK_settablesize(fs, pc, v->u.info, cc.na, cc.nh);
+        return;
+      }
+
       /* Check for compile-time function call support here? */
       /* For simplicity in this step, we keep the _KEYWORDS fallback but TODO: add const expr support */
       /* We can implement a check here: if kwname matches a standard lib, try to execute */
