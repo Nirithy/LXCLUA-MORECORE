@@ -2101,6 +2101,43 @@ static int do_file_test(const char *path, int op_type) {
 ** 返回值：
 **   布尔值，表示测试结果
 */
+static int async_start(lua_State *L) {
+    int n = lua_gettop(L);
+    lua_State *co = lua_newthread(L);
+    lua_insert(L, 1); /* Move thread to bottom (stack: thread, arg1, arg2...) */
+
+    /* Push function */
+    lua_pushvalue(L, lua_upvalueindex(1));
+    lua_xmove(L, co, 1);
+
+    /* Move arguments */
+    lua_xmove(L, co, n);
+
+    int nres;
+    int status = lua_resume(co, L, n, &nres);
+
+    if (status != LUA_OK && status != LUA_YIELD) {
+        lua_xmove(co, L, 1);
+        return lua_error(L);
+    }
+
+    if (nres > 0) {
+        if (!lua_checkstack(L, nres)) {
+            return luaL_error(L, "too many results to move");
+        }
+        lua_xmove(co, L, nres);
+    }
+
+    return 1 + nres;
+}
+
+static int luaB_async_wrap(lua_State *L) {
+    luaL_checktype(L, 1, LUA_TFUNCTION);
+    lua_pushvalue(L, 1);
+    lua_pushcclosure(L, async_start, 1);
+    return 1;
+}
+
 static int luaB_test (lua_State *L) {
   int nargs = lua_gettop(L);
   
@@ -2476,6 +2513,7 @@ static int luaB_test (lua_State *L) {
 }
 
 static const luaL_Reg base_funcs[] = {
+  {"__async_wrap", luaB_async_wrap},
   {"assert", luaB_assert},
   {"collectgarbage", luaB_collectgarbage},
   {"defer", luaB_defer},
