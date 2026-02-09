@@ -179,7 +179,7 @@ SunOS solaris:
 # 使用方法: make wasm
 # Emscripten 3.0.0+ 支持 C23 (底层 Clang 18+)
 # Emscripten SDK 路径配置（Windows需要.bat扩展名）
-EMSDK_PATH= e:/Soft/Proje/LXCLUA-NCore/lua/emsdk-main/upstream/emscripten
+EMSDK_PATH= E:/Soft/Proje/LXCLUA-NCore/emsdk/upstream/emscripten
 EMCC= $(EMSDK_PATH)/emcc.bat
 EMAR= $(EMSDK_PATH)/emar.bat
 EMRANLIB= $(EMSDK_PATH)/emranlib.bat
