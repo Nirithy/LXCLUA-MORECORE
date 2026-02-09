@@ -219,12 +219,12 @@ static SoftKWDef soft_keywords[] = {
   {"get",        SKW_GET,        SOFTKW_CTX_CLASS_BODY,    {TK_NAME, 0}, {'=', 0}, 0},
   /* implements - 类继承上下文，后面必须跟接口名 */
   {"implements", SKW_IMPLEMENTS, SOFTKW_CTX_CLASS_INHERIT, {TK_NAME, 0}, {'=', 0}, 0},
-  /* ointerface - 语句开头，后面必须跟接口名 */
-  {"ointerface", SKW_INTERFACE,  SOFTKW_CTX_STMT_BEGIN,    {TK_NAME, 0}, {'=', 0}, 0},
-  /* onew - 表达式中，后面必须跟类名 */
-  {"onew",       SKW_NEW,        SOFTKW_CTX_EXPR,          {TK_NAME, 0}, {'=', 0}, 0},
-  /* osuper - 表达式中，后面必须跟.或: */
-  {"osuper",     SKW_SUPER,      SOFTKW_CTX_EXPR,          {'.', ':', 0}, {'=', 0}, 0},
+  /* interface - 语句开头，后面必须跟接口名 */
+  {"interface",  SKW_INTERFACE,  SOFTKW_CTX_STMT_BEGIN,    {TK_NAME, 0}, {'=', 0}, 0},
+  /* new - 表达式中，后面必须跟类名 */
+  {"new",        SKW_NEW,        SOFTKW_CTX_EXPR,          {TK_NAME, 0}, {'=', 0}, 0},
+  /* super - 表达式中，后面必须跟.或: */
+  {"super",      SKW_SUPER,      SOFTKW_CTX_EXPR,          {'.', ':', 0}, {'=', 0}, 0},
   /* private - 类体内，后面跟function或标识符名 */
   {"private",    SKW_PRIVATE,    SOFTKW_CTX_CLASS_BODY,    {TK_FUNCTION, TK_NAME, 0}, {'=', 0}, 0},
   /* protected - 类体内，后面跟function或标识符名 */
@@ -4307,6 +4307,8 @@ static int test_then_block (LexState *ls, int *escapelist) {
     luaX_next(ls);  /* skip '{' */
   } else if (ls->t.token == TK_THEN) {
     luaX_next(ls);  /* skip 'then' */
+  } else if (ls->t.token == TK_DO) {
+    luaX_next(ls);  /* skip 'do' (Universal Block Opener) */
   }
   
   if (ls->t.token == TK_BREAK||ls->t.token==TK_CONTINUE) {  /* 'if x then break' ? */
@@ -7965,8 +7967,8 @@ static void class_method(LexState *ls, int class_reg, int is_static, int access_
   TString *method_name = str_checkname(ls);
   
   /* 生成方法体 */
-  /* ismethod=0: 用户需要手动在参数列表中写 self */
-  body(ls, &method_exp, 0, line);
+  /* 非静态方法自动添加 self 参数 */
+  body(ls, &method_exp, !is_static, line);
   
   /* 将方法存储到类表中 */
   int methods_reg = fs->freereg;
@@ -8381,6 +8383,8 @@ static void classstat(LexState *ls, int line, int class_flags, int isexport) {
     } while (testnext(ls, ','));
   }
   
+  testnext(ls, TK_DO); /* Optional Universal Block Opener */
+
   /* 解析类体 */
   while (!testnext(ls, TK_END)) {
     if (ls->t.token == TK_EOS) {
@@ -8639,6 +8643,8 @@ static void enumstat(LexState *ls, int line, int isexport) {
   if (ls->t.token == '{') {
     use_brace = 1;
     luaX_next(ls);  /* 跳过 '{' */
+  } else {
+    testnext(ls, TK_DO); /* Optional Universal Block Opener */
   }
   
   /* 创建枚举表 */
@@ -9120,6 +9126,12 @@ static int try_command_call (LexState *ls) {
   
   /* 检查是否是 TK_NAME 后面跟着参数 */
   if (ls->t.token != TK_NAME) {
+    return 0;
+  }
+
+  /* Check if it is a soft keyword that starts an expression (like new, super) */
+  if (softkw_test(ls, SKW_NEW, SOFTKW_CTX_EXPR) ||
+      softkw_test(ls, SKW_SUPER, SOFTKW_CTX_EXPR)) {
     return 0;
   }
   
