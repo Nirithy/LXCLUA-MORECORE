@@ -2442,6 +2442,205 @@ static void funcargs (LexState *ls, expdesc *f, int line) {
 ** ============================================================
 */
 
+static void parse_generic_arrow_body(LexState *ls, FuncState *factory_fs, expdesc *v, int line) {
+    /* Generic Arrow Function: (T, U)(args) => ... */
+    /* factory_fs is Factory */
+    int ngeneric = factory_fs->f->numparams;
+
+    /* Helper array to store type mappings for generics */
+    TString *mappings[MAXVARS];
+    int nmappings = 0;
+    for (int i = 0; i < MAXVARS; i++) mappings[i] = NULL;
+
+    /* Open Impl function */
+    FuncState impl_fs;
+    BlockCnt impl_bl;
+    impl_fs.f = addprototype(ls);
+    impl_fs.f->linedefined = line;
+
+    open_func(ls, &impl_fs, &impl_bl);
+
+    /* Parse Impl params */
+    checknext(ls, '(');
+    TString *impl_vararg = NULL;
+    parlist(ls, &impl_vararg);
+    checknext(ls, ')');
+
+    /* Capture type hints for mapping */
+    nmappings = impl_fs.f->numparams;
+    for (int i = 0; i < nmappings && i < MAXVARS; i++) {
+        Vardesc *vd = getlocalvardesc(&impl_fs, i);
+        if (vd->vd.hint && vd->vd.hint->descs[0].type == LVT_NAME) {
+            mappings[i] = vd->vd.hint->descs[0].typename;
+        }
+    }
+
+    /* Type check injection */
+    {
+       int i;
+       for (i = 0; i < impl_fs.f->numparams; i++) {
+          Vardesc *vd = getlocalvardesc(&impl_fs, i);
+          if (vd->vd.hint) {
+             int j;
+             for (j = 0; j < MAX_TYPE_DESCS; j++) {
+                if (vd->vd.hint->descs[j].type == LVT_NAME && vd->vd.hint->descs[j].typename) {
+                   expdesc f_check;
+                   singlevaraux(&impl_fs, luaS_newliteral(ls->L, "__check_type"), &f_check, 1);
+                   if (f_check.k == VVOID) {
+                      expdesc key;
+                      singlevaraux(&impl_fs, ls->envn, &f_check, 1);
+                      codestring(&key, luaS_newliteral(ls->L, "__check_type"));
+                      luaK_indexed(&impl_fs, &f_check, &key);
+                   }
+
+                   luaK_exp2nextreg(&impl_fs, &f_check);
+                   int base = f_check.u.info;
+
+                   expdesc e_val;
+                   init_var(&impl_fs, &e_val, i);
+                   luaK_exp2nextreg(&impl_fs, &e_val);
+
+                   expdesc e_type;
+                   singlevaraux(&impl_fs, vd->vd.hint->descs[j].typename, &e_type, 1);
+                   if (e_type.k == VVOID) {
+                      expdesc key;
+                      singlevaraux(&impl_fs, ls->envn, &e_type, 1);
+                      codestring(&key, vd->vd.hint->descs[j].typename);
+                      luaK_indexed(&impl_fs, &e_type, &key);
+                   }
+                   luaK_exp2nextreg(&impl_fs, &e_type);
+
+                   expdesc e_name;
+                   codestring(&e_name, vd->vd.name);
+                   luaK_exp2nextreg(&impl_fs, &e_name);
+
+                   luaK_codeABC(&impl_fs, OP_CALL, base, 4, 1);
+                   impl_fs.freereg = base;
+                }
+             }
+          }
+       }
+    }
+
+    /* Expect => */
+    if (ls->t.token == TK_MEAN) {
+        luaX_next(ls);
+    } else {
+        luaX_syntaxerror(ls, "expected '=>' after generic arrow function parameters");
+    }
+
+    if (impl_vararg) namedvararg(ls, impl_vararg);
+
+    /* Parse body */
+    if (ls->t.token == '{') {
+       luaX_next(ls);
+       while (ls->t.token != '}' && ls->t.token != TK_EOS) {
+          if (ls->t.token == TK_RETURN) {
+             statement(ls);
+             break;
+          }
+          statement(ls);
+       }
+       check_match(ls, '}', '{', line);
+    } else {
+       enterlevel(ls);
+       retstat(ls);
+       impl_fs.freereg = impl_fs.nactvar;
+       leavelevel(ls);
+    }
+
+    impl_fs.f->lastlinedefined = ls->linenumber;
+
+    /* Close Impl */
+    expdesc impl_e;
+    codeclosure(ls, &impl_e);
+    close_func(ls);
+
+    /* Back in Factory (factory_fs) */
+    /* Return impl_closure */
+    luaK_ret(factory_fs, impl_e.u.info, 1);
+
+    factory_fs->f->lastlinedefined = ls->linenumber;
+
+    /* Close Factory */
+    /* We need to save generic parameter names before closing */
+    TString *generic_names[MAXVARS];
+    for(int i=0; i<ngeneric; i++) generic_names[i] = NULL;
+
+    for (int i = 0; i < ngeneric; i++) {
+       if (i < factory_fs->f->sizelocvars) {
+           generic_names[i] = factory_fs->f->locvars[i].varname;
+       }
+    }
+
+    expdesc factory_e;
+    codeclosure(ls, &factory_e);
+
+    close_func(ls);
+    /* Now ls->fs is Parent */
+
+    /* Generate __generic_wrap call */
+    FuncState *fs = ls->fs;
+    int factory_reg = luaK_exp2anyreg(fs, &factory_e);
+
+    expdesc wrap;
+    singlevaraux(fs, luaS_newliteral(ls->L, "__generic_wrap"), &wrap, 1);
+    if (wrap.k == VVOID) {
+        expdesc key;
+        singlevaraux(fs, ls->envn, &wrap, 1);
+        codestring(&key, luaS_newliteral(ls->L, "__generic_wrap"));
+        luaK_indexed(fs, &wrap, &key);
+    }
+    int wrap_reg = fs->freereg;
+    luaK_reserveregs(fs, 1);
+    luaK_exp2reg(fs, &wrap, wrap_reg);
+
+    luaK_checkstack(fs, 3);
+    int arg1 = wrap_reg + 1;
+    int arg2 = wrap_reg + 2;
+    int arg3 = wrap_reg + 3;
+
+    /* Arg 1: Factory */
+    luaK_codeABC(fs, OP_MOVE, arg1, factory_reg, 0);
+
+    /* Arg 2: Params table */
+    int pc_arg2 = luaK_codeABC(fs, OP_NEWTABLE, arg2, 0, 0);
+    luaK_code(fs, 0);
+
+    /* Populate Arg 2 using saved names */
+    for (int i = 0; i < ngeneric; i++) {
+        if (generic_names[i]) {
+            expdesc tab; init_exp(&tab, VNONRELOC, arg2);
+            expdesc key; init_exp(&key, VKINT, 0); key.u.ival = i + 1;
+            luaK_indexed(fs, &tab, &key);
+            expdesc val; codestring(&val, generic_names[i]);
+            luaK_storevar(fs, &tab, &val);
+        }
+    }
+    luaK_settablesize(fs, pc_arg2, arg2, ngeneric, 0);
+
+    /* Arg 3: Mapping table */
+    int pc_arg3 = luaK_codeABC(fs, OP_NEWTABLE, arg3, 0, 0);
+    luaK_code(fs, 0);
+
+    /* Populate Arg 3 */
+    for (int i = 0; i < nmappings; i++) {
+        if (mappings[i]) {
+            expdesc tab; init_exp(&tab, VNONRELOC, arg3);
+            expdesc key; init_exp(&key, VKINT, 0); key.u.ival = i + 1;
+            luaK_indexed(fs, &tab, &key);
+            expdesc val; codestring(&val, mappings[i]);
+            luaK_storevar(fs, &tab, &val);
+        }
+    }
+    luaK_settablesize(fs, pc_arg3, arg3, nmappings, 0);
+
+    fs->freereg = arg3 + 1;
+
+    init_exp(v, VCALL, luaK_codeABC(fs, OP_CALL, wrap_reg, 4, 2));
+    fs->freereg = wrap_reg + 1;
+}
+
 static void primaryexp (LexState *ls, expdesc *v) {
   /* primaryexp -> NAME | '(' expr ')' | STRING | constructor | NEW | SUPER */
   switch (ls->t.token) {
@@ -2505,7 +2704,7 @@ static void primaryexp (LexState *ls, expdesc *v) {
 
          checknext(ls, ')');
 
-         /* Expect => */
+         /* Expect => or ( for Generic Arrow */
          if (ls->t.token == TK_MEAN) {
             luaX_next(ls); /* skip => */
 
@@ -2523,6 +2722,9 @@ static void primaryexp (LexState *ls, expdesc *v) {
             new_fs.f->lastlinedefined = ls->linenumber;
             codeclosure(ls, v);
             close_func(ls);
+            return;
+         } else if (ls->t.token == '(') {
+            parse_generic_arrow_body(ls, &new_fs, v, line);
             return;
          } else {
             luaX_syntaxerror(ls, "expected '=>' after arrow function parameters");
