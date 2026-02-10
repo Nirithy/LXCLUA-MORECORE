@@ -15,6 +15,7 @@ typedef struct {
     l_thread_t thread;
     lua_State *L_thread;
     int ref;
+    char name[64];
 } ThreadHandle;
 
 typedef struct ChannelElem {
@@ -53,16 +54,42 @@ static void *thread_entry(void *arg) {
     return NULL;
 }
 
+/* Helper to register thread handle in registry */
+static void register_thread_handle(lua_State *L, lua_State *L_thread, int th_idx) {
+    th_idx = lua_absindex(L, th_idx);
+    if (lua_getfield(L, LUA_REGISTRYINDEX, "_THREAD_MAP") != LUA_TTABLE) {
+        lua_pop(L, 1);
+        lua_newtable(L);
+        lua_newtable(L);
+        lua_pushstring(L, "v");
+        lua_setfield(L, -2, "__mode");
+        lua_setmetatable(L, -2);
+        lua_pushvalue(L, -1);
+        lua_setfield(L, LUA_REGISTRYINDEX, "_THREAD_MAP");
+    }
+    lua_pushlightuserdata(L, L_thread);
+    lua_pushvalue(L, th_idx);
+    lua_settable(L, -3);
+    lua_pop(L, 1);
+}
+
 static int thread_create(lua_State *L) {
     int n = lua_gettop(L);
     luaL_checktype(L, 1, LUA_TFUNCTION);
 
     ThreadHandle *th = (ThreadHandle *)lua_newuserdata(L, sizeof(ThreadHandle));
+    memset(th, 0, sizeof(ThreadHandle));
+    strcpy(th->name, "thread");
     luaL_getmetatable(L, "lthread");
     lua_setmetatable(L, -2);
 
     lua_State *L1 = lua_newthread(L);
     th->L_thread = L1;
+
+    // Register handle
+    lua_pushvalue(L, -2); /* dup th */
+    register_thread_handle(L, L1, -1);
+    lua_pop(L, 1);
 
     // Anchor L1 to prevent collection
     th->ref = luaL_ref(L, LUA_REGISTRYINDEX); // Pops L1 from stack
@@ -138,6 +165,57 @@ static int thread_createx(lua_State *L) {
     return nres;
 }
 
+static int thread_self(lua_State *L) {
+    if (lua_getfield(L, LUA_REGISTRYINDEX, "_THREAD_MAP") == LUA_TTABLE) {
+        lua_pushlightuserdata(L, L);
+        lua_gettable(L, -2);
+        if (!lua_isnil(L, -1)) {
+            lua_remove(L, -2); /* remove map */
+            return 1;
+        }
+        lua_pop(L, 2); /* remove nil and map */
+    } else {
+        lua_pop(L, 1); /* remove nil (getfield result) */
+    }
+
+    /* Not found, create new */
+    ThreadHandle *th = (ThreadHandle *)lua_newuserdata(L, sizeof(ThreadHandle));
+    memset(th, 0, sizeof(ThreadHandle));
+    th->L_thread = L;
+    th->ref = LUA_NOREF;
+#if defined(LUA_USE_WINDOWS)
+    th->thread.thread = GetCurrentThread();
+#else
+    th->thread.thread = pthread_self();
+#endif
+    strcpy(th->name, "thread");
+
+    luaL_getmetatable(L, "lthread");
+    lua_setmetatable(L, -2);
+
+    /* Register it */
+    register_thread_handle(L, L, -1); /* th is at top */
+
+    return 1;
+}
+
+static int thread_name(lua_State *L) {
+    ThreadHandle *th = (ThreadHandle *)luaL_checkudata(L, 1, "lthread");
+    if (lua_gettop(L) >= 2) {
+        const char *name = luaL_checkstring(L, 2);
+        strncpy(th->name, name, 63);
+        th->name[63] = '\0';
+    }
+    lua_pushstring(L, th->name);
+    return 1;
+}
+
+static int thread_id(lua_State *L) {
+    ThreadHandle *th = (ThreadHandle *)luaL_checkudata(L, 1, "lthread");
+    lua_pushinteger(L, (lua_Integer)l_thread_getid(&th->thread));
+    return 1;
+}
+
 static int channel_new(lua_State *L) {
     Channel *ch = (Channel *)lua_newuserdata(L, sizeof(Channel));
     l_mutex_init(&ch->lock);
@@ -163,7 +241,6 @@ static int channel_gc(lua_State *L) {
     }
     ch->head = NULL;
     ch->tail = NULL;
-    /* Listeners are managed by pick(), should be empty here but clean up just in case */
     Listener *l = ch->listeners;
     while (l) {
         Listener *next = l->next;
@@ -181,7 +258,6 @@ static int channel_send(lua_State *L) {
     Channel *ch = (Channel *)luaL_checkudata(L, 1, "lthread.channel");
     luaL_checkany(L, 2);
 
-    /* Create reference and allocate memory before locking to prevent deadlocks on error */
     int ref = luaL_ref(L, LUA_REGISTRYINDEX); // pops value
 
     ChannelElem *elem = (ChannelElem *)malloc(sizeof(ChannelElem));
@@ -209,7 +285,6 @@ static int channel_send(lua_State *L) {
 
     l_cond_signal(&ch->cond);
 
-    /* Signal any listeners (pick) */
     Listener *l = ch->listeners;
     while (l) {
         l_mutex_lock(&l->sel->lock);
@@ -221,6 +296,58 @@ static int channel_send(lua_State *L) {
 
     l_mutex_unlock(&ch->lock);
     return 0;
+}
+
+static int channel_try_send(lua_State *L) {
+    Channel *ch = (Channel *)luaL_checkudata(L, 1, "lthread.channel");
+    luaL_checkany(L, 2);
+
+    int ref = luaL_ref(L, LUA_REGISTRYINDEX); // pops value
+
+    ChannelElem *elem = (ChannelElem *)malloc(sizeof(ChannelElem));
+    if (!elem) {
+        luaL_unref(L, LUA_REGISTRYINDEX, ref);
+        return luaL_error(L, "out of memory");
+    }
+    elem->ref = ref;
+    elem->next = NULL;
+
+    if (l_mutex_trylock(&ch->lock) != 0) {
+        free(elem);
+        luaL_unref(L, LUA_REGISTRYINDEX, ref);
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+
+    if (ch->closed) {
+        l_mutex_unlock(&ch->lock);
+        free(elem);
+        luaL_unref(L, LUA_REGISTRYINDEX, ref);
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+
+    if (ch->tail) {
+        ch->tail->next = elem;
+        ch->tail = elem;
+    } else {
+        ch->head = ch->tail = elem;
+    }
+
+    l_cond_signal(&ch->cond);
+
+    Listener *l = ch->listeners;
+    while (l) {
+        l_mutex_lock(&l->sel->lock);
+        l->sel->signaled = 1;
+        l_cond_signal(&l->sel->cond);
+        l_mutex_unlock(&l->sel->lock);
+        l = l->next;
+    }
+
+    l_mutex_unlock(&ch->lock);
+    lua_pushboolean(L, 1);
+    return 1;
 }
 
 static int channel_receive(lua_State *L) {
@@ -251,13 +378,37 @@ static int channel_receive(lua_State *L) {
     return 1;
 }
 
+static int channel_try_receive(lua_State *L) {
+    Channel *ch = (Channel *)luaL_checkudata(L, 1, "lthread.channel");
+
+    l_mutex_lock(&ch->lock);
+    if (ch->head == NULL) {
+        l_mutex_unlock(&ch->lock);
+        lua_pushnil(L);
+        return 1;
+    }
+
+    ChannelElem *elem = ch->head;
+    ch->head = elem->next;
+    if (ch->head == NULL) {
+        ch->tail = NULL;
+    }
+
+    int ref = elem->ref;
+    free(elem);
+    l_mutex_unlock(&ch->lock);
+
+    lua_rawgeti(L, LUA_REGISTRYINDEX, ref);
+    luaL_unref(L, LUA_REGISTRYINDEX, ref);
+    return 1;
+}
+
 static int channel_close(lua_State *L) {
     Channel *ch = (Channel *)luaL_checkudata(L, 1, "lthread.channel");
     l_mutex_lock(&ch->lock);
     ch->closed = 1;
     l_cond_broadcast(&ch->cond);
 
-    /* Signal any listeners (pick) */
     Listener *l = ch->listeners;
     while (l) {
         l_mutex_lock(&l->sel->lock);
@@ -295,7 +446,6 @@ static int channel_recv_op(lua_State *L) {
 
 static int thread_on(lua_State *L) {
     if (lua_type(L, 1) == LUA_TUSERDATA) {
-        /* Assume channel */
         lua_newtable(L);
         lua_pushstring(L, "recv");
         lua_setfield(L, -2, "op");
@@ -326,12 +476,12 @@ static void unregister_all(lua_State *L, int tab_idx, Selector *sel) {
         lua_rawgeti(L, -1, 1);      /* desc */
         lua_getfield(L, -1, "op");
         const char *op = lua_tostring(L, -1);
-        lua_pop(L, 1); /* op */
+        lua_pop(L, 1);
 
         if (op && strcmp(op, "recv") == 0) {
             lua_getfield(L, -1, "ch");
             Channel *ch = (Channel *)lua_touserdata(L, -1);
-            lua_pop(L, 1); /* ch */
+            lua_pop(L, 1);
             if (ch) {
                 l_mutex_lock(&ch->lock);
                 Listener **pp = &ch->listeners;
@@ -340,14 +490,14 @@ static void unregister_all(lua_State *L, int tab_idx, Selector *sel) {
                         Listener *rem = *pp;
                         *pp = rem->next;
                         free(rem);
-                        break; /* Should only be once per channel per pick */
+                        break;
                     }
                     pp = &(*pp)->next;
                 }
                 l_mutex_unlock(&ch->lock);
             }
         }
-        lua_pop(L, 2); /* desc, case */
+        lua_pop(L, 2);
     }
 }
 
@@ -363,15 +513,14 @@ static int thread_pick(lua_State *L) {
     int has_timeout = 0;
     int timeout_idx = 0;
 
-    /* Pass 1: Validate inputs */
     for (int i = 1; i <= n; i++) {
-        lua_rawgeti(L, 1, i); /* case table */
+        lua_rawgeti(L, 1, i);
         if (!lua_istable(L, -1)) {
              l_mutex_destroy(&sel.lock);
              l_cond_destroy(&sel.cond);
              return luaL_error(L, "pick expects a table of cases (index %d)", i);
         }
-        lua_rawgeti(L, -1, 1); /* desc */
+        lua_rawgeti(L, -1, 1);
         if (!lua_istable(L, -1)) {
              l_mutex_destroy(&sel.lock);
              l_cond_destroy(&sel.cond);
@@ -408,13 +557,12 @@ static int thread_pick(lua_State *L) {
              l_cond_destroy(&sel.cond);
              return luaL_error(L, "unknown op '%s' (index %d)", op, i);
         }
-        lua_pop(L, 3); /* op, desc, case */
+        lua_pop(L, 3);
     }
 
-    /* Pass 2: Register listeners and check for immediate data */
     for (int i = 1; i <= n; i++) {
-        lua_rawgeti(L, 1, i); /* case table */
-        lua_rawgeti(L, -1, 1); /* desc */
+        lua_rawgeti(L, 1, i);
+        lua_rawgeti(L, -1, 1);
 
         lua_getfield(L, -1, "op");
         const char *op = lua_tostring(L, -1);
@@ -423,11 +571,10 @@ static int thread_pick(lua_State *L) {
         if (strcmp(op, "recv") == 0) {
             lua_getfield(L, -1, "ch");
             Channel *ch = (Channel *)lua_touserdata(L, -1);
-            lua_pop(L, 1); /* ch */
+            lua_pop(L, 1);
 
             l_mutex_lock(&ch->lock);
             if (ch->head || ch->closed) {
-                /* Ready immediately */
                 int ref = LUA_NOREF;
                 int closed = ch->closed;
                 if (ch->head) {
@@ -439,15 +586,13 @@ static int thread_pick(lua_State *L) {
                 }
                 l_mutex_unlock(&ch->lock);
 
-                /* Cleanup other listeners */
                 unregister_all(L, 1, &sel);
                 l_mutex_destroy(&sel.lock);
                 l_cond_destroy(&sel.cond);
 
-                /* Call handler */
-                lua_rawgeti(L, -2, 2); /* func */
+                lua_rawgeti(L, -2, 2);
                 if (closed && ref == LUA_NOREF) {
-                    lua_pushnil(L); /* closed */
+                    lua_pushnil(L);
                 } else {
                     lua_rawgeti(L, LUA_REGISTRYINDEX, ref);
                     luaL_unref(L, LUA_REGISTRYINDEX, ref);
@@ -456,25 +601,16 @@ static int thread_pick(lua_State *L) {
                 return 1;
             }
 
-            /* Register listener */
             Listener *l = malloc(sizeof(Listener));
             if (l) {
                 l->sel = &sel;
                 l->next = ch->listeners;
                 ch->listeners = l;
             }
-            /* If malloc fails, we skip this channel (or should we error? Error creates safety issues unless we use userdata cleanup) */
-            /* For now, ignoring malloc failure is safer than crashing, but not ideal. */
-
             l_mutex_unlock(&ch->lock);
         }
-        lua_pop(L, 2); /* desc, case */
+        lua_pop(L, 2);
     }
-
-    /* Wait loop */
-    /* Calculate deadline if timeout */
-    /* Note: l_cond_wait_timeout needs implementation or use standard if available */
-    /* We assume we might need a loop with timed wait */
 
     l_mutex_lock(&sel.lock);
     while (1) {
@@ -488,9 +624,8 @@ static int thread_pick(lua_State *L) {
                 l_mutex_destroy(&sel.lock);
                 l_cond_destroy(&sel.cond);
 
-                /* Call timeout handler */
                 lua_rawgeti(L, 1, timeout_idx);
-                lua_rawgeti(L, -1, 2); /* func */
+                lua_rawgeti(L, -1, 2);
                 lua_call(L, 0, 1);
                 return 1;
             }
@@ -500,18 +635,13 @@ static int thread_pick(lua_State *L) {
     }
     l_mutex_unlock(&sel.lock);
 
-    /* We woke up, check channels */
-    /* We need to find which channel triggered or just consume from first available */
-
-    /* Unregister everything first to be clean */
     unregister_all(L, 1, &sel);
     l_mutex_destroy(&sel.lock);
     l_cond_destroy(&sel.cond);
 
-    /* Iterate to find ready channel */
     for (int i = 1; i <= n; i++) {
-        lua_rawgeti(L, 1, i); /* case */
-        lua_rawgeti(L, -1, 1); /* desc */
+        lua_rawgeti(L, 1, i);
+        lua_rawgeti(L, -1, 1);
         lua_getfield(L, -1, "op");
         const char *op = lua_tostring(L, -1);
         lua_pop(L, 1);
@@ -534,7 +664,7 @@ static int thread_pick(lua_State *L) {
                 }
                 l_mutex_unlock(&ch->lock);
 
-                lua_rawgeti(L, -2, 2); /* func */
+                lua_rawgeti(L, -2, 2);
                 if (closed && ref == LUA_NOREF) {
                     lua_pushnil(L);
                 } else {
@@ -542,48 +672,30 @@ static int thread_pick(lua_State *L) {
                     luaL_unref(L, LUA_REGISTRYINDEX, ref);
                 }
                 lua_call(L, 1, 1);
-                // lua_pop(L, 2); /* case, desc */ -> call consumes func/arg, result is on top. case/desc are below?
-                // The loop iterates using lua_rawgeti(..., i). Stack grows.
-                // We need to clean up stack?
-                // lua_call puts result on top.
-                // We can just return 1. The garbage below will be discarded by Lua call return handling?
-                // No, this is C function. We should clean up if we can, but returning 1 with result on top is essential.
-                // Actually, `lua_call` removed function and args.
-                // We have `lua_rawgeti(L, 1, i)` (case) and `lua_rawgeti(L, -1, 1)` (desc) on stack before call loop logic.
-                // In loop: push case, push desc, pop desc, pop case.
-                // Wait, "lua_pop(L, 2); /* case, desc */" was at end of loop.
-                // Inside "if (ch->head...)", we break out.
-                // Stack state:
-                // 1: table
-                // ...
-                // top-2: case
-                // top-1: desc (popped before) -> wait, "lua_rawgeti(L, -1, 1); /* desc */" ... "lua_pop(L, 1);" (op) ...
-                // "lua_pop(L, 1); /* ch */"
-                // At this point we have 'case' and 'desc' on stack?
-                // "lua_rawgeti(L, -2, 2); /* func */" (from case)
-                // "lua_call(L, 1, 1)".
-                // Result is on top. 'case' and 'desc' are below result.
-                // If we return 1, Lua takes top.
                 return 1;
             }
             l_mutex_unlock(&ch->lock);
         }
-        lua_pop(L, 2); /* case, desc */
+        lua_pop(L, 2);
     }
 
-    return 0; /* Should not happen if signaled */
+    return 0;
 }
 
 static const luaL_Reg thread_methods[] = {
     {"join", thread_join},
+    {"name", thread_name},
+    {"id", thread_id},
     {NULL, NULL}
 };
 
 static const luaL_Reg channel_methods[] = {
     {"send", channel_send},
     {"receive", channel_receive},
-    {"pop", channel_receive}, /* Alias */
-    {"push", channel_send},   /* Alias */
+    {"try_send", channel_try_send},
+    {"try_recv", channel_try_receive},
+    {"pop", channel_receive},
+    {"push", channel_send},
     {"peek", channel_peek},
     {"recv_op", channel_recv_op},
     {"close", channel_close},
@@ -598,6 +710,8 @@ static const luaL_Reg thread_funcs[] = {
     {"pick", thread_pick},
     {"on", thread_on},
     {"over", thread_over},
+    {"self", thread_self},
+    {"current", thread_self}, /* Alias for self */
     {NULL, NULL}
 };
 

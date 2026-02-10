@@ -40,6 +40,14 @@
 #define F_DEFAULT "default"
 #define F_DEF "def" /* For nested structs */
 
+/* Array support */
+typedef struct {
+    size_t len;
+    size_t size; /* size of each element */
+    Table *def;
+    lu_byte data[];
+} Array;
+
 static int get_int_field(lua_State *L, int table_idx, const char *key) {
     int res;
     lua_pushstring(L, key);
@@ -458,6 +466,95 @@ static int struct_define (lua_State *L) {
     return 1; /* Return Def table */
 }
 
+/* Array Implementation */
+
+static int array_len(lua_State *L) {
+    Array *arr = (Array *)lua_touserdata(L, 1);
+    lua_pushinteger(L, arr->len);
+    return 1;
+}
+
+static int array_index(lua_State *L) {
+    Array *arr = (Array *)lua_touserdata(L, 1);
+    int idx = (int)luaL_checkinteger(L, 2);
+    if (idx < 1 || idx > (int)arr->len) {
+        if (lua_type(L, 2) == LUA_TSTRING) {
+             lua_getmetatable(L, 1);
+             lua_pushvalue(L, 2);
+             lua_rawget(L, -2);
+             if (!lua_isnil(L, -1)) return 1;
+        }
+        return luaL_error(L, "array index out of bounds");
+    }
+
+    /* Return a COPY of the struct at index */
+    Struct *s = (Struct *)luaC_newobjdt(L, LUA_TSTRUCT, sizeof(Struct) + arr->size - 1, 0);
+    s->def = arr->def;
+    s->data_size = arr->size;
+
+    lu_byte *src = arr->data + (idx - 1) * arr->size;
+    memcpy(s->data, src, arr->size);
+
+    TValue *v = s2v(L->top.p);
+    v->value_.struct_ = s;
+    v->tt_ = ctb(LUA_VSTRUCT);
+    api_incr_top(L);
+
+    return 1;
+}
+
+static int array_newindex(lua_State *L) {
+    Array *arr = (Array *)lua_touserdata(L, 1);
+    int idx = (int)luaL_checkinteger(L, 2);
+    if (idx < 1 || idx > (int)arr->len) return luaL_error(L, "array index out of bounds");
+
+    if (!ttisstruct(s2v(L->top.p - 1))) {
+        return luaL_error(L, "expected struct value");
+    }
+    Struct *s = structvalue(s2v(L->top.p - 1));
+
+    if (s->def != arr->def) {
+        return luaL_error(L, "struct type mismatch");
+    }
+
+    lu_byte *dst = arr->data + (idx - 1) * arr->size;
+    memcpy(dst, s->data, arr->size);
+
+    return 0;
+}
+
+static int array_new(lua_State *L) {
+    if (!lua_istable(L, 1)) return luaL_error(L, "expected struct definition table");
+    int count = (int)luaL_checkinteger(L, 2);
+    if (count < 0) return luaL_error(L, "size must be non-negative");
+
+    int size = get_int_field(L, 1, KEY_SIZE);
+
+    size_t total_size = sizeof(Array) + (size_t)count * size;
+    Array *arr = (Array *)lua_newuserdatauv(L, total_size, 1);
+    arr->len = count;
+    arr->size = size;
+    arr->def = (Table*)lua_topointer(L, 1); /* 1st arg: def table */
+
+    /* Anchor def table */
+    lua_pushvalue(L, 1);
+    lua_setiuservalue(L, -2, 1);
+
+    memset(arr->data, 0, (size_t)count * size);
+
+    if (luaL_newmetatable(L, "struct.array")) {
+        lua_pushcfunction(L, array_index);
+        lua_setfield(L, -2, "__index");
+        lua_pushcfunction(L, array_newindex);
+        lua_setfield(L, -2, "__newindex");
+        lua_pushcfunction(L, array_len);
+        lua_setfield(L, -2, "__len");
+    }
+    lua_setmetatable(L, -2);
+
+    return 1;
+}
+
 static const luaL_Reg struct_funcs[] = {
   {"define", struct_define},
   {NULL, NULL}
@@ -469,6 +566,10 @@ int luaopen_struct (lua_State *L) {
   /* Register __struct_define globally for syntax support */
   lua_pushcfunction(L, struct_define);
   lua_setglobal(L, "__struct_define");
+
+  /* Register __array_define globally */
+  lua_pushcfunction(L, array_new);
+  lua_setglobal(L, "__array_define");
 
   return 1;
 }

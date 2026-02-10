@@ -47,6 +47,7 @@ typedef void *(*l_thread_func)(void *arg);
 /* Mutex API */
 void l_mutex_init(l_mutex_t *m);
 void l_mutex_lock(l_mutex_t *m);
+int l_mutex_trylock(l_mutex_t *m); /* Returns 0 on success */
 void l_mutex_unlock(l_mutex_t *m);
 void l_mutex_destroy(l_mutex_t *m);
 
@@ -68,5 +69,7 @@ void l_rwlock_destroy(l_rwlock_t *l);
 /* Thread API */
 int l_thread_create(l_thread_t *t, l_thread_func func, void *arg);
 int l_thread_join(l_thread_t t, void **retval);
+size_t l_thread_selfid(void);
+size_t l_thread_getid(l_thread_t *t);
 
 #endif

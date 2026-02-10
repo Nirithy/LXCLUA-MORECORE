@@ -185,6 +185,8 @@ typedef enum {
   SKW_ABSTRACT,
   SKW_FINAL,
   SKW_SEALED,    /* 密封类修饰符 */
+  /* array */
+  SKW_ARRAY,     /* 数组关键字 */
   /* getter/setter */
   SKW_GET,       /* getter 属性访问器 */
   SKW_SET,       /* setter 属性访问器 */
@@ -214,6 +216,8 @@ typedef struct {
 static SoftKWDef soft_keywords[] = {
   /* abstract - 语句开头（abstract class）或类体内（abstract function）*/
   {"abstract",   SKW_ABSTRACT,   SOFTKW_CTX_STMT_BEGIN | SOFTKW_CTX_CLASS_BODY,    {TK_FUNCTION, TK_NAME, 0}, {'=', 0}, 0},
+  /* array - 表达式中，后面跟类型名 */
+  {"array",      SKW_ARRAY,      SOFTKW_CTX_EXPR,          {TK_NAME, 0}, {'=', 0}, 0},
   /* class - 语句开头，后面必须跟类名 */
   {"class",      SKW_CLASS,      SOFTKW_CTX_STMT_BEGIN,    {TK_NAME, 0}, {'=', 0}, 0},
   /* extends - 类继承上下文，后面必须跟类名 */
@@ -2352,6 +2356,42 @@ static void primaryexp (LexState *ls, expdesc *v) {
         /* onew ClassName(args...) - 创建类实例 */
         newexpr(ls, v);
         return;
+      }
+      /* 使用软关键字系统检查 array */
+      if (softkw_test(ls, SKW_ARRAY, SOFTKW_CTX_EXPR)) {
+          luaX_next(ls); /* skip 'array' */
+
+          /* Get __array_define function */
+          expdesc f;
+          singlevaraux(ls->fs, luaS_newliteral(ls->L, "__array_define"), &f, 1);
+          if (f.k == VVOID) {
+              expdesc key;
+              singlevaraux(ls->fs, ls->envn, &f, 1);
+              codestring(&key, luaS_newliteral(ls->L, "__array_define"));
+              luaK_indexed(ls->fs, &f, &key);
+          }
+          luaK_exp2nextreg(ls->fs, &f);
+          int base = f.u.info;
+
+          /* Parse Type (arg1) */
+          expdesc type_e;
+          primaryexp(ls, &type_e);
+          while (ls->t.token == '.') {
+              fieldsel(ls, &type_e);
+          }
+          luaK_exp2nextreg(ls->fs, &type_e);
+
+          /* Parse Size (arg2) */
+          checknext(ls, '[');
+          expdesc size_e;
+          expr(ls, &size_e);
+          checknext(ls, ']');
+          luaK_exp2nextreg(ls->fs, &size_e);
+
+          /* Call __array_define */
+          init_exp(v, VCALL, luaK_codeABC(ls->fs, OP_CALL, base, 3, 2));
+          ls->fs->freereg = base + 1;
+          return;
       }
       /* 使用软关键字系统检查 osuper（需要前瞻 . 或 :） */
       if (softkw_test(ls, SKW_SUPER, SOFTKW_CTX_EXPR)) {
@@ -9285,6 +9325,11 @@ static void structstat (LexState *ls, int line, int isexport) {
   while (ls->t.token != '}' && ls->t.token != TK_EOS) {
       /* Field name */
       TString *fname = str_checkname(ls);
+
+      if (testnext(ls, ':')) {
+          TypeHint *th = typehint_new(ls);
+          checktypehint(ls, th);
+      }
 
       checknext(ls, '=');
 

@@ -25,6 +25,14 @@ void l_mutex_lock(l_mutex_t *m) {
 #endif
 }
 
+int l_mutex_trylock(l_mutex_t *m) {
+#if defined(LUA_USE_WINDOWS)
+  return TryEnterCriticalSection(&m->cs) ? 0 : 1;
+#else
+  return (pthread_mutex_trylock(&m->mutex) == 0) ? 0 : 1;
+#endif
+}
+
 void l_mutex_unlock(l_mutex_t *m) {
 #if defined(LUA_USE_WINDOWS)
   LeaveCriticalSection(&m->cs);
@@ -138,5 +146,21 @@ int l_thread_join(l_thread_t t, void **retval) {
   return 0;
 #else
   return pthread_join(t.thread, retval);
+#endif
+}
+
+size_t l_thread_selfid(void) {
+#if defined(LUA_USE_WINDOWS)
+  return (size_t)GetCurrentThreadId();
+#else
+  return (size_t)pthread_self();
+#endif
+}
+
+size_t l_thread_getid(l_thread_t *t) {
+#if defined(LUA_USE_WINDOWS)
+  return (size_t)GetThreadId(t->thread);
+#else
+  return (size_t)t->thread;
 #endif
 }
