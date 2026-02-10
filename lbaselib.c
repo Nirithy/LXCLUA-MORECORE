@@ -2609,6 +2609,11 @@ static int luaB_check_type(lua_State *L) {
     luaL_checkany(L, 1);
     luaL_checkany(L, 2);
 
+    if (lua_isnil(L, 2)) {
+        const char *name = luaL_optstring(L, 3, "?");
+        return luaL_error(L, "Bad type constraint for argument '%s': type or concept is nil (undefined)", name);
+    }
+
     if (!check_subtype(L, 1, 2)) {
         const char *name = luaL_optstring(L, 3, "?");
         const char *expected = "unknown";
