@@ -1924,6 +1924,7 @@ static void body (LexState *ls, expdesc *e, int ismethod, int line) {
   /* body ->  '(' parlist ')' block END | '{' block '}' */
   FuncState new_fs;
   BlockCnt bl;
+  int is_generic_factory = 0;
   
   if (ls->t.token == '{') {
     new_fs.f = addprototype(ls);
@@ -2022,7 +2023,22 @@ static void body (LexState *ls, expdesc *e, int ismethod, int line) {
      }
   }
   
-  if (ls->t.token == '(' || ls->t.token == TK_REQUIRES) {
+  if (ls->t.token == TK_REQUIRES) {
+      is_generic_factory = 1;
+  }
+  else if (ls->t.token == '(') {
+      int la1 = luaX_lookahead(ls);
+      if (la1 == ')') is_generic_factory = 1;
+      else if (la1 == TK_DOTS) {
+          if (luaX_lookahead2(ls) == ')') is_generic_factory = 1;
+      }
+      else if (la1 == TK_NAME) {
+          int la2 = luaX_lookahead2(ls);
+          if (la2 == ',' || la2 == ')' || la2 == ':') is_generic_factory = 1;
+      }
+  }
+
+  if (is_generic_factory) {
       /* Generic Factory Function */
       /* Current new_fs is Factory */
       /* Captured params are generics */
