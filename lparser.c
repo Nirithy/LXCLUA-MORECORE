@@ -10285,6 +10285,38 @@ static void constexprstat (LexState *ls) {
   }
 }
 
+static void deferstat (LexState *ls) {
+  FuncState *fs = ls->fs;
+  int line = ls->linenumber;
+  luaX_next(ls);  /* skip DEFER */
+
+  expdesc b;
+  FuncState new_fs;
+  BlockCnt bl;
+  new_fs.f = addprototype(ls);
+  new_fs.f->linedefined = line;
+  open_func(ls, &new_fs, &bl);
+  new_fs.f->numparams = 0;
+  new_fs.f->is_vararg = 0;
+
+  statement(ls);
+
+  new_fs.f->lastlinedefined = ls->linenumber;
+  codeclosure(ls, &b);
+  close_func(ls);
+
+  int vidx = new_localvarliteral(ls, "(defer)");
+  getlocalvardesc(fs, vidx)->vd.kind = RDKTOCLOSE;
+
+  adjustlocalvars(ls, 1);
+
+  expdesc v;
+  init_var(fs, &v, vidx);
+  luaK_storevar(fs, &v, &b);
+
+  checktoclose(fs, fs->nactvar - 1);
+}
+
 static void statement (LexState *ls) {
   int line = ls->linenumber;  /* may be needed for error messages */
   enterlevel(ls);
@@ -10342,6 +10374,10 @@ static void statement (LexState *ls) {
     }
     case TK_TRY: {  /* stat -> trystat */
       trystat(ls, line);
+      break;
+    }
+    case TK_DEFER: {
+      deferstat(ls);
       break;
     }
     case TK_WITH: {  /* stat -> withstat */
