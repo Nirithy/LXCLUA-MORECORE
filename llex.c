@@ -145,7 +145,7 @@ static const char* const luaX_warnNames[] = {
 };
 
 static const char *const luaX_tokens [] = {
-    "and", "asm", "async", "await", "break", "case", "catch", "command", "const", "continue", "default", "do", "else", "elseif",
+    "and", "asm", "async", "await", "break", "case", "catch", "command", "const", "continue", "default", "defer", "do", "else", "elseif",
     "end", "enum", "export", "false", "finally", "for", "function", "global", "goto", "if", "in", "is", "keyword", "lambda", "local", "nil", "not", "operator", "or",
     "repeat",
     "return", "switch", "take", "then", "true", "try", "until", "when", "while", "with",

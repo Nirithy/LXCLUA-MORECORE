@@ -124,6 +124,8 @@ UpVal *luaF_findupval (lua_State *L, StkId level) {
 static void callclosemethod (lua_State *L, TValue *obj, TValue *err, int yy) {
   StkId top = L->top.p;
   const TValue *tm = luaT_gettmbyobj(L, obj, TM_CLOSE);
+  if (ttisnil(tm) && ttisfunction(obj))
+    tm = obj;  /* use object itself as the close method */
   setobj2s(L, top, tm);  /* will call metamethod... */
   setobj2s(L, top + 1, obj);  /* with 'self' as the 1st argument */
   setobj2s(L, top + 2, err);  /* and error msg. as 2nd argument */
@@ -141,7 +143,7 @@ static void callclosemethod (lua_State *L, TValue *obj, TValue *err, int yy) {
 */
 static void checkclosemth (lua_State *L, StkId level) {
   const TValue *tm = luaT_gettmbyobj(L, s2v(level), TM_CLOSE);
-  if (ttisnil(tm)) {  /* no metamethod? */
+  if (ttisnil(tm) && !ttisfunction(s2v(level))) {  /* no metamethod and not a function? */
     int idx = cast_int(level - L->ci->func.p);  /* variable index */
     const char *vname = luaG_findlocal(L, L->ci, idx, NULL);
     if (vname == NULL) vname = "?";
