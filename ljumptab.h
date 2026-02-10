@@ -128,6 +128,7 @@ static const void *const disptab[NUM_OPCODES] = {
 &&L_OP_IN,
 &&L_OP_SLICE,
 &&L_OP_NOP,
+&&L_OP_CASE,
 &&L_OP_EXTRAARG
 
 };

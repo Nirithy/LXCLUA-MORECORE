@@ -2756,6 +2756,21 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
         UNUSED(GETARG_C(i));
         vmbreak;
       }
+      vmcase(OP_CASE) {
+        StkId ra = RA(i);
+        TValue rb; setobj(L, &rb, vRB(i)); /* copy B before it might be overwritten */
+        TValue rc; setobj(L, &rc, vRC(i)); /* copy C before it might be overwritten */
+        Table *t;
+        L->top.p = ra + 1;  /* correct top in case of emergency GC */
+        t = luaH_new(L);  /* memory allocation */
+        sethvalue2s(L, ra, t);
+        /* t[1] = RB */
+        luaH_setint(L, t, 1, &rb);
+        /* t[2] = RC */
+        luaH_setint(L, t, 2, &rc);
+        checkGC(L, ra + 1);
+        vmbreak;
+      }
       vmcase(OP_EXTRAARG) {
         lua_assert(0);
         vmbreak;

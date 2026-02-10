@@ -8,7 +8,10 @@
 #else
   #include <pthread.h>
   #include <time.h>
+  #include <errno.h>
 #endif
+
+#define LTHREAD_TIMEDOUT 1
 
 typedef struct l_mutex_t {
 #if defined(LUA_USE_WINDOWS)
@@ -50,6 +53,7 @@ void l_mutex_destroy(l_mutex_t *m);
 /* Condition Variable API */
 void l_cond_init(l_cond_t *c);
 void l_cond_wait(l_cond_t *c, l_mutex_t *m);
+int l_cond_wait_timeout(l_cond_t *c, l_mutex_t *m, long ms);
 void l_cond_signal(l_cond_t *c);
 void l_cond_broadcast(l_cond_t *c);
 void l_cond_destroy(l_cond_t *c);

@@ -58,6 +58,23 @@ void l_cond_wait(l_cond_t *c, l_mutex_t *m) {
 #endif
 }
 
+int l_cond_wait_timeout(l_cond_t *c, l_mutex_t *m, long ms) {
+#if defined(LUA_USE_WINDOWS)
+  if (SleepConditionVariableCS(&c->cond, &m->cs, ms)) return 0;
+  return (GetLastError() == ERROR_TIMEOUT) ? LTHREAD_TIMEDOUT : -1;
+#else
+  struct timespec ts;
+  clock_gettime(CLOCK_REALTIME, &ts);
+  ts.tv_sec += ms / 1000;
+  ts.tv_nsec += (ms % 1000) * 1000000;
+  if (ts.tv_nsec >= 1000000000) {
+    ts.tv_sec++;
+    ts.tv_nsec -= 1000000000;
+  }
+  return (pthread_cond_timedwait(&c->cond, &m->mutex, &ts) == ETIMEDOUT) ? LTHREAD_TIMEDOUT : 0;
+#endif
+}
+
 void l_cond_signal(l_cond_t *c) {
 #if defined(LUA_USE_WINDOWS)
   WakeConditionVariable(&c->cond);

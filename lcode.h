@@ -47,6 +47,8 @@ typedef enum BinOpr {
   OPR_AND, OPR_OR,
   /* null coalescing operator */
   OPR_NULLCOAL,
+  /* pick case operator */
+  OPR_CASE,
   OPR_NOBINOPR
 } BinOpr;
 
