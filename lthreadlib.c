@@ -8,6 +8,7 @@
 #include "lualib.h"
 
 #include "lthread.h"
+#include "lstruct.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -41,6 +42,7 @@ typedef struct {
     ChannelElem *tail;
     int closed;
     Listener *listeners;
+    int type_ref;
 } Channel;
 
 static void *thread_entry(void *arg) {
@@ -216,7 +218,7 @@ static int thread_id(lua_State *L) {
     return 1;
 }
 
-static int channel_new(lua_State *L) {
+static int channel_create_impl(lua_State *L, int type_idx) {
     Channel *ch = (Channel *)lua_newuserdata(L, sizeof(Channel));
     l_mutex_init(&ch->lock);
     l_cond_init(&ch->cond);
@@ -224,9 +226,28 @@ static int channel_new(lua_State *L) {
     ch->tail = NULL;
     ch->closed = 0;
     ch->listeners = NULL;
+    ch->type_ref = LUA_NOREF;
+    if (type_idx != 0) {
+        lua_pushvalue(L, type_idx);
+        ch->type_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+    }
     luaL_getmetatable(L, "lthread.channel");
     lua_setmetatable(L, -2);
     return 1;
+}
+
+static int channel_factory_call(lua_State *L) {
+    return channel_create_impl(L, lua_upvalueindex(1));
+}
+
+static int thread_channel(lua_State *L) {
+    if (lua_gettop(L) == 0) {
+        return channel_create_impl(L, 0);
+    } else {
+        lua_pushvalue(L, 1);
+        lua_pushcclosure(L, channel_factory_call, 1);
+        return 1;
+    }
 }
 
 static int channel_gc(lua_State *L) {
@@ -248,15 +269,47 @@ static int channel_gc(lua_State *L) {
         l = next;
     }
     ch->listeners = NULL;
+    if (ch->type_ref != LUA_NOREF) {
+        luaL_unref(L, LUA_REGISTRYINDEX, ch->type_ref);
+    }
     l_mutex_unlock(&ch->lock);
     l_mutex_destroy(&ch->lock);
     l_cond_destroy(&ch->cond);
     return 0;
 }
 
+static int check_type_match(lua_State *L, int type_idx, int val_idx) {
+    if (lua_type(L, type_idx) == LUA_TSTRING) {
+        const char *expected = lua_tostring(L, type_idx);
+        if (strcmp(expected, "number") == 0) return lua_isnumber(L, val_idx);
+        if (strcmp(expected, "string") == 0) return lua_isstring(L, val_idx);
+        if (strcmp(expected, "boolean") == 0) return lua_isboolean(L, val_idx);
+        if (strcmp(expected, "table") == 0) return lua_istable(L, val_idx);
+        if (strcmp(expected, "function") == 0) return lua_isfunction(L, val_idx);
+        if (strcmp(expected, "thread") == 0) return lua_isthread(L, val_idx);
+        if (strcmp(expected, "userdata") == 0) return lua_isuserdata(L, val_idx);
+        if (strcmp(expected, "nil_type") == 0) return lua_isnil(L, val_idx);
+        return 0;
+    } else if (lua_type(L, type_idx) == LUA_TTABLE) {
+        if (lua_type(L, val_idx) != LUA_TSTRUCT) return 0;
+        Struct *s = (Struct *)lua_topointer(L, val_idx);
+        if (!s) return 0;
+        return (s->def == (Table*)lua_topointer(L, type_idx));
+    }
+    return 1; /* Match anything else or invalid type spec */
+}
+
 static int channel_send(lua_State *L) {
     Channel *ch = (Channel *)luaL_checkudata(L, 1, "lthread.channel");
     luaL_checkany(L, 2);
+
+    if (ch->type_ref != LUA_NOREF) {
+        lua_rawgeti(L, LUA_REGISTRYINDEX, ch->type_ref);
+        if (!check_type_match(L, -1, 2)) {
+             return luaL_error(L, "channel type mismatch");
+        }
+        lua_pop(L, 1);
+    }
 
     int ref = luaL_ref(L, LUA_REGISTRYINDEX); // pops value
 
@@ -301,6 +354,16 @@ static int channel_send(lua_State *L) {
 static int channel_try_send(lua_State *L) {
     Channel *ch = (Channel *)luaL_checkudata(L, 1, "lthread.channel");
     luaL_checkany(L, 2);
+
+    if (ch->type_ref != LUA_NOREF) {
+        lua_rawgeti(L, LUA_REGISTRYINDEX, ch->type_ref);
+        if (!check_type_match(L, -1, 2)) {
+             lua_pop(L, 1);
+             lua_pushboolean(L, 0);
+             return 1;
+        }
+        lua_pop(L, 1);
+    }
 
     int ref = luaL_ref(L, LUA_REGISTRYINDEX); // pops value
 
@@ -706,7 +769,7 @@ static const luaL_Reg channel_methods[] = {
 static const luaL_Reg thread_funcs[] = {
     {"create", thread_create},
     {"createx", thread_createx},
-    {"channel", channel_new},
+    {"channel", thread_channel},
     {"pick", thread_pick},
     {"on", thread_on},
     {"over", thread_over},

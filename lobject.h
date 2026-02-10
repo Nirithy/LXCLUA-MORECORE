@@ -471,6 +471,8 @@ typedef struct TString {
 typedef struct Struct {
   CommonHeader;
   struct Table *def;
+  int *gc_offsets;
+  int n_gc_offsets;
   size_t data_size;
   lu_byte data[1];
 } Struct;

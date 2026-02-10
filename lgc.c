@@ -302,6 +302,13 @@ static void reallymarkobject (global_State *g, GCObject *o) {
     case LUA_VSTRUCT: {
       Struct *s = gco2struct(o);
       markobjectN(g, s->def);
+      if (s->gc_offsets) {
+          int i;
+          for (i = 0; i < s->n_gc_offsets; i++) {
+              GCObject **slot = (GCObject**)(s->data + s->gc_offsets[i]);
+              markobjectN(g, *slot);
+          }
+      }
       set2black(o);
       break;
     }
