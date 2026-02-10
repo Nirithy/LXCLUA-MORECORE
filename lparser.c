@@ -2175,11 +2175,147 @@ static void primaryexp (LexState *ls, expdesc *v) {
   switch (ls->t.token) {
     case '(': {
       int line = ls->linenumber;
+
+      /*
+      ** Arrow Function Detection
+      ** Case 1: ( ... ) => ...  (Empty or Multi-param or Single-param with comma)
+      ** We check this BEFORE consuming '('.
+      */
+      int is_arrow = 0;
+      int la1 = luaX_lookahead(ls);
+
+      /* Case: () => */
+      if (la1 == ')') {
+         if (luaX_lookahead2(ls) == TK_MEAN) {
+            is_arrow = 1;
+         }
+      }
+      /* Case: (name, ...) => */
+      else if ((la1 == TK_NAME || la1 == TK_DOTS) && luaX_lookahead2(ls) == ',') {
+         is_arrow = 1;
+      }
+
+      if (is_arrow) {
+         luaX_next(ls); /* skip '(' */
+
+         /* Parse parameters manually */
+         FuncState new_fs;
+         BlockCnt bl;
+         new_fs.f = addprototype(ls);
+         new_fs.f->linedefined = line;
+         open_func(ls, &new_fs, &bl);
+
+         TString *varargname = NULL;
+         int nparams = 0;
+         if (ls->t.token != ')') {
+             do {
+                if (ls->t.token == TK_NAME) {
+                   new_localvar(ls, str_checkname(ls));
+                   nparams++;
+                } else if (ls->t.token == TK_DOTS) {
+                   luaX_next(ls);
+                   new_fs.f->is_vararg = 1;
+                   if (ls->t.token == TK_NAME) {
+                      varargname = ls->t.seminfo.ts;
+                      luaX_next(ls);
+                   }
+                } else {
+                   luaX_syntaxerror(ls, "<name> or '...' expected in arrow function args");
+                }
+             } while (!new_fs.f->is_vararg && testnext(ls, ','));
+         }
+
+         adjustlocalvars(ls, nparams);
+         new_fs.f->numparams = cast_byte(new_fs.nactvar);
+         if (new_fs.f->is_vararg)
+            setvararg(&new_fs, new_fs.f->numparams);
+         luaK_reserveregs(&new_fs, new_fs.nactvar);
+
+         checknext(ls, ')');
+
+         /* Expect => */
+         if (ls->t.token == TK_MEAN) {
+            luaX_next(ls); /* skip => */
+
+            if (varargname) namedvararg(ls, varargname);
+
+            if (ls->t.token == '{') {
+               statement(ls);
+            } else {
+               enterlevel(ls);
+               retstat(ls);
+               new_fs.freereg = new_fs.nactvar;
+               leavelevel(ls);
+            }
+
+            new_fs.f->lastlinedefined = ls->linenumber;
+            codeclosure(ls, v);
+            close_func(ls);
+            return;
+         } else {
+            luaX_syntaxerror(ls, "expected '=>' after arrow function parameters");
+         }
+      }
+
+      /*
+      ** Standard '(' case, but we need to check for `(name) =>` and `(...) =>`
+      ** which require peeking 3 tokens deep: ( name ) =>
+      ** We do this AFTER consuming '(' so we can use lookahead2 to see '=>'.
+      */
       int old_flags = ls->expr_flags;
       ls->expr_flags = 0;
-      luaX_next(ls);
-      if (ls->t.token == TK_NAME) {
-        if (luaX_lookahead(ls) == TK_WALRUS) {
+      luaX_next(ls); /* skip '(' */
+
+      /* Check for (name) => or (...) => */
+      if ((ls->t.token == TK_NAME || ls->t.token == TK_DOTS) &&
+          luaX_lookahead(ls) == ')' &&
+          luaX_lookahead2(ls) == TK_MEAN) {
+
+          /* It is a single-param arrow function! */
+          TString *param_name = NULL;
+          int is_vararg = 0;
+
+          if (ls->t.token == TK_NAME) {
+             param_name = ls->t.seminfo.ts;
+          } else {
+             is_vararg = 1;
+          }
+          luaX_next(ls); /* consume name/... */
+          luaX_next(ls); /* consume ) */
+          luaX_next(ls); /* consume => */
+
+          FuncState new_fs;
+          BlockCnt bl;
+          new_fs.f = addprototype(ls);
+          new_fs.f->linedefined = line;
+          open_func(ls, &new_fs, &bl);
+
+          if (is_vararg) {
+             new_fs.f->is_vararg = 1;
+             setvararg(&new_fs, 0);
+          } else {
+             new_localvar(ls, param_name);
+             adjustlocalvars(ls, 1);
+             new_fs.f->numparams = 1;
+             luaK_reserveregs(&new_fs, 1);
+          }
+
+          if (ls->t.token == '{') {
+             statement(ls);
+          } else {
+             enterlevel(ls);
+             retstat(ls);
+             new_fs.freereg = new_fs.nactvar;
+             leavelevel(ls);
+          }
+
+          new_fs.f->lastlinedefined = ls->linenumber;
+          codeclosure(ls, v);
+          close_func(ls);
+          return;
+      }
+
+      if (ls->t.token == TK_NAME && luaX_lookahead(ls) == TK_WALRUS) {
           TString *varname = ls->t.seminfo.ts;
           int save = ls->linenumber;
           luaX_next(ls);
@@ -2200,8 +2336,8 @@ static void primaryexp (LexState *ls, expdesc *v) {
           luaK_exp2nextreg(ls->fs, &e);
           init_exp(v, VNONRELOC, e.u.info);
           return;
-        }
       }
+
       expr(ls, v);
       ls->expr_flags = old_flags;
       check_match(ls, ')', '(', line);
