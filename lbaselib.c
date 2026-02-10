@@ -2106,6 +2106,19 @@ static int async_start(lua_State *L) {
     lua_State *co = lua_newthread(L);
     lua_insert(L, 1); /* Move thread to bottom (stack: thread, arg1, arg2...) */
 
+    /* Get wrapper from registry */
+    lua_getfield(L, LUA_REGISTRYINDEX, "_ASYNC_LAZY_WRAPPER");
+    if (lua_isnil(L, -1)) {
+        lua_pop(L, 1);
+        /* Create wrapper if not exists (lazy init) */
+        if (luaL_dostring(L, "return function(f, ...) coroutine.yield(); return f(...) end") != LUA_OK) {
+            return lua_error(L);
+        }
+        lua_pushvalue(L, -1);
+        lua_setfield(L, LUA_REGISTRYINDEX, "_ASYNC_LAZY_WRAPPER");
+    }
+    lua_xmove(L, co, 1);
+
     /* Push function */
     lua_pushvalue(L, lua_upvalueindex(1));
     lua_xmove(L, co, 1);
@@ -2114,21 +2127,20 @@ static int async_start(lua_State *L) {
     lua_xmove(L, co, n);
 
     int nres;
-    int status = lua_resume(co, L, n, &nres);
+    int status = lua_resume(co, L, n + 1, &nres);
 
-    if (status != LUA_OK && status != LUA_YIELD) {
-        lua_xmove(co, L, 1);
-        return lua_error(L);
+    if (status != LUA_YIELD) {
+        if (status != LUA_OK) {
+            lua_xmove(co, L, 1);
+            return lua_error(L);
+        }
     }
 
     if (nres > 0) {
-        if (!lua_checkstack(L, nres)) {
-            return luaL_error(L, "too many results to move");
-        }
-        lua_xmove(co, L, nres);
+        lua_pop(co, nres);
     }
 
-    return 1 + nres;
+    return 1;
 }
 
 static int luaB_async_wrap(lua_State *L) {

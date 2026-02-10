@@ -32,10 +32,17 @@ local task = test_async("start")
 assert(type(task) == "thread")
 
 -- Resume the task (simulating a scheduler)
--- The first resume was done by __async_wrap. The task is suspended at 'await'.
+-- The task is suspended at start (lazy start).
+-- We resume it to start execution.
+local status, res = coroutine.resume(task)
+print("First resume status:", status, "result:", res)
+assert(status == true)
+assert(res == "yield_value")
+
+-- The task is now suspended at 'await'.
 -- We resume it providing the result of the 'await'.
-local status, res = coroutine.resume(task, "resolved")
-print("Resume status:", status, "result:", res)
+status, res = coroutine.resume(task, "resolved")
+print("Second resume status:", status, "result:", res)
 
 assert(status == true)
 assert(res == "resolved_done")
