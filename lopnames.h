@@ -116,6 +116,7 @@ static const char *const opnames[] = {
   "IN",
   "SLICE",
   "NOP",
+  "CASE",
   "EXTRAARG",
   NULL
 };

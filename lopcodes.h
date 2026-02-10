@@ -384,6 +384,8 @@ OP_NOP,/*	A B C	空操作指令 - 不执行任何操作
 			B = 虚假操作数1（被忽略）
 			C = 虚假操作数2（被忽略）			*/
 
+OP_CASE,/*	A B C	R[A] := { R[B], R[C] } (create case pair)	*/
+
 OP_EXTRAARG/*	Ax	extra (larger) argument for previous opcode	*/
 } OpCode;
 
