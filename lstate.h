@@ -418,6 +418,7 @@ union GCUnion {
   struct Proto p;
   struct lua_State th;  /* thread */
   struct UpVal upv;
+  struct Struct struct_;
 };
 
 

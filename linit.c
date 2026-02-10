@@ -44,6 +44,9 @@ int luaopen_logtable(lua_State *L);
 /* 声明thread库的初始化函数 */
 int luaopen_thread(lua_State *L);
 
+/* 声明struct库的初始化函数 */
+int luaopen_struct(lua_State *L);
+
 // clang and ffi libraries
 
 /*
@@ -71,6 +74,7 @@ static const luaL_Reg stdlibs[] = {
   {LUA_VMLIBNAME, luaopen_vm},
   {LUA_BITLIBNAME, luaopen_bit},
   {LUA_PTRLIBNAME, luaopen_ptr},
+  {LUA_STRUCTLIBNAME, luaopen_struct},
   {"bit32", luaopen_bit},
   {"thread", luaopen_thread},
 
@@ -130,6 +134,7 @@ static const luaL_Reg loadedlibs[] = {
   {LUA_DBLIBNAME, luaopen_debug},
   {LUA_BITLIBNAME, luaopen_bit},
   {LUA_PTRLIBNAME, luaopen_ptr},
+  {LUA_STRUCTLIBNAME, luaopen_struct},
   {"bit32", luaopen_bit},
   {"thread", luaopen_thread},
 

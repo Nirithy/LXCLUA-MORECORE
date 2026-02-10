@@ -88,6 +88,7 @@ static void trystat (LexState *ls, int line);     /* try语句的前向声明 */
 static void withstat (LexState *ls, int line);    /* with语句的前向声明 */
 static void classstat (LexState *ls, int line, int class_flags, int isexport);   /* class语句的前向声明 */
 static void interfacestat (LexState *ls, int line); /* interface语句的前向声明 */
+static void structstat (LexState *ls, int line, int isexport);  /* struct语句的前向声明 */
 static void enumstat (LexState *ls, int line, int isexport);    /* enum语句的前向声明 */
 static void newexpr (LexState *ls, expdesc *v);   /* onew表达式的前向声明 */
 static void superexpr (LexState *ls, expdesc *v); /* osuper表达式的前向声明 */
@@ -1413,6 +1414,7 @@ static void fieldsel (LexState *ls, expdesc *v) {
       case TK_OR: ts = luaS_newliteral(ls->L, "or"); break;
       case TK_REPEAT: ts = luaS_newliteral(ls->L, "repeat"); break;
       case TK_RETURN: ts = luaS_newliteral(ls->L, "return"); break;
+      case TK_STRUCT: ts = luaS_newliteral(ls->L, "struct"); break;
       case TK_SWITCH: ts = luaS_newliteral(ls->L, "switch"); break;
       case TK_TAKE: ts = luaS_newliteral(ls->L, "take"); break;
       case TK_THEN: ts = luaS_newliteral(ls->L, "then"); break;
@@ -9237,6 +9239,112 @@ static void interfacestat(LexState *ls, int line) {
 
 
 /*
+** 解析 struct 定义
+** 语法: struct Name { field = value, ... }
+** 编译为: Name = __struct_define("Name", { "field", value, ... })
+*/
+static void structstat (LexState *ls, int line, int isexport) {
+  FuncState *fs = ls->fs;
+  expdesc struct_name_exp, v;
+  TString *structname;
+
+  luaX_next(ls);  /* skip 'struct' */
+
+  /* Get struct name */
+  structname = str_checkname(ls);
+
+  /* Prepare to call __struct_define(name, {fields}) */
+  expdesc func_exp;
+  singlevaraux(fs, luaS_newliteral(ls->L, "__struct_define"), &func_exp, 1);
+  if (func_exp.k == VVOID) {
+      /* Fallback to _ENV */
+      expdesc key;
+      singlevaraux(fs, ls->envn, &func_exp, 1);
+      codestring(&key, luaS_newliteral(ls->L, "__struct_define"));
+      luaK_indexed(fs, &func_exp, &key);
+  }
+  luaK_exp2nextreg(fs, &func_exp);
+  int func_reg = func_exp.u.info;
+
+  /* Arg 1: Name string */
+  expdesc name_arg;
+  codestring(&name_arg, structname);
+  luaK_exp2nextreg(fs, &name_arg);
+
+  /* Arg 2: Fields table */
+  /* We build the table manually using OP_NEWTABLE and filling it as an array */
+  /* The array content: { "field1", val1, "field2", val2, ... } */
+  int table_reg = fs->freereg;
+  int pc = luaK_codeABC(fs, OP_NEWTABLE, table_reg, 0, 0);
+  luaK_code(fs, 0); /* extra arg */
+  luaK_reserveregs(fs, 1);
+
+  checknext(ls, '{');
+
+  int i = 1; /* Array index, 1-based */
+  while (ls->t.token != '}' && ls->t.token != TK_EOS) {
+      /* Field name */
+      TString *fname = str_checkname(ls);
+
+      checknext(ls, '=');
+
+      expdesc val_exp;
+      expr(ls, &val_exp);
+      luaK_exp2nextreg(fs, &val_exp);
+
+      /* Store name at index i */
+      expdesc t_exp;
+      init_exp(&t_exp, VNONRELOC, table_reg);
+
+      expdesc key_idx;
+      init_exp(&key_idx, VKINT, 0);
+      key_idx.u.ival = i;
+      luaK_indexed(fs, &t_exp, &key_idx);
+
+      expdesc fname_exp;
+      codestring(&fname_exp, fname);
+      luaK_storevar(fs, &t_exp, &fname_exp);
+
+      /* Store value at index i+1 */
+      init_exp(&t_exp, VNONRELOC, table_reg);
+
+      key_idx.u.ival = i + 1;
+      luaK_indexed(fs, &t_exp, &key_idx);
+
+      luaK_storevar(fs, &t_exp, &val_exp);
+
+      i += 2;
+
+      if (ls->t.token == ',' || ls->t.token == ';')
+          luaX_next(ls);
+  }
+  check_match(ls, '}', '{', line);
+
+  luaK_settablesize(fs, pc, table_reg, i - 1, 0);
+
+  /* Call __struct_define */
+  init_exp(&v, VCALL, luaK_codeABC(fs, OP_CALL, func_reg, 3, 2)); /* 2 args, 1 result */
+  fs->freereg = func_reg + 1; /* Result is at func_reg */
+
+  /* Store result in variable */
+  if (isexport) {
+     new_localvar(ls, structname);
+     add_export(ls, structname);
+     adjustlocalvars(ls, 1);
+     init_var(fs, &struct_name_exp, fs->nactvar - 1);
+  } else {
+     buildglobal(ls, structname, &struct_name_exp);
+  }
+
+  /* v is now the result of the call (VCALL) */
+  /* We need to execute the call and store result */
+  luaK_storevar(fs, &struct_name_exp, &v);
+
+  luaK_fixline(fs, line);
+}
+
+
+/*
 ** 解析枚举定义
 ** 参数：
 **   ls - 词法状态
@@ -10401,6 +10509,10 @@ static void statement (LexState *ls) {
       funcstat(ls, line, 0);
       break;
     }
+    case TK_STRUCT: {  /* stat -> structstat */
+      structstat(ls, line, 0);
+      break;
+    }
     case TK_ENUM: {  /* stat -> enumstat */
       enumstat(ls, line, 0);
       break;
@@ -10412,6 +10524,9 @@ static void statement (LexState *ls) {
       }
       else if (testnext(ls, TK_LOCAL)) {
         localstat(ls, 1);
+      }
+      else if (ls->t.token == TK_STRUCT) {
+        structstat(ls, line, 1);
       }
       else if (ls->t.token == TK_ENUM) {
         enumstat(ls, line, 1);

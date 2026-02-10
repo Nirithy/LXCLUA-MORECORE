@@ -52,6 +52,7 @@ typedef union Value {
   struct GCObject *gc;    /* collectable objects */
   void *p;         /* light userdata */
   void *ptr;       /* 真正的指针类型 */
+  struct Struct *struct_; /* struct values */
   lua_CFunction f; /* light C functions */
   lua_Integer i;   /* integer numbers */
   lua_Number n;    /* float numbers */
@@ -122,10 +123,15 @@ typedef struct TValue {
 
 
 /* main macro to copy values (from 'obj2' to 'obj1') */
+/* Modified to support struct deep copy */
 #define setobj(L,obj1,obj2) \
-	{ TValue *io1=(obj1); const TValue *io2=(obj2); \
-          io1->value_ = io2->value_; settt_(io1, io2->tt_); \
-	  checkliveness(L,io1); lua_assert(!isnonstrictnil(io1)); }
+  { TValue *io1=(obj1); const TValue *io2=(obj2); \
+    if (l_unlikely(ttisstruct(io2))) { \
+       luaS_copystruct(L, io1, io2); \
+    } else { \
+       io1->value_ = io2->value_; settt_(io1, io2->tt_); \
+       checkliveness(L,io1); lua_assert(!isnonstrictnil(io1)); \
+    } }
 
 /*
 ** Different types of assignments, according to source and destination.
@@ -446,6 +452,33 @@ typedef struct TString {
 	(strisshr(ts) \
 	? (cast_void((len) = cast_sizet((ts)->shrlen)), rawgetshrstr(ts)) \
 	: (cast_void((len) = (ts)->u.lnglen), (ts)->contents))
+
+/* }======================================================= */
+
+
+/*
+** {=======================================================
+** Structs
+** ========================================================
+*/
+
+#define LUA_VSTRUCT	makevariant(LUA_TSTRUCT, 0)
+
+#define ttisstruct(o)		checktag((o), ctb(LUA_VSTRUCT))
+
+#define structvalue(o)	check_exp(ttisstruct(o), gco2struct(val_(o).gc))
+
+typedef struct Struct {
+  CommonHeader;
+  struct Table *def;
+  size_t data_size;
+  lu_byte data[1];
+} Struct;
+
+#define gco2struct(o)	check_exp((o)->tt == LUA_VSTRUCT, &((cast_u(o) - offsetof(Struct, next))->struct_))
+
+/* function to copy structs */
+LUAI_FUNC void luaS_copystruct (lua_State *L, TValue *dest, const TValue *src);
 
 /* }======================================================= */
 

@@ -25,6 +25,7 @@
 #include "ltable.h"
 #include "ltm.h"
 #include "lvm.h"
+#include "lstruct.h"
 
 
 /*
@@ -32,6 +33,22 @@
 ** 内部辅助函数
 ** =====================================================================
 */
+
+static TValue *index2value_helper (lua_State *L, int idx) {
+  CallInfo *ci = L->ci;
+  if (idx > 0) {
+    StkId o = ci->func.p + idx;
+    api_check(L, idx <= ci->top.p - (ci->func.p + 1), "unacceptable index");
+    if (o >= L->top.p) return &G(L)->nilvalue;
+    else return s2v(o);
+  }
+  else if (idx == LUA_REGISTRYINDEX)
+    return &G(L)->l_registry;
+  else {
+      /* assume upvalue or other pseudo indices not handled here for now in lclass */
+      return &G(L)->nilvalue;
+  }
+}
 
 /*
 ** 获取绝对栈索引
@@ -1582,6 +1599,13 @@ int luaC_instanceof(lua_State *L, int obj_idx, int class_idx) {
   obj_idx = absindex(L, obj_idx);
   class_idx = absindex(L, class_idx);
   
+  if (lua_type(L, obj_idx) == LUA_TSTRUCT) {
+      const TValue *o = index2value_helper(L, obj_idx);
+      const TValue *c = index2value_helper(L, class_idx);
+      if (structvalue(o)->def == hvalue(c)) return 1;
+      return 0;
+  }
+
   /* 检查是否是对象 */
   if (!luaC_isobject(L, obj_idx)) {
     return 0;

@@ -24,6 +24,7 @@
 #include "lfunc.h"
 #include "ldo.h"
 #include "lgc.h"
+#include "lclass.h"
 #include <stdint.h>
 
 #if defined(__ANDROID__) && !defined(__NDK_MAJOR__)
@@ -480,6 +481,16 @@ static int luaB_collectgarbage (lua_State *L) {
   return 1;
 }
 
+
+static int luaB_isstruct (lua_State *L) {
+  lua_pushboolean(L, lua_type(L, 1) == LUA_TSTRUCT);
+  return 1;
+}
+
+static int luaB_isinstance (lua_State *L) {
+  lua_pushboolean(L, luaC_instanceof(L, 1, 2));
+  return 1;
+}
 
 static int luaB_type (lua_State *L) {
   int t = lua_type(L, 1);
@@ -2565,6 +2576,8 @@ static const luaL_Reg base_funcs[] = {
   {"fwake", luaB_fwake},
   {"wymd5", luaB_md5},
   {"type", luaB_type},
+  {"isstruct", luaB_isstruct},
+  {"isinstance", luaB_isinstance},
   {"__test__", luaB_test},
   {"xpcall", luaB_xpcall},
   /* placeholders */

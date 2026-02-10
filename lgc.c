@@ -299,6 +299,12 @@ GCObject *luaC_newobj (lua_State *L, int tt, size_t sz) {
 */
 static void reallymarkobject (global_State *g, GCObject *o) {
   switch (o->tt) {
+    case LUA_VSTRUCT: {
+      Struct *s = gco2struct(o);
+      markobjectN(g, s->def);
+      set2black(o);
+      break;
+    }
     case LUA_VSHRSTR:
     case LUA_VLNGSTR: {
       set2black(o);  /* nothing to visit */
@@ -783,6 +789,11 @@ static void freeobj (lua_State *L, GCObject *o) {
     case LUA_VUPVAL:
       freeupval(L, gco2upv(o));
       break;
+    case LUA_VSTRUCT: {
+      Struct *s = gco2struct(o);
+      luaM_freemem(L, s, sizeof(Struct) + s->data_size - 1);
+      break;
+    }
     case LUA_VLCL: {
       LClosure *cl = gco2lcl(o);
       luaM_freemem(L, cl, sizeLclosure(cl->nupvalues));

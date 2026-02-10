@@ -51,6 +51,7 @@
 #include "lclass.h"
 #include "lobfuscate.h"
 #include "lthread.h"
+#include "lstruct.h"
 
 
 /*
@@ -331,6 +332,9 @@ void luaV_finishget (lua_State *L, const TValue *t, TValue *key, StkId val,
             return;
          }
          l_rwlock_unlock(&h->lock);
+      } else if (ttisstruct(t)) {
+        luaS_structindex(L, t, key, val);
+        return;
       } else {
         if (ttisstring(t) && ttisinteger(key)) {
           size_t l = tsslen(tsvalue(t));
@@ -429,7 +433,11 @@ void luaV_finishset (lua_State *L, const TValue *t, TValue *key,
       /* else will try the metamethod */
     }
     else {  /* not a table? or slot is NULL */
-      if (ttistable(t)) {
+      if (ttisstruct(t)) {
+        luaS_structnewindex(L, t, key, val);
+        return;
+      }
+      else if (ttistable(t)) {
          Table *h = hvalue(t);
          l_rwlock_wrlock(&h->lock);
          const TValue *res = luaH_get(h, key);
@@ -719,6 +727,7 @@ int luaV_equalobj (lua_State *L, const TValue *t1, const TValue *t2) {
     case LUA_VLCF: return fvalue(t1) == fvalue(t2);
     case LUA_VSHRSTR: return eqshrstr(tsvalue(t1), tsvalue(t2));
     case LUA_VLNGSTR: return luaS_eqlngstr(tsvalue(t1), tsvalue(t2));
+    case LUA_VSTRUCT: return luaS_structeq(t1, t2);
     case LUA_VUSERDATA: {
       if (uvalue(t1) == uvalue(t2)) return 1;
       else if (L == LUA_NULLPTR) return 0;
