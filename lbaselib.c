@@ -2584,6 +2584,17 @@ static int check_subtype(lua_State *L, int val_idx, int type_idx) {
 
         return luaC_instanceof(L, val_idx, type_idx);
     }
+    else if (lua_type(L, type_idx) == LUA_TFUNCTION) {
+        lua_pushvalue(L, type_idx);
+        lua_pushvalue(L, val_idx);
+        if (lua_pcall(L, 1, 1, 0) == 0) {
+            int res = lua_toboolean(L, -1);
+            lua_pop(L, 1);
+            return res;
+        }
+        lua_pop(L, 1);
+        return 0;
+    }
     return 0;
 }
 

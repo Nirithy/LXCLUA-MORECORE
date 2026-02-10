@@ -44,6 +44,8 @@ extern void luaX_addalias(LexState *ls, TString *name, Token *tokens, int ntoken
 
 #define hasmultret(k)		((k) == VCALL || (k) == VVARARG)
 
+#define E_NO_COLON 1
+#define E_NO_CALL 2
 
 /* because all strings are unified by the scanner, the parser
    can use pointer equality for string equality */
@@ -1951,6 +1953,11 @@ static void body (LexState *ls, expdesc *e, int ismethod, int line) {
   new_fs.f->linedefined = line;
   open_func(ls, &new_fs, &bl);
 
+  /* Helper array to store type mappings for generics */
+  TString *mappings[MAXVARS];
+  int nmappings = 0;
+  for (int i = 0; i < MAXVARS; i++) mappings[i] = NULL;
+
   checknext(ls, '(');
 
   if (ismethod) {
@@ -2015,7 +2022,7 @@ static void body (LexState *ls, expdesc *e, int ismethod, int line) {
      }
   }
   
-  if (ls->t.token == '(') {
+  if (ls->t.token == '(' || ls->t.token == TK_REQUIRES) {
       /* Generic Factory Function */
       /* Current new_fs is Factory */
       /* Captured params are generics */
@@ -2035,6 +2042,15 @@ static void body (LexState *ls, expdesc *e, int ismethod, int line) {
       TString *impl_vararg = NULL;
       parlist(ls, &impl_vararg);
       checknext(ls, ')');
+
+      /* Capture type hints for mapping */
+      nmappings = impl_fs.f->numparams;
+      for (int i = 0; i < nmappings && i < MAXVARS; i++) {
+          Vardesc *vd = getlocalvardesc(&impl_fs, i);
+          if (vd->vd.hint && vd->vd.hint->descs[0].type == LVT_NAME) {
+              mappings[i] = vd->vd.hint->descs[0].typename;
+          }
+      }
 
       {
          int i;
@@ -2100,6 +2116,42 @@ static void body (LexState *ls, expdesc *e, int ismethod, int line) {
           }
       }
 
+      if (ls->t.token == TK_REQUIRES) {
+          luaX_next(ls);
+
+          FuncState *save_fs = ls->fs;
+          ls->fs = &new_fs;
+
+          expdesc e;
+          expr(ls, &e);
+
+          ls->fs = save_fs;
+
+          /* if not e then error("constraint failed") end */
+          int cond = luaK_exp2anyreg(&new_fs, &e);
+          luaK_codeABCk(&new_fs, OP_TEST, cond, 0, 0, 1);
+          int jmp_skip = luaK_jump(&new_fs);
+
+          expdesc err_func;
+          singlevaraux(&new_fs, luaS_newliteral(ls->L, "error"), &err_func, 1);
+          if (err_func.k == VVOID) {
+             expdesc key;
+             singlevaraux(&new_fs, ls->envn, &err_func, 1);
+             codestring(&key, luaS_newliteral(ls->L, "error"));
+             luaK_indexed(&new_fs, &err_func, &key);
+          }
+          luaK_exp2nextreg(&new_fs, &err_func);
+          int err_reg = err_func.u.info;
+
+          expdesc msg;
+          codestring(&msg, luaS_newliteral(ls->L, "generic constraint failed"));
+          luaK_exp2nextreg(&new_fs, &msg);
+
+          luaK_codeABC(&new_fs, OP_CALL, err_reg, 2, 1);
+
+          luaK_patchtohere(&new_fs, jmp_skip);
+      }
+
       if (impl_vararg) namedvararg(ls, impl_vararg);
       statlist(ls);
 
@@ -2150,12 +2202,40 @@ static void body (LexState *ls, expdesc *e, int ismethod, int line) {
       luaK_codeABC(fs, OP_MOVE, arg1, factory_reg, 0);
 
       /* Arg 2: Params table */
-      luaK_codeABC(fs, OP_NEWTABLE, arg2, 0, 0);
+      int pc_arg2 = luaK_codeABC(fs, OP_NEWTABLE, arg2, 0, 0);
       luaK_code(fs, 0);
 
+      /* Populate Arg 2 with generic param names */
+      for (int i = 0; i < ngeneric; i++) {
+          int idx = i + (ismethod ? 1 : 0);
+          if (idx < new_fs.f->sizelocvars) {
+              TString *pname = new_fs.f->locvars[idx].varname;
+              if (pname) {
+                  expdesc tab; init_exp(&tab, VNONRELOC, arg2);
+                  expdesc key; init_exp(&key, VKINT, 0); key.u.ival = i + 1;
+                  luaK_indexed(fs, &tab, &key);
+                  expdesc val; codestring(&val, pname);
+                  luaK_storevar(fs, &tab, &val);
+              }
+          }
+      }
+      luaK_settablesize(fs, pc_arg2, arg2, ngeneric, 0);
+
       /* Arg 3: Mapping table */
-      luaK_codeABC(fs, OP_NEWTABLE, arg3, 0, 0);
+      int pc_arg3 = luaK_codeABC(fs, OP_NEWTABLE, arg3, 0, 0);
       luaK_code(fs, 0);
+
+      /* Populate Arg 3 */
+      for (int i = 0; i < nmappings; i++) {
+          if (mappings[i]) {
+              expdesc tab; init_exp(&tab, VNONRELOC, arg3);
+              expdesc key; init_exp(&key, VKINT, 0); key.u.ival = i + 1;
+              luaK_indexed(fs, &tab, &key);
+              expdesc val; codestring(&val, mappings[i]);
+              luaK_storevar(fs, &tab, &val);
+          }
+      }
+      luaK_settablesize(fs, pc_arg3, arg3, nmappings, 0);
 
       fs->freereg = arg3 + 1;
 
@@ -2361,8 +2441,6 @@ static void funcargs (LexState *ls, expdesc *f, int line) {
 ** Expression parsing
 ** ============================================================
 */
-
-#define E_NO_COLON 1
 
 static void primaryexp (LexState *ls, expdesc *v) {
   /* primaryexp -> NAME | '(' expr ')' | STRING | constructor | NEW | SUPER */
@@ -8718,6 +8796,55 @@ static void operatorstat (LexState *ls, int line) {
 }
 
 
+static void conceptstat (LexState *ls, int line) {
+  /* conceptstat -> CONCEPT funcname body */
+  expdesc v, b;
+  int ismethod;
+
+  luaX_next(ls);  /* skip CONCEPT */
+  ismethod = funcname(ls, &v);
+
+  if (ismethod) {
+      luaX_syntaxerror(ls, "concepts cannot be methods");
+  }
+
+  check_readonly(ls, &v);
+
+  FuncState new_fs;
+  BlockCnt bl;
+  new_fs.f = addprototype(ls);
+  new_fs.f->linedefined = line;
+  open_func(ls, &new_fs, &bl);
+
+  if (ls->t.token == '(') {
+      checknext(ls, '(');
+      parlist(ls, NULL);
+      checknext(ls, ')');
+  }
+
+  if (testnext(ls, '=')) {
+      /* Expression body: return expr */
+      expdesc e;
+      expr(ls, &e);
+      luaK_ret(&new_fs, luaK_exp2anyreg(&new_fs, &e), 1);
+
+      new_fs.f->lastlinedefined = ls->linenumber;
+      codeclosure(ls, &b);
+      close_func(ls);
+  } else {
+      statlist(ls);
+      check_match(ls, TK_END, TK_CONCEPT, line);
+
+      new_fs.f->lastlinedefined = ls->linenumber;
+      codeclosure(ls, &b);
+      close_func(ls);
+  }
+
+  luaK_storevar(ls->fs, &v, &b);
+  luaK_fixline(ls->fs, line);
+}
+
+
 static void funcstat (LexState *ls, int line, int isasync) {
   /* funcstat -> FUNCTION funcname body */
   int ismethod;
@@ -10757,6 +10884,10 @@ static void statement (LexState *ls) {
     }
     case TK_FUNCTION: {  /* stat -> funcstat */
       funcstat(ls, line, 0);
+      break;
+    }
+    case TK_CONCEPT: {  /* stat -> conceptstat */
+      conceptstat(ls, line);
       break;
     }
     case TK_STRUCT: {  /* stat -> structstat */
