@@ -4960,7 +4960,6 @@ static void fornum (LexState *ls, TString *varname, int line) {
   int base = fs->freereg;
   new_localvarliteral(ls, "(for state)");
   new_localvarliteral(ls, "(for state)");
-  new_localvarliteral(ls, "(for state)");
   new_varkind(ls, varname, RDKCONST);  /* 控制变量设为只读常量 */
   checknext(ls, '=');
   exp1(ls);  /* initial value */
@@ -4972,7 +4971,7 @@ static void fornum (LexState *ls, TString *varname, int line) {
     luaK_int(fs, fs->freereg, 1);
     luaK_reserveregs(fs, 1);
   }
-  adjustlocalvars(ls, 3);  /* control variables */
+  adjustlocalvars(ls, 2);  /* control variables */
   forbody(ls, base, line, 1, 0);
 }
 
@@ -4981,11 +4980,10 @@ static void forlist (LexState *ls, TString *indexname) {
   /* forlist -> NAME {,NAME} IN explist forbody */
   FuncState *fs = ls->fs;
   expdesc e;
-  int nvars = 5;  /* gen, state, control, toclose, 'indexname' */
+  int nvars = 4;  /* gen, state, control, toclose, 'indexname' */
   int line;
   int base = fs->freereg;
   /* create control variables */
-  new_localvarliteral(ls, "(for state)");
   new_localvarliteral(ls, "(for state)");
   new_localvarliteral(ls, "(for state)");
   new_localvarliteral(ls, "(for state)");
@@ -4997,11 +4995,11 @@ static void forlist (LexState *ls, TString *indexname) {
   }
   if (ls->t.token == TK_IN) luaX_next(ls);
   line = ls->linenumber;
-  adjust_assign(ls, 4, explist(ls, &e), &e);
-  adjustlocalvars(ls, 4);  /* control variables */
+  adjust_assign(ls, 3, explist(ls, &e), &e);
+  adjustlocalvars(ls, 3);  /* control variables */
   marktobeclosed(fs);  /* last control var. must be closed */
   luaK_checkstack(fs, 3);  /* extra space to call generator */
-  forbody(ls, base, line, nvars - 4, 1);
+  forbody(ls, base, line, nvars - 3, 1);
 }
 
 
