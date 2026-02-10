@@ -299,16 +299,6 @@ GCObject *luaC_newobj (lua_State *L, int tt, size_t sz) {
 */
 static void reallymarkobject (global_State *g, GCObject *o) {
   switch (o->tt) {
-    case LUA_VNAMESPACE: {
-      Namespace *ns = gco2ns(o);
-      int i;
-      for (i = 0; i < ns->size; i++) {
-        markobjectN(g, ns->entries[i].key);
-        markvalue(g, &ns->entries[i].val);
-      }
-      set2black(o);
-      break;
-    }
     case LUA_VSTRUCT: {
       Struct *s = gco2struct(o);
       markobjectN(g, s->def);
@@ -806,12 +796,6 @@ static void freeobj (lua_State *L, GCObject *o) {
     case LUA_VUPVAL:
       freeupval(L, gco2upv(o));
       break;
-    case LUA_VNAMESPACE: {
-      Namespace *ns = gco2ns(o);
-      luaM_freemem(L, ns->entries, ns->capacity * sizeof(NamespaceEntry));
-      luaM_freemem(L, ns, sizeof(Namespace));
-      break;
-    }
     case LUA_VSTRUCT: {
       Struct *s = gco2struct(o);
       luaM_freemem(L, s, sizeof(Struct) + s->data_size - 1);

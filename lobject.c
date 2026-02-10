@@ -27,7 +27,6 @@
 #include "lobject.h"
 #include "lstate.h"
 #include "lstring.h"
-#include "ltable.h"
 #include "lvm.h"
 
 
@@ -782,60 +781,3 @@ void luaO_chunkid (char *out, const char *source, size_t srclen) {
   }
 }
 
-
-Namespace *luaN_new (lua_State *L) {
-  Namespace *ns = (Namespace *)luaC_newobj(L, LUA_VNAMESPACE, sizeof(Namespace));
-  ns->entries = NULL;
-  ns->size = 0;
-  ns->capacity = 0;
-  setnilvalue(&ns->parent);
-  return ns;
-}
-
-void luaN_set (lua_State *L, Namespace *ns, TString *key, TValue *val) {
-  int i;
-  for (i = 0; i < ns->size; i++) {
-    if (ns->entries[i].key == key) {
-       setobj2t(L, &ns->entries[i].val, val);
-       luaC_barrierback(L, obj2gco(ns), val);
-       return;
-    }
-  }
-  if (ns->size >= ns->capacity) {
-    int newcapacity = (ns->capacity == 0) ? 4 : ns->capacity * 2;
-    ns->entries = luaM_reallocvector(L, ns->entries, ns->capacity, newcapacity, NamespaceEntry);
-    ns->capacity = newcapacity;
-  }
-  NamespaceEntry *entry = &ns->entries[ns->size++];
-  entry->key = key;
-  setobj2t(L, &entry->val, val);
-  luaC_objbarrier(L, obj2gco(ns), key);
-  luaC_barrierback(L, obj2gco(ns), val);
-}
-
-const TValue *luaN_get (lua_State *L, Namespace *ns, TString *key) {
-  int i;
-  for (i = 0; i < ns->size; i++) {
-    if (ns->entries[i].key == key) {
-       return &ns->entries[i].val;
-    }
-  }
-
-  if (!ttisnil(&ns->parent)) {
-     if (ttisnamespace(&ns->parent)) {
-        return luaN_get(L, nsvalue(&ns->parent), key);
-     } else if (ttistable(&ns->parent)) {
-        Table *h = hvalue(&ns->parent);
-        /* Use luaH_getstr for string keys to avoid type mismatch */
-        l_rwlock_rdlock(&h->lock);
-        const TValue *res = luaH_getstr(h, key);
-        if (!isempty(res)) {
-           l_rwlock_unlock(&h->lock);
-           return res;
-        }
-        l_rwlock_unlock(&h->lock);
-     }
-  }
-
-  return &G(L)->nilvalue;
-}

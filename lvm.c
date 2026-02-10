@@ -335,14 +335,6 @@ void luaV_finishget (lua_State *L, const TValue *t, TValue *key, StkId val,
       } else if (ttisstruct(t)) {
         luaS_structindex(L, t, key, val);
         return;
-      } else if (ttisnamespace(t)) {
-        if (ttisstring(key)) {
-           const TValue *res = luaN_get(L, nsvalue(t), tsvalue(key));
-           setobj2s(L, val, res);
-        } else {
-           setnilvalue(s2v(val));
-        }
-        return;
       } else {
         if (ttisstring(t) && ttisinteger(key)) {
           size_t l = tsslen(tsvalue(t));
@@ -443,13 +435,6 @@ void luaV_finishset (lua_State *L, const TValue *t, TValue *key,
     else {  /* not a table? or slot is NULL */
       if (ttisstruct(t)) {
         luaS_structnewindex(L, t, key, val);
-        return;
-      }
-      else if (ttisnamespace(t)) {
-        if (ttisstring(key))
-           luaN_set(L, nsvalue(t), tsvalue(key), val);
-        else
-           luaG_runerror(L, "namespace key must be a string");
         return;
       }
       else if (ttistable(t)) {
@@ -1656,34 +1641,6 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
         if (b != 0 || c != 0)
           luaH_resize(L, t, c, b);  /* idem */
         checkGC(L, ra + 1);
-        vmbreak;
-      }
-      vmcase(OP_NEWNS) {
-        StkId ra = RA(i);
-        L->top.p = ra + 1;
-        Namespace *ns = luaN_new(L);
-
-        /* Set parent if B != 0 */
-        if (GETARG_B(i) != 0) {
-           TValue *parent = vRB(i);
-           setobj2t(L, &ns->parent, parent);
-           luaC_barrier(L, obj2gco(ns), parent);
-        }
-
-        setnsvalue(L, s2v(ra), ns);
-        checkGC(L, ra + 1);
-        vmbreak;
-      }
-      vmcase(OP_GETNS) {
-        StkId ra = RA(i);
-        TValue *rb = vRB(i);
-        TValue *rc = KC(i);
-        if (l_likely(ttisnamespace(rb))) {
-           const TValue *res = luaN_get(L, nsvalue(rb), tsvalue(rc));
-           setobj2s(L, ra, res);
-        } else {
-           luaG_typeerror(L, rb, "access namespace member");
-        }
         vmbreak;
       }
       vmcase(OP_SELF) {

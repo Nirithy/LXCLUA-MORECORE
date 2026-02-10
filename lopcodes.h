@@ -386,9 +386,6 @@ OP_NOP,/*	A B C	空操作指令 - 不执行任何操作
 
 OP_CASE,/*	A B C	R[A] := { R[B], R[C] } (create case pair)	*/
 
-OP_NEWNS,/*	A	R[A] := {} (namespace)			*/
-OP_GETNS,/*	A B C	R[A] := R[B]::K[C]			*/
-
 OP_EXTRAARG/*	Ax	extra (larger) argument for previous opcode	*/
 } OpCode;
 

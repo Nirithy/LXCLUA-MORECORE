@@ -31,13 +31,11 @@
 */
 enum RESERVED {
   /* terminal symbols denoted by reserved words */
-  TK_AND = FIRST_RESERVED, TK_ASM, TK_ASYNC, TK_AWAIT, TK_BREAK, TK_CASE, TK_CATCH, TK_CLASS, TK_COMMAND, TK_CONCEPT, TK_CONST, TK_CONTINUE, TK_DEFAULT,
-  TK_DEFER, TK_DO, TK_ELSE, TK_ELSEIF, TK_END, TK_ENUM, TK_EXPORT,
-  TK_EXTENDS, TK_FALSE, TK_FINALLY, TK_FOR, TK_FUNCTION,
-  TK_GLOBAL, TK_GOTO, TK_IF, TK_IMPLEMENTS, TK_IN, TK_INTERFACE, TK_IS, TK_KEYWORD, TK_LAMBDA, TK_LOCAL, TK_NAMESPACE,
-  TK_NEW, TK_NIL, TK_NOT, TK_OPERATOR, TK_OR,
+  TK_AND = FIRST_RESERVED, TK_ASM, TK_ASYNC, TK_AWAIT, TK_BREAK, TK_CASE, TK_CATCH, TK_COMMAND, TK_CONCEPT, TK_CONST, TK_CONTINUE, TK_DEFAULT,
+  TK_DEFER, TK_DO, TK_ELSE, TK_ELSEIF, TK_END, TK_ENUM, TK_EXPORT, TK_FALSE, TK_FINALLY, TK_FOR, TK_FUNCTION,
+  TK_GLOBAL, TK_GOTO, TK_IF, TK_IN, TK_IS, TK_KEYWORD, TK_LAMBDA, TK_LOCAL, TK_NIL, TK_NOT, TK_OPERATOR, TK_OR,
   TK_REPEAT, TK_REQUIRES,
-  TK_RETURN, TK_STRUCT, TK_SUPER, TK_SWITCH, TK_TAKE, TK_THEN, TK_TRUE, TK_TRY, TK_UNTIL, TK_WHEN, TK_WHILE, TK_WITH,
+  TK_RETURN, TK_STRUCT, TK_SWITCH, TK_TAKE, TK_THEN, TK_TRUE, TK_TRY, TK_UNTIL, TK_WHEN, TK_WHILE, TK_WITH,
 
   /* other terminal symbols */
   TK_IDIV, TK_CONCAT, TK_DOTS, TK_EQ, TK_GE, TK_LE, TK_NE,
@@ -153,7 +151,6 @@ typedef struct LexState {
   struct Dyndata *dyd;  /* dynamic structures used by the parser */
   TString *source;  /* current source name */
   TString *envn;  /* environment variable name */
-  TString *glbn;  /* global variable name */
 
   /* Preprocessor additions */
   Alias *aliases;
@@ -177,8 +174,6 @@ typedef struct LexState {
 
 LUAI_FUNC void luaX_init (lua_State *L);
 LUAI_FUNC void luaX_warning (LexState *ls, const char *msg, WarningType wt);
-LUAI_FUNC void luaX_pushincludefile(LexState *ls, const char *filename);
-LUAI_FUNC void luaX_addalias(LexState *ls, TString *name, Token *tokens, int n);
 LUAI_FUNC void luaX_setinput (lua_State *L, LexState *ls, ZIO *z,
                               TString *source, int firstchar);
 LUAI_FUNC TString *luaX_newstring (LexState *ls, const char *str, size_t l);

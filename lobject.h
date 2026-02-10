@@ -1,3 +1,10 @@
+/*
+** $Id: lobject.h $
+** Type definitions for Lua objects
+** See Copyright Notice in lua.h
+*/
+
+
 #ifndef lobject_h
 #define lobject_h
 
@@ -480,45 +487,6 @@ LUAI_FUNC void luaS_copystruct (lua_State *L, TValue *dest, const TValue *src);
 
 /*
 ** {=======================================================
-** Namespaces
-** ========================================================
-*/
-
-#define LUA_VNAMESPACE	makevariant(LUA_TNAMESPACE, 0)
-
-#define ttisnamespace(o)	checktag((o), ctb(LUA_VNAMESPACE))
-
-#define nsvalue(o)	check_exp(ttisnamespace(o), gco2ns(val_(o).gc))
-
-#define setnsvalue(L,obj,x) \
-  { TValue *io = (obj); Namespace *x_ = (x); \
-    val_(io).gc = obj2gco(x_); settt_(io, ctb(LUA_VNAMESPACE)); \
-    checkliveness(L,io); }
-
-typedef struct NamespaceEntry {
-  TString *key;
-  TValue val;
-} NamespaceEntry;
-
-typedef struct Namespace {
-  CommonHeader;
-  NamespaceEntry *entries;
-  TValue parent;
-  int size;
-  int capacity;
-} Namespace;
-
-#define gco2ns(o)	check_exp((o)->tt == LUA_VNAMESPACE, &((cast_u(o) - offsetof(Namespace, next))->ns))
-
-LUAI_FUNC struct Namespace *luaN_new (lua_State *L);
-LUAI_FUNC void luaN_set (lua_State *L, struct Namespace *ns, TString *key, TValue *val);
-LUAI_FUNC const TValue *luaN_get (lua_State *L, struct Namespace *ns, TString *key);
-
-/* }======================================================= */
-
-
-/*
-** {=======================================================
 ** Userdata
 ** ========================================================
 */
@@ -976,11 +944,6 @@ typedef struct Table {
   va_end(argp); \
   if (msg == NULL) luaD_throw(L, LUA_ERRMEM);  /* only after 'va_end' */ }
 
-/*
-** returns the Node, given the value of a table entry
-*/
-#define nodefromval(v)	cast(Node *, cast(char *, (v)) - offsetof(Node, i_val))
-
 
 LUAI_FUNC int luaO_utf8esc (char *buff, l_uint32 x);
 LUAI_FUNC int luaO_ceillog2 (unsigned int x);
@@ -1003,3 +966,4 @@ LUAI_FUNC lu_byte luaO_codeparam (unsigned int p);
 
 
 #endif
+

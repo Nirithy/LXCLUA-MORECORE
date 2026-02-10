@@ -1340,7 +1340,7 @@ static int block_follow (LexState *ls, int withuntil) {
   switch (ls->t.token) {
     case TK_ELSE: case TK_ELSEIF:
     case TK_END: case TK_EOS:
-    case TK_CASE: case TK_DEFAULT: case '}':
+    case TK_CASE: case TK_DEFAULT:
       return 1;
     case TK_DOLLAR: {
        int la = luaX_lookahead(ls);
@@ -1396,7 +1396,7 @@ static void fieldsel (LexState *ls, expdesc *v) {
       case TK_COMMAND: ts = luaS_newliteral(ls->L, "command"); break;
       case TK_CONST: ts = luaS_newliteral(ls->L, "const"); break;
       case TK_CONTINUE: ts = luaS_newliteral(ls->L, "continue"); break;
-      case TK_DEFAULT: case '}': ts = luaS_newliteral(ls->L, "default"); break;
+      case TK_DEFAULT: ts = luaS_newliteral(ls->L, "default"); break;
       case TK_DO: ts = luaS_newliteral(ls->L, "do"); break;
       case TK_ELSE: ts = luaS_newliteral(ls->L, "else"); break;
       case TK_ELSEIF: ts = luaS_newliteral(ls->L, "elseif"); break;
@@ -3066,18 +3066,6 @@ static void suffixedexp (LexState *ls, expdesc *v) {
   primaryexp(ls, v);
   for (;;) {
     switch (ls->t.token) {
-      case TK_DBCOLON: {
-        luaX_next(ls);
-        expdesc key;
-        codename(ls, &key);
-        luaK_exp2anyreg(fs, v);
-        int key_idx = luaK_stringK(fs, key.u.strval);
-        int reg = fs->freereg;
-        luaK_reserveregs(fs, 1);
-        luaK_codeABC(fs, OP_GETNS, reg, v->u.info, key_idx);
-        init_exp(v, VNONRELOC, reg);
-        break;
-      }
       case TK_OPTCHAIN: {  /* '?.' 可选链字段访问 */
         /*
         ** 可选链运算符: a?.b
@@ -3121,7 +3109,7 @@ static void suffixedexp (LexState *ls, expdesc *v) {
             case TK_COMMAND: ts = luaS_newliteral(ls->L, "command"); break;
             case TK_CONST: ts = luaS_newliteral(ls->L, "const"); break;
             case TK_CONTINUE: ts = luaS_newliteral(ls->L, "continue"); break;
-            case TK_DEFAULT: case '}': ts = luaS_newliteral(ls->L, "default"); break;
+            case TK_DEFAULT: ts = luaS_newliteral(ls->L, "default"); break;
             case TK_DO: ts = luaS_newliteral(ls->L, "do"); break;
             case TK_ELSE: ts = luaS_newliteral(ls->L, "else"); break;
             case TK_ELSEIF: ts = luaS_newliteral(ls->L, "elseif"); break;
@@ -4461,18 +4449,6 @@ static void cond_suffixedexp (LexState *ls, expdesc *v) {
   primaryexp(ls, v);
   for (;;) {
     switch (ls->t.token) {
-      case TK_DBCOLON: {
-        luaX_next(ls);
-        expdesc key;
-        codename(ls, &key);
-        luaK_exp2anyreg(fs, v);
-        int key_idx = luaK_stringK(fs, key.u.strval);
-        int reg = fs->freereg;
-        luaK_reserveregs(fs, 1);
-        luaK_codeABC(fs, OP_GETNS, reg, v->u.info, key_idx);
-        init_exp(v, VNONRELOC, reg);
-        break;
-      }
       case TK_OPTCHAIN: {  /* '?.' 可选链字段访问 */
         expdesc key;
         int reg;
@@ -4500,7 +4476,7 @@ static void cond_suffixedexp (LexState *ls, expdesc *v) {
             case TK_COMMAND: ts = luaS_newliteral(ls->L, "command"); break;
             case TK_CONST: ts = luaS_newliteral(ls->L, "const"); break;
             case TK_CONTINUE: ts = luaS_newliteral(ls->L, "continue"); break;
-            case TK_DEFAULT: case '}': ts = luaS_newliteral(ls->L, "default"); break;
+            case TK_DEFAULT: ts = luaS_newliteral(ls->L, "default"); break;
             case TK_DO: ts = luaS_newliteral(ls->L, "do"); break;
             case TK_ELSE: ts = luaS_newliteral(ls->L, "else"); break;
             case TK_ELSEIF: ts = luaS_newliteral(ls->L, "elseif"); break;
@@ -9038,63 +9014,6 @@ static void operatorstat (LexState *ls, int line) {
 }
 
 
-static void namespace_stat (LexState *ls, int line, int isexport) {
-  FuncState *fs = ls->fs;
-  expdesc v, ns_exp;
-  TString *nsname;
-
-  luaX_next(ls);  /* skip NAMESPACE */
-
-  /* Get namespace name */
-  nsname = str_checkname(ls);
-
-  /* Create namespace object */
-  int ns_reg = fs->freereg;
-  luaK_reserveregs(fs, 1);
-
-  /* Get current _ENV as parent */
-  expdesc parent_env;
-  singlevaraux(fs, ls->envn, &parent_env, 1);
-  luaK_exp2nextreg(fs, &parent_env);
-  int parent_reg = parent_env.u.info;
-
-  luaK_codeABC(fs, OP_NEWNS, ns_reg, parent_reg, 0);
-  init_exp(&ns_exp, VNONRELOC, ns_reg);
-  /* Free parent register */
-  fs->freereg--;
-
-  /* Assign to variable */
-  if (isexport) {
-     new_localvar(ls, nsname);
-     add_export(ls, nsname);
-     adjustlocalvars(ls, 1);
-     init_var(fs, &v, fs->nactvar - 1);
-  } else {
-     buildglobal(ls, nsname, &v);
-  }
-  luaK_storevar(fs, &v, &ns_exp);
-  if (ns_reg >= fs->freereg) fs->freereg = ns_reg + 1;
-
-  checknext(ls, '{');
-
-  /* Enter block with _ENV = namespace */
-  enterlevel(ls);
-  /* Create local _ENV initialized with namespace */
-  new_localvar(ls, ls->envn); /* _ENV */
-  adjustlocalvars(ls, 1);
-  /* Store namespace into _ENV */
-  expdesc env_var;
-  init_var(fs, &env_var, fs->nactvar - 1);
-  luaK_storevar(fs, &env_var, &ns_exp);
-
-  statlist(ls);
-  check_match(ls, '}', '{', line);
-
-  /* Leave block (removes _ENV) */
-  removevars(fs, fs->nactvar - 1);
-  leavelevel(ls);
-}
-
 static void conceptstat (LexState *ls, int line) {
   /* conceptstat -> CONCEPT funcname body */
   expdesc v, b;
@@ -11189,10 +11108,6 @@ static void statement (LexState *ls) {
       conceptstat(ls, line);
       break;
     }
-    case TK_NAMESPACE: {  /* stat -> namespace_stat */
-      namespace_stat(ls, line, 0);
-      break;
-    }
     case TK_STRUCT: {  /* stat -> structstat */
       structstat(ls, line, 0);
       break;
@@ -11296,9 +11211,6 @@ static void statement (LexState *ls) {
       break;
     }
     case TK_DBCOLON: {  /* stat -> label */
-      /* Check for ambiguity: if next is name and next2 is ::, it is a label. */
-      /* But this is 'statement'. Labels always start with ::. */
-      /* Namespace access is in 'suffixedexp'. */
       luaX_next(ls);  /* skip double colon */
       if (ls->t.token == TK_CONTINUE) {
         TString *name = luaS_newliteral(ls->L, "continue");
