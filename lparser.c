@@ -1968,6 +1968,52 @@ static void body (LexState *ls, expdesc *e, int ismethod, int line) {
   TString *varargname = NULL;
   parlist(ls, &varargname);
   checknext(ls, ')');
+
+  {
+     int i;
+     for (i = 0; i < new_fs.f->numparams; i++) {
+        Vardesc *vd = getlocalvardesc(&new_fs, i);
+        if (vd->vd.hint) {
+           int j;
+           for (j = 0; j < MAX_TYPE_DESCS; j++) {
+              if (vd->vd.hint->descs[j].type == LVT_NAME && vd->vd.hint->descs[j].typename) {
+                 expdesc f_check;
+                 singlevaraux(&new_fs, luaS_newliteral(ls->L, "__check_type"), &f_check, 1);
+                 if (f_check.k == VVOID) {
+                    expdesc key;
+                    singlevaraux(&new_fs, ls->envn, &f_check, 1);
+                    codestring(&key, luaS_newliteral(ls->L, "__check_type"));
+                    luaK_indexed(&new_fs, &f_check, &key);
+                 }
+
+                 luaK_exp2nextreg(&new_fs, &f_check);
+                 int base = f_check.u.info;
+
+                 expdesc e_val;
+                 init_var(&new_fs, &e_val, i);
+                 luaK_exp2nextreg(&new_fs, &e_val);
+
+                 expdesc e_type;
+                 singlevaraux(&new_fs, vd->vd.hint->descs[j].typename, &e_type, 1);
+                 if (e_type.k == VVOID) {
+                    expdesc key;
+                    singlevaraux(&new_fs, ls->envn, &e_type, 1);
+                    codestring(&key, vd->vd.hint->descs[j].typename);
+                    luaK_indexed(&new_fs, &e_type, &key);
+                 }
+                 luaK_exp2nextreg(&new_fs, &e_type);
+
+                 expdesc e_name;
+                 codestring(&e_name, vd->vd.name);
+                 luaK_exp2nextreg(&new_fs, &e_name);
+
+                 luaK_codeABC(&new_fs, OP_CALL, base, 4, 1);
+                 new_fs.freereg = base;
+              }
+           }
+        }
+     }
+  }
   
   if (ls->t.token == '(') {
       /* Generic Factory Function */
@@ -1989,6 +2035,52 @@ static void body (LexState *ls, expdesc *e, int ismethod, int line) {
       TString *impl_vararg = NULL;
       parlist(ls, &impl_vararg);
       checknext(ls, ')');
+
+      {
+         int i;
+         for (i = 0; i < impl_fs.f->numparams; i++) {
+            Vardesc *vd = getlocalvardesc(&impl_fs, i);
+            if (vd->vd.hint) {
+               int j;
+               for (j = 0; j < MAX_TYPE_DESCS; j++) {
+                  if (vd->vd.hint->descs[j].type == LVT_NAME && vd->vd.hint->descs[j].typename) {
+                     expdesc f_check;
+                     singlevaraux(&impl_fs, luaS_newliteral(ls->L, "__check_type"), &f_check, 1);
+                     if (f_check.k == VVOID) {
+                        expdesc key;
+                        singlevaraux(&impl_fs, ls->envn, &f_check, 1);
+                        codestring(&key, luaS_newliteral(ls->L, "__check_type"));
+                        luaK_indexed(&impl_fs, &f_check, &key);
+                     }
+
+                     luaK_exp2nextreg(&impl_fs, &f_check);
+                     int base = f_check.u.info;
+
+                     expdesc e_val;
+                     init_var(&impl_fs, &e_val, i);
+                     luaK_exp2nextreg(&impl_fs, &e_val);
+
+                     expdesc e_type;
+                     singlevaraux(&impl_fs, vd->vd.hint->descs[j].typename, &e_type, 1);
+                     if (e_type.k == VVOID) {
+                        expdesc key;
+                        singlevaraux(&impl_fs, ls->envn, &e_type, 1);
+                        codestring(&key, vd->vd.hint->descs[j].typename);
+                        luaK_indexed(&impl_fs, &e_type, &key);
+                     }
+                     luaK_exp2nextreg(&impl_fs, &e_type);
+
+                     expdesc e_name;
+                     codestring(&e_name, vd->vd.name);
+                     luaK_exp2nextreg(&impl_fs, &e_name);
+
+                     luaK_codeABC(&impl_fs, OP_CALL, base, 4, 1);
+                     impl_fs.freereg = base;
+                  }
+               }
+            }
+         }
+      }
 
       /* Parse return type hint if any */
       if (testnext(ls, ':')) {
@@ -5860,7 +5952,9 @@ static void checktypehint (LexState *ls, TypeHint *th) {
         }
         td.type = LVT_NONE; /* processed */
       } else {
-        luaX_syntaxerror(ls, luaO_pushfstring(ls->L, "unknown type hint '%s'", tname));
+        /* Store unknown type name for runtime check */
+        td.type = LVT_NAME;
+        td.typename = ts;
       }
     }
     

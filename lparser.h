@@ -118,6 +118,7 @@ typedef enum {
   LVT_TABLE,
   LVT_FUNC,
   LVT_USERDATA,
+  LVT_NAME,
 } ValType;
 
 struct TypeHint;
@@ -139,6 +140,9 @@ typedef struct TypeDesc {
   int8_t nfields;
   TString* names[MAX_TYPED_FIELDS];
   struct TypeHint* hints[MAX_TYPED_FIELDS];
+
+  /* named type */
+  TString* typename;
 } TypeDesc;
 
 #define MAX_TYPE_DESCS 3

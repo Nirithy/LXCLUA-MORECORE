@@ -2551,11 +2551,79 @@ static int luaB_typeof(lua_State *L) {
   return 1;
 }
 
+static int check_subtype(lua_State *L, int val_idx, int type_idx) {
+    if (lua_type(L, type_idx) == LUA_TSTRING) {
+        const char *tname = lua_tostring(L, type_idx);
+        if (strcmp(tname, "any") == 0) return 1;
+        if (strcmp(tname, "int") == 0 || strcmp(tname, "integer") == 0) return lua_isinteger(L, val_idx);
+        if (strcmp(tname, "number") == 0) return lua_type(L, val_idx) == LUA_TNUMBER;
+        if (strcmp(tname, "float") == 0) return lua_type(L, val_idx) == LUA_TNUMBER;
+        if (strcmp(tname, "string") == 0) return lua_type(L, val_idx) == LUA_TSTRING;
+        if (strcmp(tname, "boolean") == 0) return lua_type(L, val_idx) == LUA_TBOOLEAN;
+        if (strcmp(tname, "table") == 0) return lua_type(L, val_idx) == LUA_TTABLE;
+        if (strcmp(tname, "function") == 0) return lua_type(L, val_idx) == LUA_TFUNCTION;
+        if (strcmp(tname, "thread") == 0) return lua_type(L, val_idx) == LUA_TTHREAD;
+        if (strcmp(tname, "userdata") == 0) return lua_type(L, val_idx) == LUA_TUSERDATA;
+        if (strcmp(tname, "nil") == 0 || strcmp(tname, "void") == 0) return lua_type(L, val_idx) == LUA_TNIL;
+        return 0;
+    }
+    else if (lua_type(L, type_idx) == LUA_TTABLE) {
+        lua_getglobal(L, "string");
+        if (lua_rawequal(L, -1, type_idx)) {
+            lua_pop(L, 1);
+            return lua_type(L, val_idx) == LUA_TSTRING;
+        }
+        lua_pop(L, 1);
+
+        lua_getglobal(L, "table");
+        if (lua_rawequal(L, -1, type_idx)) {
+            lua_pop(L, 1);
+            return lua_type(L, val_idx) == LUA_TTABLE;
+        }
+        lua_pop(L, 1);
+
+        return luaC_instanceof(L, val_idx, type_idx);
+    }
+    return 0;
+}
+
 static int luaB_issubtype(lua_State *L) {
   luaL_checkany(L, 1);
   luaL_checkany(L, 2);
-  lua_pushboolean(L, lua_compare(L, 1, 2, LUA_OPEQ));
+  lua_pushboolean(L, check_subtype(L, 1, 2));
   return 1;
+}
+
+static int luaB_check_type(lua_State *L) {
+    luaL_checkany(L, 1);
+    luaL_checkany(L, 2);
+
+    if (!check_subtype(L, 1, 2)) {
+        const char *name = luaL_optstring(L, 3, "?");
+        const char *expected = "unknown";
+        if (lua_type(L, 2) == LUA_TSTRING) expected = lua_tostring(L, 2);
+        else if (lua_type(L, 2) == LUA_TTABLE) {
+             lua_getfield(L, 2, "__name");
+             if (lua_isstring(L, -1)) expected = lua_tostring(L, -1);
+             else {
+                 lua_getglobal(L, "string");
+                 if (lua_rawequal(L, -1, 2)) expected = "string";
+                 lua_pop(L, 1);
+
+                 if (strcmp(expected, "string") != 0) {
+                     lua_getglobal(L, "table");
+                     if (lua_rawequal(L, -1, 2)) expected = "table";
+                     lua_pop(L, 1);
+                 }
+                 if (strcmp(expected, "unknown") == 0) expected = "table";
+             }
+             lua_pop(L, 1);
+        }
+
+        return luaL_error(L, "Type mismatch for argument '%s': expected %s, got %s",
+                          name, expected, luaL_typename(L, 1));
+    }
+    return 0;
 }
 
 static int luaB_isgeneric(lua_State *L) {
@@ -2723,6 +2791,7 @@ static int luaB_generic_wrap(lua_State *L) {
 static const luaL_Reg base_funcs[] = {
   {"__async_wrap", luaB_async_wrap},
   {"__generic_wrap", luaB_generic_wrap},
+  {"__check_type", luaB_check_type},
   {"typeof", luaB_typeof},
   {"issubtype", luaB_issubtype},
   {"isgeneric", luaB_isgeneric},
