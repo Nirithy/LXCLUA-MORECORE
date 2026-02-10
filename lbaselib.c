@@ -25,6 +25,7 @@
 #include "ldo.h"
 #include "lgc.h"
 #include "lclass.h"
+#include "lapi.h"
 #include <stdint.h>
 
 #if defined(__ANDROID__) && !defined(__NDK_MAJOR__)
@@ -2535,8 +2536,196 @@ static int luaB_test (lua_State *L) {
   return 1;
 }
 
+static int luaB_typeof(lua_State *L) {
+  luaL_checkany(L, 1);
+  if (lua_type(L, 1) == LUA_TSTRUCT) {
+    const TValue *o = s2v(L->top.p - 1);
+    Struct *s = structvalue(o);
+    lua_lock(L);
+    sethvalue(L, s2v(L->top.p), s->def);
+    api_incr_top(L);
+    lua_unlock(L);
+    return 1;
+  }
+  lua_pushstring(L, luaL_typename(L, 1));
+  return 1;
+}
+
+static int luaB_issubtype(lua_State *L) {
+  luaL_checkany(L, 1);
+  luaL_checkany(L, 2);
+  lua_pushboolean(L, lua_compare(L, 1, 2, LUA_OPEQ));
+  return 1;
+}
+
+static int luaB_isgeneric(lua_State *L) {
+  if (lua_istable(L, 1)) {
+     lua_pushstring(L, "__is_generic");
+     lua_rawget(L, 1);
+     int res = lua_toboolean(L, -1);
+     lua_pop(L, 1);
+     lua_pushboolean(L, res);
+     return 1;
+  }
+  lua_pushboolean(L, 0);
+  return 1;
+}
+
+static int generic_call (lua_State *L) {
+    /* Upvalues: 1:factory, 2:params, 3:mapping */
+    /* Called as __call(self, args...) */
+    int nargs = lua_gettop(L) - 1;
+    int base = 2;
+    int is_specialization = 0;
+
+    if (nargs >= 1) {
+        int t = lua_type(L, base);
+        if (t == LUA_TSTRING) {
+            const char *s = lua_tostring(L, base);
+            if (strcmp(s, "number")==0 || strcmp(s, "string")==0 ||
+                strcmp(s, "boolean")==0 || strcmp(s, "table")==0 ||
+                strcmp(s, "function")==0 || strcmp(s, "thread")==0 ||
+                strcmp(s, "userdata")==0 || strcmp(s, "nil_type")==0) {
+                is_specialization = 1;
+            }
+        } else if (t == LUA_TTABLE) {
+            /* Check for libraries used as types */
+            lua_getglobal(L, "string");
+            if (lua_rawequal(L, -1, base)) is_specialization = 1;
+            lua_pop(L, 1);
+
+            if (!is_specialization) {
+                lua_getglobal(L, "table");
+                if (lua_rawequal(L, -1, base)) is_specialization = 1;
+                lua_pop(L, 1);
+            }
+
+            if (!is_specialization) {
+                lua_getfield(L, base, "__name");
+                if (!lua_isnil(L, -1)) is_specialization = 1;
+                lua_pop(L, 1);
+            }
+        }
+    }
+
+    if (is_specialization) {
+        lua_pushvalue(L, lua_upvalueindex(1)); /* factory */
+        for (int i = 0; i < nargs; i++) {
+            lua_pushvalue(L, base + i);
+        }
+        lua_call(L, nargs, LUA_MULTRET);
+        return lua_gettop(L) - (nargs + 1);
+    }
+
+    /* Inference */
+    lua_newtable(L); /* inferred map */
+    int inferred_idx = lua_gettop(L);
+
+    int nmapping = luaL_len(L, lua_upvalueindex(3));
+    for (int i = 0; i < nargs && i < nmapping; i++) {
+        lua_rawgeti(L, lua_upvalueindex(3), i + 1);
+        const char *param_type_name = lua_tostring(L, -1);
+        lua_pop(L, 1);
+
+        if (param_type_name) {
+            int nparams = luaL_len(L, lua_upvalueindex(2));
+            int is_generic = 0;
+            for (int j = 1; j <= nparams; j++) {
+                lua_rawgeti(L, lua_upvalueindex(2), j);
+                const char *gp = lua_tostring(L, -1);
+                lua_pop(L, 1);
+                if (gp && strcmp(gp, param_type_name) == 0) {
+                    is_generic = 1;
+                    break;
+                }
+            }
+
+            if (is_generic) {
+                lua_pushvalue(L, base + i);
+                if (lua_type(L, -1) == LUA_TSTRUCT) {
+                    const TValue *o = s2v(L->top.p - 1);
+                    Struct *s = structvalue(o);
+                    lua_lock(L);
+                    sethvalue(L, s2v(L->top.p), s->def);
+                    L->top.p++;
+                    lua_unlock(L);
+                    lua_remove(L, -2);
+                } else {
+                    lua_pushstring(L, luaL_typename(L, -1));
+                    lua_remove(L, -2);
+                }
+
+                lua_pushstring(L, param_type_name);
+                lua_rawget(L, inferred_idx);
+                if (!lua_isnil(L, -1)) {
+                    if (!lua_compare(L, -1, -2, LUA_OPEQ)) {
+                        return luaL_error(L, "type inference failed: inconsistent types for '%s'", param_type_name);
+                    }
+                    lua_pop(L, 2);
+                } else {
+                    lua_pop(L, 1);
+                    lua_pushstring(L, param_type_name);
+                    lua_pushvalue(L, -2);
+                    lua_rawset(L, inferred_idx);
+                    lua_pop(L, 1);
+                }
+            }
+        }
+    }
+
+    int nparams = luaL_len(L, lua_upvalueindex(2));
+    lua_pushvalue(L, lua_upvalueindex(1));
+
+    for (int j = 1; j <= nparams; j++) {
+        lua_rawgeti(L, lua_upvalueindex(2), j);
+        const char *gp = lua_tostring(L, -1);
+        lua_pop(L, 1);
+
+        lua_pushstring(L, gp);
+        lua_rawget(L, inferred_idx);
+        if (lua_isnil(L, -1)) {
+            return luaL_error(L, "could not infer type for '%s'", gp);
+        }
+    }
+
+    lua_call(L, nparams, 1); /* impl */
+
+    int impl_idx = lua_gettop(L);
+    lua_pushvalue(L, impl_idx);
+    for (int i = 0; i < nargs; i++) {
+       lua_pushvalue(L, base + i);
+    }
+    lua_call(L, nargs, LUA_MULTRET);
+    return lua_gettop(L) - impl_idx;
+}
+
+static int luaB_generic_wrap(lua_State *L) {
+    luaL_checktype(L, 1, LUA_TFUNCTION);
+    luaL_checktype(L, 2, LUA_TTABLE);
+    luaL_checktype(L, 3, LUA_TTABLE);
+
+    lua_newtable(L); /* wrapper table */
+    lua_newtable(L); /* metatable */
+
+    lua_pushvalue(L, 1);
+    lua_pushvalue(L, 2);
+    lua_pushvalue(L, 3);
+    lua_pushcclosure(L, generic_call, 3);
+    lua_setfield(L, -2, "__call");
+
+    lua_pushboolean(L, 1);
+    lua_setfield(L, -2, "__is_generic");
+
+    lua_setmetatable(L, -2);
+    return 1;
+}
+
 static const luaL_Reg base_funcs[] = {
   {"__async_wrap", luaB_async_wrap},
+  {"__generic_wrap", luaB_generic_wrap},
+  {"typeof", luaB_typeof},
+  {"issubtype", luaB_issubtype},
+  {"isgeneric", luaB_isgeneric},
   {"assert", luaB_assert},
   {"collectgarbage", luaB_collectgarbage},
   {"defer", luaB_defer},
@@ -2707,6 +2896,16 @@ LUAMOD_API int luaopen_base (lua_State *L) {
   
   /* 允许用户修改全局表的元表，但保留__newindex保护 */
   lua_setmetatable(L, -2);  /* 设置全局表元表 */
+
+  /* Define global type constants */
+  lua_pushliteral(L, "number"); lua_setfield(L, -2, "number");
+  /* string is standard library */
+  lua_pushliteral(L, "boolean"); lua_setfield(L, -2, "boolean");
+  /* table is standard library */
+  /* function is keyword */
+  lua_pushliteral(L, "thread"); lua_setfield(L, -2, "thread");
+  lua_pushliteral(L, "userdata"); lua_setfield(L, -2, "userdata");
+  lua_pushliteral(L, "nil"); lua_setfield(L, -2, "nil_type"); /* avoid clashing with nil value */
   
   return 1;
 }
