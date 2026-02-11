@@ -27,6 +27,7 @@
 #include "ltable.h"
 #include "lundump.h"
 #include "lzio.h"
+#include "lvm.h"
 
 #include "sha256.h"
 #include "lobfuscate.h"
@@ -662,6 +663,9 @@ static void loadFunction (LoadState *S, Proto *f, TString *psource) {
   loadUpvalues(S, f);
   loadProtos(S, f);
   loadDebug(S, f);
+
+  /* Encrypt the loaded bytecode in memory */
+  luaV_encrypt_proto(f);
 }
 
 

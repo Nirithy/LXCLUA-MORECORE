@@ -307,7 +307,7 @@ static void collectvalidlines (lua_State *L, Closure *f) {
       if (!(isvararg(p)))  /* regular function? */
         i = 0;  /* consider all instructions */
       else {  /* vararg function */
-        lua_assert(GET_OPCODE(p->code[0]) == OP_VARARGPREP);
+        lua_assert(GET_OPCODE(luaV_getinst(p, 0)) == OP_VARARGPREP);
         currentline = nextline(p, currentline, 0);
         i = 1;  /* skip first instruction (OP_VARARGPREP) */
       }
@@ -449,10 +449,10 @@ static int findsetreg (const Proto *p, int lastpc, int reg) {
   int pc;
   int setreg = -1;  /* keep last instruction that changed 'reg' */
   int jmptarget = 0;  /* any code before this address is conditional */
-  if (testMMMode(GET_OPCODE(p->code[lastpc])))
+  if (testMMMode(GET_OPCODE(luaV_getinst(p, lastpc))))
     lastpc--;  /* previous instruction was not actually executed */
   for (pc = 0; pc < lastpc; pc++) {
-    Instruction i = p->code[pc];
+    Instruction i = luaV_getinst(p, pc);
     OpCode op = GET_OPCODE(i);
     int a = GETARG_A(i);
     int change;  /* true if current instruction changed 'reg' */
@@ -516,7 +516,7 @@ static const char *basicgetobjname (const Proto *p, int *ppc, int reg,
   /* else try symbolic execution */
   *ppc = pc = findsetreg(p, pc, reg);
   if (pc != -1) {  /* could find instruction? */
-    Instruction i = p->code[pc];
+    Instruction i = luaV_getinst(p, pc);
     OpCode op = GET_OPCODE(i);
     switch (op) {
       case OP_MOVE: {
@@ -530,7 +530,7 @@ static const char *basicgetobjname (const Proto *p, int *ppc, int reg,
         return strupval;
       }
       case OP_LOADK: return kname(p, GETARG_Bx(i), name);
-      case OP_LOADKX: return kname(p, GETARG_Ax(p->code[pc + 1]), name);
+      case OP_LOADKX: return kname(p, GETARG_Ax(luaV_getinst(p, pc + 1)), name);
       default: break;
     }
   }
@@ -592,7 +592,7 @@ static const char *getobjname (const Proto *p, int lastpc, int reg,
   if (kind != NULL)
     return kind;
   else if (lastpc != -1) {  /* could find instruction? */
-    Instruction i = p->code[lastpc];
+    Instruction i = luaV_getinst(p, lastpc);
     OpCode op = GET_OPCODE(i);
     switch (op) {
       case OP_GETTABUP: {
@@ -635,7 +635,7 @@ static const char *getobjname (const Proto *p, int lastpc, int reg,
 static const char *funcnamefromcode (lua_State *L, const Proto *p,
                                      int pc, const char **name) {
   TMS tm = (TMS)0;  /* (initial value avoids warnings) */
-  Instruction i = p->code[pc];  /* calling instruction */
+  Instruction i = luaV_getinst(p, pc);  /* calling instruction */
   switch (GET_OPCODE(i)) {
     case OP_CALL:
     case OP_TAILCALL:
@@ -1029,7 +1029,7 @@ int luaG_traceexec (lua_State *L, const Instruction *pc) {
     ci->callstatus &= ~CIST_HOOKYIELD;  /* erase mark */
     return 1;  /* do not call hook again (VM yielded, so it did not move) */
   }
-  if (!isIT(*(ci->u.l.savedpc - 1)))  /* top not being used? */
+  if (!isIT(luaV_getinst(p, (int)(ci->u.l.savedpc - 1 - p->code))))  /* top not being used? */
     L->top.p = ci->top.p;  /* correct top */
   if (counthook)
     luaD_hook(L, LUA_HOOKCOUNT, -1, 0, 0);  /* call count hook */

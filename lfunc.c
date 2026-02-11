@@ -336,6 +336,7 @@ Proto *luaF_newproto (lua_State *L) {
   f->linedefined = 0;
   f->lastlinedefined = 0;
   f->source = NULL;
+  f->runtime_code_seed = 0;
   f->is_sleeping = 0;
   f->call_queue = NULL;
   return f;

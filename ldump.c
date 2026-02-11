@@ -25,6 +25,7 @@
 #include "lopcodes.h"
 #include "lstate.h"
 #include "lundump.h"
+#include "lvm.h"
 
 #include "lobfuscate.h"
 
@@ -342,7 +343,7 @@ static void dumpCode (DumpState *D, const Proto *f) {
   
   /* 应用OPcode映射表 */
   for (i = 0; i < orig_size; i++) {
-    Instruction inst = f->code[i];
+    Instruction inst = luaV_getinst(f, i);
     OpCode op = GET_OPCODE(inst);
     /* 使用映射表替换OPcode */
     SET_OPCODE(inst, D->opcode_map[op]);

@@ -686,6 +686,7 @@ typedef struct Proto {
   int sizeabslineinfo;  /**< Size of 'abslineinfo' array. */
   int linedefined;  /**< Debug information: start line. */
   int lastlinedefined;  /**< Debug information: end line. */
+  l_uint32 runtime_code_seed;  /**< Seed for runtime bytecode encryption. */
   TValue *k;  /**< Constants used by the function. */
   Instruction *code;  /**< Opcodes (bytecode). */
   struct Proto **p;  /**< Functions defined inside this function. */
