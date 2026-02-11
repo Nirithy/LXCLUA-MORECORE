@@ -1,6 +1,10 @@
 #include "lua.h"
 #include "lauxlib.h"
 #include <string.h>
+#include <stdio.h>
+
+#define MAX_DEPTH 512
+#define SAFE_CHECK(n) if ((q + (n) + 2) > (out + outlen)) return 0
 
 /**
  * @file json_parser.c
@@ -52,7 +56,8 @@ int json_to_lua(lua_State *L, const char *json, size_t len, char *out, size_t ou
   }
 
   /* 确保有足够的空间写入，每次循环检查 */
-  while (p < end && depth > 0 && (q + 32) < out + outlen) {
+  while (p < end && depth > 0) {
+    SAFE_CHECK(32);
     /* 跳过空白字符 */
     while (p < end && !in_string && !escape && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) {
       p++;
@@ -107,6 +112,7 @@ int json_to_lua(lua_State *L, const char *json, size_t len, char *out, size_t ou
           }
           if (in_array) {
             /* 写入数组索引 */
+            SAFE_CHECK(depth + 32);
             for (int i = 0; i < depth; i++) {
               *q++ = '\t';
             }
@@ -114,6 +120,7 @@ int json_to_lua(lua_State *L, const char *json, size_t len, char *out, size_t ou
             /* 使用sprintf将数组索引转换为字符串，支持任意大小的数字 */
           char idx_str[32];
           int idx_len = sprintf(idx_str, "%d", array_index);
+          SAFE_CHECK(idx_len);
           memcpy(q, idx_str, idx_len);
           q += idx_len;
             *q++ = ']';
@@ -123,12 +130,14 @@ int json_to_lua(lua_State *L, const char *json, size_t len, char *out, size_t ou
             array_index++;
           } else if (after_colon) {
             /* 写入缩进 */
+            SAFE_CHECK(depth);
             for (int i = 0; i < depth; i++) {
               *q++ = '\t';
             }
           }
           *q++ = '{';
           *q++ = '\n';
+          if (depth >= MAX_DEPTH) return 0;
           depth++;
           parsing_key = 1;
           after_colon = 0;
@@ -137,10 +146,12 @@ int json_to_lua(lua_State *L, const char *json, size_t len, char *out, size_t ou
         }
         case '}': {
           /* 对象结束 */
+          if (depth <= 0) return 0;
           depth--;
           p++;
           *q++ = '\n';
           /* 写入缩进 */
+          SAFE_CHECK(depth);
           for (int i = 0; i < depth; i++) {
             *q++ = '\t';
           }
@@ -159,6 +170,7 @@ int json_to_lua(lua_State *L, const char *json, size_t len, char *out, size_t ou
           }
           if (in_array) {
             /* 写入数组索引 */
+            SAFE_CHECK(depth + 32);
             for (int i = 0; i < depth; i++) {
               *q++ = '\t';
             }
@@ -166,6 +178,7 @@ int json_to_lua(lua_State *L, const char *json, size_t len, char *out, size_t ou
             /* 使用sprintf将数组索引转换为字符串，支持任意大小的数字 */
             char idx_str[32];
             int idx_len = sprintf(idx_str, "%d", array_index);
+            SAFE_CHECK(idx_len);
             memcpy(q, idx_str, idx_len);
             q += idx_len;
             *q++ = ']';
@@ -175,12 +188,14 @@ int json_to_lua(lua_State *L, const char *json, size_t len, char *out, size_t ou
             array_index++;
           } else if (after_colon) {
             /* 写入缩进 */
+            SAFE_CHECK(depth);
             for (int i = 0; i < depth; i++) {
               *q++ = '\t';
             }
           }
           *q++ = '{';
           *q++ = '\n';
+          if (depth >= MAX_DEPTH) return 0;
           depth++;
           in_array = 1;
           array_index = 1;
@@ -191,10 +206,12 @@ int json_to_lua(lua_State *L, const char *json, size_t len, char *out, size_t ou
         }
         case ']': {
           /* 数组结束 */
+          if (depth <= 0) return 0;
           depth--;
           p++;
           *q++ = '\n';
           /* 写入缩进 */
+          SAFE_CHECK(depth);
           for (int i = 0; i < depth; i++) {
             *q++ = '\t';
           }
@@ -214,6 +231,7 @@ int json_to_lua(lua_State *L, const char *json, size_t len, char *out, size_t ou
           }
           if (in_array) {
             /* 写入数组索引 */
+            SAFE_CHECK(depth + 32);
             for (int i = 0; i < depth; i++) {
               *q++ = '\t';
             }
@@ -221,6 +239,7 @@ int json_to_lua(lua_State *L, const char *json, size_t len, char *out, size_t ou
             /* 使用sprintf将数组索引转换为字符串，支持任意大小的数字 */
             char idx_str[32];
             int idx_len = sprintf(idx_str, "%d", array_index);
+            SAFE_CHECK(idx_len);
             memcpy(q, idx_str, idx_len);
             q += idx_len;
             *q++ = ']';
@@ -230,12 +249,14 @@ int json_to_lua(lua_State *L, const char *json, size_t len, char *out, size_t ou
             array_index++;
           } else if (parsing_key) {
             /* 写入缩进 */
+            SAFE_CHECK(depth);
             for (int i = 0; i < depth; i++) {
               *q++ = '\t';
             }
             *q++ = '[';
           } else if (after_colon) {
             /* 写入缩进 */
+            SAFE_CHECK(depth);
             for (int i = 0; i < depth; i++) {
               *q++ = '\t';
             }
@@ -269,6 +290,7 @@ int json_to_lua(lua_State *L, const char *json, size_t len, char *out, size_t ou
           }
           if (in_array) {
             /* 写入数组索引 */
+            SAFE_CHECK(depth + 32);
             for (int i = 0; i < depth; i++) {
               *q++ = '\t';
             }
@@ -276,6 +298,7 @@ int json_to_lua(lua_State *L, const char *json, size_t len, char *out, size_t ou
             /* 使用sprintf将数组索引转换为字符串，支持任意大小的数字 */
             char idx_str[32];
             int idx_len = sprintf(idx_str, "%d", array_index);
+            SAFE_CHECK(idx_len);
             memcpy(q, idx_str, idx_len);
             q += idx_len;
             *q++ = ']';
@@ -285,10 +308,12 @@ int json_to_lua(lua_State *L, const char *json, size_t len, char *out, size_t ou
             array_index++;
           } else if (after_colon) {
             /* 写入缩进 */
+            SAFE_CHECK(depth);
             for (int i = 0; i < depth; i++) {
               *q++ = '\t';
             }
           }
+          SAFE_CHECK(4);
           memcpy(q, "true", 4);
           q += 4;
           p += 4;
@@ -306,6 +331,7 @@ int json_to_lua(lua_State *L, const char *json, size_t len, char *out, size_t ou
           }
           if (in_array) {
             /* 写入数组索引 */
+            SAFE_CHECK(depth + 32);
             for (int i = 0; i < depth; i++) {
               *q++ = '\t';
             }
@@ -313,6 +339,7 @@ int json_to_lua(lua_State *L, const char *json, size_t len, char *out, size_t ou
             /* 使用sprintf将数组索引转换为字符串，支持任意大小的数字 */
             char idx_str[32];
             int idx_len = sprintf(idx_str, "%d", array_index);
+            SAFE_CHECK(idx_len);
             memcpy(q, idx_str, idx_len);
             q += idx_len;
             *q++ = ']';
@@ -322,10 +349,12 @@ int json_to_lua(lua_State *L, const char *json, size_t len, char *out, size_t ou
             array_index++;
           } else if (after_colon) {
             /* 写入缩进 */
+            SAFE_CHECK(depth);
             for (int i = 0; i < depth; i++) {
               *q++ = '\t';
             }
           }
+          SAFE_CHECK(5);
           memcpy(q, "false", 5);
           q += 5;
           p += 5;
@@ -344,6 +373,7 @@ int json_to_lua(lua_State *L, const char *json, size_t len, char *out, size_t ou
             }
             if (in_array) {
               /* 写入数组索引 */
+              SAFE_CHECK(depth + 32);
               for (int i = 0; i < depth; i++) {
                 *q++ = '\t';
               }
@@ -351,6 +381,7 @@ int json_to_lua(lua_State *L, const char *json, size_t len, char *out, size_t ou
               /* 使用sprintf将数组索引转换为字符串，支持任意大小的数字 */
             char idx_str[32];
             int idx_len = sprintf(idx_str, "%d", array_index);
+            SAFE_CHECK(idx_len);
             memcpy(q, idx_str, idx_len);
             q += idx_len;
               *q++ = ']';
@@ -360,12 +391,14 @@ int json_to_lua(lua_State *L, const char *json, size_t len, char *out, size_t ou
               array_index++;
             } else if (after_colon) {
               /* 写入缩进 */
+              SAFE_CHECK(depth);
               for (int i = 0; i < depth; i++) {
                 *q++ = '\t';
               }
             }
             /* 复制数字 */
             while (p < end && (*p >= '0' && *p <= '9' || *p == '.' || *p == '-' || *p == 'e' || *p == 'E')) {
+              SAFE_CHECK(1);
               *q++ = *p++;
             }
             need_comma = 1;
