@@ -578,10 +578,51 @@ static int luaB_ipairs (lua_State *L) {
   return 3;
 }
 
+static void get_thread_envs_table (lua_State *L) {
+  lua_getfield(L, LUA_REGISTRYINDEX, "_THREAD_ENVS");
+  if (lua_isnil(L, -1)) {
+    lua_pop(L, 1);
+    lua_newtable(L);
+    /* create metatable for weak keys */
+    lua_newtable(L);
+    lua_pushliteral(L, "k");
+    lua_setfield(L, -2, "__mode");
+    lua_setmetatable(L, -2);
+    /* set in registry */
+    lua_pushvalue(L, -1);
+    lua_setfield(L, LUA_REGISTRYINDEX, "_THREAD_ENVS");
+  }
+}
+
+static void set_thread_env (lua_State *L, int idx) {
+  get_thread_envs_table(L);
+  lua_pushthread(L);
+  lua_pushvalue(L, idx);
+  lua_settable(L, -3);
+  lua_pop(L, 1); /* pop envs table */
+}
+
+static void get_thread_env (lua_State *L) {
+  get_thread_envs_table(L);
+  lua_pushthread(L);
+  lua_gettable(L, -2);
+  if (lua_isnil(L, -1)) {
+    lua_pop(L, 2); /* pop nil and envs table */
+    lua_pushglobaltable(L);
+  } else {
+    lua_remove(L, -2); /* remove envs table */
+  }
+}
+
 static int load_aux (lua_State *L, int status, int envidx) {
   if (l_likely(status == LUA_OK)) {
     if (envidx != 0) {  /* 'env' parameter? */
       lua_pushvalue(L, envidx);  /* environment for loaded function */
+      if (!lua_setupvalue(L, -2, 1))  /* set it as 1st upvalue */
+        lua_pop(L, 1);  /* remove 'env' if not used by previous call */
+    }
+    else {
+      get_thread_env(L);
       if (!lua_setupvalue(L, -2, 1))  /* set it as 1st upvalue */
         lua_pop(L, 1);  /* remove 'env' if not used by previous call */
     }
@@ -698,6 +739,8 @@ static int luaB_dofile (lua_State *L) {
   lua_settop(L, 1);
   if (l_unlikely(luaL_loadfile(L, fname) != LUA_OK))
     return lua_error(L);
+  get_thread_env(L);
+  if (!lua_setupvalue(L, -2, 1)) lua_pop(L, 1);
   lua_callk(L, 0, LUA_MULTRET, 0, dofilecont);
   return dofilecont(L, 0, 0);
 }
@@ -1399,7 +1442,7 @@ static int getfunc (lua_State *L, int opt) {
 
 static int luaB_getfenv (lua_State *L) {
   if (!getfunc(L, 1)) {  /* level 0? */
-    lua_pushglobaltable(L);
+    get_thread_env(L);
     return 1;
   }
 
@@ -1427,8 +1470,7 @@ static int luaB_setfenv (lua_State *L) {
   luaL_checktype(L, 2, LUA_TTABLE);
   
   if (!getfunc(L, 0)) {  /* level 0? */
-    lua_pushvalue(L, 2);
-    lua_rawseti(L, LUA_REGISTRYINDEX, LUA_RIDX_GLOBALS);
+    set_thread_env(L, 2);
     return 0;
   }
 
@@ -1445,7 +1487,7 @@ static int luaB_setfenv (lua_State *L) {
       /* Create a dummy closure to hold the new environment upvalue */
       /* "return _ENV" ensures the upvalue exists and is used */
       if (luaL_loadstring(L, "return _ENV") != LUA_OK) {
-        return luaL_error(L, "failed to create temporary closure");
+        return luaL_error(L, "failed to create temporary closure: %s", lua_tostring(L, -1));
       }
 
       /* Set the new environment as the upvalue of the dummy closure */
