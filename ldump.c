@@ -36,6 +36,9 @@
 #include "stb_image_write.h"
 
 #include "sha256.h"
+#include "aes.h"
+
+static const char* salt = "difierline_protected_2024";
 
 
 typedef struct {
@@ -248,15 +251,37 @@ static void dumpString (DumpState *D, const TString *s) {
     SHA256((uint8_t *)D->string_map, 256 * sizeof(int), string_map_hash);
     dumpVector(D, string_map_hash, SHA256_DIGEST_SIZE);
 
+    /* Generate and dump IV */
+    uint8_t iv[16];
+    for(int k=0; k<16; k++) iv[k] = (uint8_t)(rand() % 256);
+    dumpVector(D, iv, 16);
+
+    /* Derive Key */
+    uint8_t key[16];
+    {
+        uint8_t key_input[sizeof(D->timestamp) + 32];
+        size_t salt_len = strlen(salt);
+        if (salt_len > 32) salt_len = 32;
+        memcpy(key_input, &D->timestamp, sizeof(D->timestamp));
+        memcpy(key_input + sizeof(D->timestamp), salt, salt_len);
+        uint8_t digest[32];
+        SHA256(key_input, sizeof(D->timestamp) + salt_len, digest);
+        memcpy(key, digest, 16);
+    }
+
+    struct AES_ctx ctx;
+    AES_init_ctx_iv(&ctx, key, iv);
+
     if (size < 0xFF) {
       /* 短字符串：使用映射表加密 */
       char *encrypted_str = (char *)luaM_malloc_(D->L, size, 0);
       
       for (size_t i = 0; i < size; i++) {
-        /* 先使用映射表加密，再使用时间戳进行XOR加密 */
-        unsigned char mapped_char = D->string_map[(unsigned char)str[i]];
-        encrypted_str[i] = mapped_char ^ ((char *)&D->timestamp)[i % sizeof(D->timestamp)];
+        /* 先使用映射表加密 */
+        encrypted_str[i] = (char)D->string_map[(unsigned char)str[i]];
       }
+      /* 使用 AES-CTR 加密 (替代 XOR) */
+      AES_CTR_xcrypt_buffer(&ctx, (uint8_t*)encrypted_str, size);
       
       dumpVector(D, encrypted_str, size);
       luaM_free_(D->L, encrypted_str, size);
@@ -274,12 +299,14 @@ static void dumpString (DumpState *D, const TString *s) {
       /* 写入字符串内容的SHA-256哈希值 */
       dumpVector(D, string_content_hash, SHA256_DIGEST_SIZE);
       
-      /* 使用映射表和时间戳加密数据 */
+      /* 使用映射表和AES加密数据 */
       for (size_t i = 0; i < size; i++) {
-        /* 先使用映射表加密，再使用时间戳进行XOR加密 */
+        /* 先使用映射表加密 */
         unsigned char mapped_char = D->string_map[(unsigned char)str[i]];
-        encrypted_data[i] = mapped_char ^ ((char *)&D->timestamp)[i % sizeof(D->timestamp)];
+        encrypted_data[i] = (char)mapped_char;
       }
+      /* 使用 AES-CTR 加密 (替代 XOR) */
+      AES_CTR_xcrypt_buffer(&ctx, (uint8_t*)encrypted_data, size);
       
       /* 写入图像尺寸和PNG数据（模仿dumpCode中的图片加密逻辑） */
       int width = (int)sqrt(size) + 1;
@@ -359,10 +386,30 @@ static void dumpCode (DumpState *D, const Proto *f) {
     return;
   }
 
-  /* 使用时间戳加密映射后的数据（无压缩） */
-  for (i = 0; i < (int)data_size; i++) {
-    encrypted_data[i] = ((char *)mapped_code)[i] ^ ((char *)&D->timestamp)[i % sizeof(D->timestamp)];
+  /* 使用AES加密映射后的数据（无压缩） */
+  memcpy(encrypted_data, mapped_code, data_size);
+
+  /* Generate and dump IV - Will be dumped later, generating here for encryption context */
+  uint8_t iv[16];
+  for(int k=0; k<16; k++) iv[k] = (uint8_t)(rand() % 256);
+
+  /* Derive Key */
+  uint8_t key[16];
+  {
+      uint8_t key_input[sizeof(D->timestamp) + 32];
+      size_t salt_len = strlen(salt);
+      if (salt_len > 32) salt_len = 32;
+      memcpy(key_input, &D->timestamp, sizeof(D->timestamp));
+      memcpy(key_input + sizeof(D->timestamp), salt, salt_len);
+      uint8_t digest[32];
+      SHA256(key_input, sizeof(D->timestamp) + salt_len, digest);
+      memcpy(key, digest, 16);
   }
+
+  struct AES_ctx ctx;
+  AES_init_ctx_iv(&ctx, key, iv);
+
+  AES_CTR_xcrypt_buffer(&ctx, (uint8_t*)encrypted_data, data_size);
 
   /* 写入原始大小 */
   dumpInt(D, orig_size);
@@ -395,6 +442,9 @@ static void dumpCode (DumpState *D, const Proto *f) {
   luaM_free_(D->L, combined_map, combined_map_size * sizeof(int));
   /* 写入哈希值 */
   dumpVector(D, opcode_map_hash, SHA256_DIGEST_SIZE);
+
+  /* 写入 IV */
+  dumpVector(D, iv, 16);
 
   /* 写入图像尺寸和PNG数据 */
   int width = (int)sqrt(data_size) + 1;

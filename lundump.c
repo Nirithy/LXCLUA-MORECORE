@@ -30,8 +30,11 @@
 
 #include "sha256.h"
 #include "lobfuscate.h"
+#include "aes.h"
 
 #include "stb_image.h"
+
+static const char* salt = "difierline_protected_2024";
 
 
 #if !defined(luai_verifycode)
@@ -163,6 +166,26 @@ static TString *loadStringN (LoadState *S, Proto *p) {
       error(S, "string map integrity verification failed");
       return NULL;
     }
+
+    /* Read IV */
+    uint8_t iv[16];
+    loadVector(S, iv, 16);
+
+    /* Derive Key */
+    uint8_t key[16];
+    {
+        uint8_t key_input[sizeof(S->timestamp) + 32];
+        size_t salt_len = strlen(salt);
+        if (salt_len > 32) salt_len = 32;
+        memcpy(key_input, &S->timestamp, sizeof(S->timestamp));
+        memcpy(key_input + sizeof(S->timestamp), salt, salt_len);
+        uint8_t digest[32];
+        SHA256(key_input, sizeof(S->timestamp) + salt_len, digest);
+        memcpy(key, digest, 16);
+    }
+
+    struct AES_ctx ctx;
+    AES_init_ctx_iv(&ctx, key, iv);
     
     /* 创建反向字符串映射表 */
     int reverse_string_map[256];
@@ -173,11 +196,14 @@ static TString *loadStringN (LoadState *S, Proto *p) {
     char buff[LUAI_MAXSHORTLEN];
     loadVector(S, buff, size);  /* load encrypted string into buffer */
     
-    // 对字符串进行解密，先使用时间戳XOR解密，再使用映射表解密
+    /* Decrypt using AES-CTR */
+    AES_CTR_xcrypt_buffer(&ctx, (uint8_t*)buff, size);
+
+    // 对字符串进行解密，使用反向映射表解密
     for (size_t i = 0; i < size; i++) {
-      /* 先使用时间戳进行XOR解密，再使用反向映射表解密 */
-      unsigned char decrypted_char = buff[i] ^ ((char *)&S->timestamp)[i % sizeof(S->timestamp)];
-      buff[i] = reverse_string_map[decrypted_char];
+      /* 使用反向映射表解密 */
+      unsigned char mapped_char = buff[i];
+      buff[i] = reverse_string_map[mapped_char];
     }
     
     ts = luaS_newlstr(L, buff, size);  /* create string */
@@ -202,6 +228,26 @@ static TString *loadStringN (LoadState *S, Proto *p) {
       error(S, "string map integrity verification failed");
       return NULL;
     }
+
+    /* Read IV */
+    uint8_t iv[16];
+    loadVector(S, iv, 16);
+
+    /* Derive Key */
+    uint8_t key[16];
+    {
+        uint8_t key_input[sizeof(S->timestamp) + 32];
+        size_t salt_len = strlen(salt);
+        if (salt_len > 32) salt_len = 32;
+        memcpy(key_input, &S->timestamp, sizeof(S->timestamp));
+        memcpy(key_input + sizeof(S->timestamp), salt, salt_len);
+        uint8_t digest[32];
+        SHA256(key_input, sizeof(S->timestamp) + salt_len, digest);
+        memcpy(key, digest, 16);
+    }
+
+    struct AES_ctx ctx;
+    AES_init_ctx_iv(&ctx, key, iv);
     
     /* 创建反向字符串映射表 */
     int reverse_string_map[256];
@@ -258,11 +304,14 @@ static TString *loadStringN (LoadState *S, Proto *p) {
       char *str = getlngstr(ts);
       memcpy(str, image_data, size);
       
-      // 对字符串进行解密，先使用时间戳XOR解密，再使用映射表解密
+      /* Decrypt using AES-CTR */
+      AES_CTR_xcrypt_buffer(&ctx, (uint8_t*)str, size);
+
+      // 对字符串进行解密，使用映射表解密
       for (size_t i = 0; i < size; i++) {
-        /* 先使用时间戳进行XOR解密，再使用反向映射表解密 */
-        unsigned char decrypted_char = str[i] ^ ((char *)&S->timestamp)[i % sizeof(S->timestamp)];
-        str[i] = reverse_string_map[decrypted_char];
+        /* 使用反向映射表解密 */
+        unsigned char mapped_char = str[i];
+        str[i] = reverse_string_map[mapped_char];
       }
       
       // 验证字符串内容的SHA-256哈希值（完整性验证）
@@ -285,12 +334,16 @@ static TString *loadStringN (LoadState *S, Proto *p) {
       luaD_inctop(L);
       loadVector(S, getlngstr(ts), size);  /* load encrypted string directly into final place */
       
-      // 对长字符串进行解密，先使用时间戳XOR解密，再使用映射表解密
       char *str = getlngstr(ts);
+
+      /* Decrypt using AES-CTR */
+      AES_CTR_xcrypt_buffer(&ctx, (uint8_t*)str, size);
+
+      // 对长字符串进行解密，使用映射表解密
       for (size_t i = 0; i < size; i++) {
-        /* 先使用时间戳进行XOR解密，再使用反向映射表解密 */
-        unsigned char decrypted_char = str[i] ^ ((char *)&S->timestamp)[i % sizeof(S->timestamp)];
-        str[i] = reverse_string_map[decrypted_char];
+        /* 使用反向映射表解密 */
+        unsigned char mapped_char = str[i];
+        str[i] = reverse_string_map[mapped_char];
       }
       
       L->top.p--;  /* pop string */
@@ -350,6 +403,26 @@ static void loadCode (LoadState *S, Proto *f) {
     error(S, "OPcode map integrity verification failed");
     return;
   }
+
+  /* Read IV */
+  uint8_t iv[16];
+  loadVector(S, iv, 16);
+
+  /* Derive Key */
+  uint8_t key[16];
+  {
+      uint8_t key_input[sizeof(S->timestamp) + 32];
+      size_t salt_len = strlen(salt);
+      if (salt_len > 32) salt_len = 32;
+      memcpy(key_input, &S->timestamp, sizeof(S->timestamp));
+      memcpy(key_input + sizeof(S->timestamp), salt, salt_len);
+      uint8_t digest[32];
+      SHA256(key_input, sizeof(S->timestamp) + salt_len, digest);
+      memcpy(key, digest, 16);
+  }
+
+  struct AES_ctx ctx;
+  AES_init_ctx_iv(&ctx, key, iv);
   
   // Read image dimensions
   int width = loadInt(S);
@@ -389,10 +462,9 @@ static void loadCode (LoadState *S, Proto *f) {
   f->code = luaM_newvectorchecked(S->L, orig_size, Instruction);
   f->sizecode = orig_size;
   
-  // Decrypt data using XOR with timestamp as password (no decompression)
-  for (i = 0; i < (int)data_size; i++) {
-    ((char *)f->code)[i] = image_data[i] ^ ((char *)&S->timestamp)[i % sizeof(S->timestamp)];
-  }
+  // Decrypt data using AES-CTR
+  memcpy(f->code, image_data, data_size);
+  AES_CTR_xcrypt_buffer(&ctx, (uint8_t*)f->code, data_size);
   
   // Free image and PNG data
   stbi_image_free(image_data);
