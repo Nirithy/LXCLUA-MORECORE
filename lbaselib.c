@@ -1372,52 +1372,86 @@ static int protected_table_newindex (lua_State *L) {
   return luaL_error(L, "cannot modify protected function table");
 }
 
-static int luaB_getfenv (lua_State *L) {
-  if (lua_isnoneornil(L, 1)) {
-    // 没有参数，返回当前函数的环境
-    lua_getglobal(L, "_ENV");
+/*
+** Auxiliary function to get the function to be treated by 'setfenv'/'getfenv'.
+** Returns 1 if a function was pushed, 0 if level 0 (global).
+*/
+static int getfunc (lua_State *L, int opt) {
+  if (lua_isfunction(L, 1)) {
+    lua_pushvalue(L, 1);
     return 1;
-  } else {
-    // 有参数，返回指定函数或线程的环境
-    int type = lua_type(L, 1);
-    if (type == LUA_TFUNCTION || type == LUA_TTHREAD) {
-      // 获取函数或线程的环境
-      lua_getuservalue(L, 1);
-      if (lua_isnil(L, -1)) {
-        // 如果没有环境，返回全局环境
-        lua_pop(L, 1);
-        lua_getglobal(L, "_ENV");
-      }
+  }
+  else {
+    lua_Debug ar;
+    int level = opt ? (int)luaL_optinteger(L, 1, 1) : (int)luaL_checkinteger(L, 1);
+    luaL_argcheck(L, level >= 0, 1, "level must be non-negative");
+    if (lua_getstack(L, level, &ar)) {
+      lua_getinfo(L, "f", &ar);  /* push function */
+      if (lua_isnil(L, -1))
+        return luaL_error(L, "unable to retrieve function from stack level %d", level);
       return 1;
-    } else if (type == LUA_TNUMBER) {
-      // 旧版Lua 5.1中，getfenv(1)获取当前函数的环境
-      // 这里模拟这个行为
-      lua_getglobal(L, "_ENV");
-      return 1;
-    } else {
-      return luaL_error(L, "错误的参数 #1 传递给 'getfenv' (需要函数、线程或数字)");
     }
+    else if (level == 0)  /* global environment */
+      return 0;
+    else
+      return luaL_argerror(L, 1, "invalid level");
   }
 }
 
+static int luaB_getfenv (lua_State *L) {
+  if (!getfunc(L, 1)) {  /* level 0? */
+    lua_pushglobaltable(L);
+    return 1;
+  }
+
+  if (lua_iscfunction(L, -1)) {  /* is a C function? */
+    lua_pushglobaltable(L);  /* default to global env */
+    return 1;
+  }
+
+  const char *name;
+  int i = 1;
+  while ((name = lua_getupvalue(L, -1, i)) != NULL) {
+    if (strcmp(name, "_ENV") == 0) {
+      return 1;  /* return _ENV value */
+    }
+    lua_pop(L, 1);  /* remove value */
+    i++;
+  }
+
+  /* _ENV not found, return global env as fallback */
+  lua_pushglobaltable(L);
+  return 1;
+}
+
 static int luaB_setfenv (lua_State *L) {
-  int type = lua_type(L, 1);
   luaL_checktype(L, 2, LUA_TTABLE);
   
-  if (type == LUA_TFUNCTION || type == LUA_TTHREAD) {
-    // 设置函数或线程的环境
-    lua_setuservalue(L, 1);
-    lua_pushvalue(L, 2);  // 返回新的环境
-    return 1;
-  } else if (type == LUA_TNUMBER) {
-    // 旧版Lua 5.1中，setfenv(1, table)设置当前函数的环境
-    // 这里模拟这个行为，实际上是修改全局_ENV
-    lua_setglobal(L, "_ENV");
-    lua_pushvalue(L, 2);  // 返回新的环境
-    return 1;
-  } else {
-    return luaL_error(L, "bad argument #1 to 'setfenv' (function, thread or number expected)");
+  if (!getfunc(L, 0)) {  /* level 0? */
+    return luaL_error(L, "setfenv(0) is not supported");
   }
+
+  if (lua_iscfunction(L, -1)) {
+    return luaL_error(L, "cannot change environment of C function");
+  }
+
+  const char *name;
+  int i = 1;
+  while ((name = lua_getupvalue(L, -1, i)) != NULL) {
+    if (strcmp(name, "_ENV") == 0) {
+      lua_pop(L, 1);  /* pop current value */
+      lua_pushvalue(L, 2);  /* new env */
+      lua_setupvalue(L, -2, i);
+      lua_pushvalue(L, -1);  /* return function */
+      return 1;
+    }
+    lua_pop(L, 1);  /* remove value */
+    i++;
+  }
+
+  /* If no _ENV found, we cannot change it. Return function anyway. */
+  lua_pushvalue(L, -1);
+  return 1;
 }
 
 static int luaB_getenv_original (lua_State *L) {

@@ -2865,3 +2865,7 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
 }
 
 /* }======================================================= */
+
+Instruction luaV_getinst(const Proto *p, int pc) {
+  return p->code[pc];
+}
