@@ -2983,14 +2983,16 @@ static char* nirithy_encode(const unsigned char* input, size_t len) {
   return out;
 }
 
-static void nirithy_encrypt(unsigned char* data, size_t len, uint64_t timestamp) {
-  uint64_t key = timestamp ^ 0xDEADBEEFCAFEBABEULL;
-  size_t i;
-  for (i = 0; i < len; i++) {
-    uint8_t k = (uint8_t)((key >> ((i % 8) * 8)) & 0xFF);
-    k ^= (uint8_t)((i * 13) & 0xFF);
-    data[i] ^= k;
-  }
+static void nirithy_derive_key(uint64_t timestamp, uint8_t *key) {
+  uint8_t input[32];
+  uint8_t digest[SHA256_DIGEST_SIZE];
+
+  /* Input: timestamp (8 bytes) + "NirithySalt" (11 bytes) */
+  memcpy(input, &timestamp, 8);
+  memcpy(input + 8, "NirithySalt", 11);
+
+  SHA256(input, 19, digest);
+  memcpy(key, digest, 16); /* Use first 16 bytes as AES-128 key */
 }
 
 static int str_envelop(lua_State *L) {
@@ -2998,14 +3000,39 @@ static int str_envelop(lua_State *L) {
   const char *s = luaL_checklstring(L, 1, &l);
   uint64_t timestamp = (uint64_t)time(NULL);
 
-  size_t payload_len = 8 + l;
+  /* Structure: Timestamp (8) + IV (16) + EncryptedData (l) */
+  size_t payload_len = 8 + 16 + l;
   unsigned char *payload = (unsigned char *)malloc(payload_len);
   if (!payload) return luaL_error(L, "memory allocation failed");
 
+  /* 1. Timestamp */
   memcpy(payload, &timestamp, 8);
-  memcpy(payload + 8, s, l);
 
-  nirithy_encrypt(payload + 8, l, timestamp);
+  /* 2. IV (Random) */
+  {
+    /* Generate random IV using local LCG seeded by luaL_makeseed to avoid
+       time collision and global state modification */
+    unsigned int seed = luaL_makeseed(L);
+    int i;
+    for (i = 0; i < 16; i++) {
+      seed = seed * 1103515245 + 12345;
+      payload[8 + i] = (unsigned char)((seed >> 16) & 0xFF);
+    }
+  }
+
+  /* 3. Encrypt Payload */
+  {
+    uint8_t key[16];
+    struct AES_ctx ctx;
+    nirithy_derive_key(timestamp, key);
+
+    /* Copy data to payload buffer */
+    memcpy(payload + 8 + 16, s, l);
+
+    /* Encrypt the data part using AES-128-CTR */
+    AES_init_ctx_iv(&ctx, key, payload + 8);
+    AES_CTR_xcrypt_buffer(&ctx, payload + 8 + 16, (uint32_t)l);
+  }
 
   char *encoded = nirithy_encode(payload, payload_len);
   free(payload);

@@ -31,6 +31,9 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
+#include "aes.h"
+#include "sha256.h"
+
 /* Define UNUSED macro for Android NDK compatibility */
 #if !defined(UNUSED)
 #define UNUSED(x) ((void)(x))
@@ -796,14 +799,25 @@ static unsigned char* nirithy_decode(const char* input, size_t input_len, size_t
   return out;
 }
 
-static void nirithy_decrypt(unsigned char* data, size_t len, uint64_t timestamp) {
-  uint64_t key = timestamp ^ 0xDEADBEEFCAFEBABEULL;
-  size_t i;
-  for (i = 0; i < len; i++) {
-    uint8_t k = (uint8_t)((key >> ((i % 8) * 8)) & 0xFF);
-    k ^= (uint8_t)((i * 13) & 0xFF);
-    data[i] ^= k;
-  }
+static void nirithy_derive_key(uint64_t timestamp, uint8_t *key) {
+  uint8_t input[32];
+  uint8_t digest[SHA256_DIGEST_SIZE];
+
+  /* Input: timestamp (8 bytes) + "NirithySalt" (11 bytes) */
+  memcpy(input, &timestamp, 8);
+  memcpy(input + 8, "NirithySalt", 11);
+
+  SHA256(input, 19, digest);
+  memcpy(key, digest, 16); /* Use first 16 bytes as AES-128 key */
+}
+
+static void nirithy_decrypt(unsigned char* data, size_t len, uint64_t timestamp, const uint8_t* iv) {
+  uint8_t key[16];
+  struct AES_ctx ctx;
+
+  nirithy_derive_key(timestamp, key);
+  AES_init_ctx_iv(&ctx, key, iv);
+  AES_CTR_xcrypt_buffer(&ctx, data, (uint32_t)len);
 }
 
 static const char *getF (lua_State *L, void *ud, size_t *size) {
@@ -941,12 +955,19 @@ LUALIB_API int luaL_loadfilex (lua_State *L, const char *filename,
             if (fread(payload, 1, payload_len, lf.f) == (size_t)payload_len) {
               size_t bin_len;
               unsigned char *bin = nirithy_decode(payload, payload_len, &bin_len);
-              if (bin && bin_len > 8) {
+              if (bin && bin_len > 24) { /* 8 timestamp + 16 IV */
                 uint64_t timestamp = 0;
+                uint8_t iv[16];
+                unsigned char *data;
+                size_t data_len;
+
                 memcpy(&timestamp, bin, 8);
-                unsigned char *data = bin + 8;
-                size_t data_len = bin_len - 8;
-                nirithy_decrypt(data, data_len, timestamp);
+                memcpy(iv, bin + 8, 16);
+
+                data = bin + 24;
+                data_len = bin_len - 24;
+
+                nirithy_decrypt(data, data_len, timestamp, iv);
 
                 status = luaL_loadbuffer(L, (char*)data, data_len, lua_tostring(L, -1));
                 free(bin);
@@ -1146,11 +1167,21 @@ LUALIB_API int luaL_loadbufferx (lua_State *L, const char *buff, size_t size,
     size_t bin_len;
     unsigned char *bin = nirithy_decode(buff + 9, size - 9, &bin_len);
     if (bin) {
-      if (bin_len > 8) {
+      if (bin_len > 24) { /* 8 timestamp + 16 IV */
         uint64_t timestamp = 0;
+        uint8_t iv[16];
+        unsigned char *data;
+        size_t data_len;
+        int status;
+
         memcpy(&timestamp, bin, 8);
-        nirithy_decrypt(bin + 8, bin_len - 8, timestamp);
-        int status = luaL_loadbufferx(L, (char*)(bin + 8), bin_len - 8, name, mode);
+        memcpy(iv, bin + 8, 16);
+
+        data = bin + 24;
+        data_len = bin_len - 24;
+
+        nirithy_decrypt(data, data_len, timestamp, iv);
+        status = luaL_loadbufferx(L, (char*)data, data_len, name, mode);
         free(bin);
         return status;
       }

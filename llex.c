@@ -28,6 +28,8 @@
 #include "lstring.h"
 #include "ltable.h"
 #include "lzio.h"
+#include "aes.h"
+#include "sha256.h"
 
 
 
@@ -42,31 +44,171 @@
 
 #define currIsNewline(ls)	(ls->current == '\n' || ls->current == '\r')
 
+/* Duplicate helper functions for llex.c */
+static const char* nirithy_b64 = "9876543210zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA-_";
 
-typedef struct LoadF {
-  int n;  /* number of pre-read characters */
-  FILE *f;  /* file being read */
-  char buff[1024];  /* area for reading file */
-} LoadF;
+static int nirithy_b64_val(char c) {
+  const char *p = strchr(nirithy_b64, c);
+  if (p) return (int)(p - nirithy_b64);
+  return -1;
+}
 
-static const char *getF (lua_State *L, void *ud, size_t *size) {
-  LoadF *lf = (LoadF *)ud;
+static unsigned char* nirithy_decode(const char* input, size_t input_len, size_t* out_len) {
+  size_t len;
+  unsigned char* out;
+  size_t i, j;
+
+  if (input_len % 4 != 0) return NULL;
+  len = input_len / 4 * 3;
+  if (input_len > 0 && input[input_len - 1] == '=') len--;
+  if (input_len > 1 && input[input_len - 2] == '=') len--;
+  out = (unsigned char*)malloc(len);
+  if (!out) return NULL;
+
+  for (i = 0, j = 0; i < input_len; i += 4) {
+    int a = input[i] == '=' ? 0 : nirithy_b64_val(input[i]);
+    int b = input[i+1] == '=' ? 0 : nirithy_b64_val(input[i+1]);
+    int c = input[i+2] == '=' ? 0 : nirithy_b64_val(input[i+2]);
+    int d = input[i+3] == '=' ? 0 : nirithy_b64_val(input[i+3]);
+    uint32_t triple;
+
+    if (a < 0 || b < 0 || c < 0 || d < 0) {
+      free(out);
+      return NULL;
+    }
+    triple = (uint32_t)((a << 18) + (b << 12) + (c << 6) + d);
+    if (j < len) out[j++] = (triple >> 16) & 0xFF;
+    if (j < len) out[j++] = (triple >> 8) & 0xFF;
+    if (j < len) out[j++] = (triple) & 0xFF;
+  }
+  *out_len = len;
+  return out;
+}
+
+static void nirithy_derive_key(uint64_t timestamp, uint8_t *key) {
+  uint8_t input[32];
+  uint8_t digest[SHA256_DIGEST_SIZE];
+
+  memcpy(input, &timestamp, 8);
+  memcpy(input + 8, "NirithySalt", 11);
+
+  SHA256(input, 19, digest);
+  memcpy(key, digest, 16);
+}
+
+static void nirithy_decrypt(unsigned char* data, size_t len, uint64_t timestamp, const uint8_t* iv) {
+  uint8_t key[16];
+  struct AES_ctx ctx;
+
+  nirithy_derive_key(timestamp, key);
+  AES_init_ctx_iv(&ctx, key, iv);
+  AES_CTR_xcrypt_buffer(&ctx, data, (uint32_t)len);
+}
+
+typedef struct LoadState {
+  int is_string;
+  union {
+    struct {
+      int n;
+      FILE *f;
+      char buff[1024];
+    } f;
+    struct {
+      const char *s;
+      size_t size;
+      char *to_free; /* buffer to free */
+    } s;
+  } u;
+} LoadState;
+
+static const char *getReader (lua_State *L, void *ud, size_t *size) {
+  LoadState *ls = (LoadState *)ud;
   (void)L;
-  if (lf->n > 0) {  /* are there pre-read characters to be read? */
-    *size = lf->n;  /* return them (chars already in buffer) */
-    lf->n = 0;  /* no more pre-read characters */
+  if (ls->is_string) {
+    if (ls->u.s.size == 0) return NULL;
+    *size = ls->u.s.size;
+    ls->u.s.size = 0;
+    return ls->u.s.s;
+  } else {
+    if (ls->u.f.n > 0) {
+      *size = ls->u.f.n;
+      ls->u.f.n = 0;
+    } else {
+      if (feof(ls->u.f.f)) return NULL;
+      *size = fread(ls->u.f.buff, 1, sizeof(ls->u.f.buff), ls->u.f.f);
+    }
+    return ls->u.f.buff;
   }
-  else {
-    if (feof(lf->f)) return NULL;
-    *size = fread(lf->buff, 1, sizeof(lf->buff), lf->f);
-  }
-  return lf->buff;
 }
 
 void luaX_pushincludefile(LexState *ls, const char *filename) {
   FILE *f = fopen(filename, "r");
   if (f == NULL) {
     luaX_syntaxerror(ls, luaO_pushfstring(ls->L, "cannot open file '%s'", filename));
+  }
+
+  /* Check signature */
+  char sig[9];
+  int is_encrypted = 0;
+  if (fread(sig, 1, 9, f) == 9 && memcmp(sig, "Nirithy==", 9) == 0) {
+    is_encrypted = 1;
+  }
+
+  LoadState *lf = luaM_new(ls->L, LoadState);
+
+  if (is_encrypted) {
+    /* Read whole file */
+    long fsize;
+    size_t payload_len;
+    char *payload;
+    size_t bin_len;
+    unsigned char *bin;
+    uint64_t timestamp;
+    uint8_t iv[16];
+    unsigned char *data;
+    size_t data_len;
+
+    fseek(f, 0, SEEK_END);
+    fsize = ftell(f);
+    fseek(f, 9, SEEK_SET); /* Skip signature */
+
+    payload_len = fsize - 9;
+    payload = (char*)malloc(payload_len + 1);
+    if (!payload || fread(payload, 1, payload_len, f) != payload_len) {
+        if (payload) free(payload);
+        fclose(f);
+        luaM_free(ls->L, lf);
+        luaX_syntaxerror(ls, "failed to read encrypted file");
+    }
+    fclose(f); /* File no longer needed */
+
+    bin = nirithy_decode(payload, payload_len, &bin_len);
+    free(payload);
+
+    if (!bin || bin_len <= 24) {
+        if (bin) free(bin);
+        luaM_free(ls->L, lf);
+        luaX_syntaxerror(ls, "failed to decode encrypted file");
+    }
+
+    memcpy(&timestamp, bin, 8);
+    memcpy(iv, bin + 8, 16);
+
+    data = bin + 24;
+    data_len = bin_len - 24;
+
+    nirithy_decrypt(data, data_len, timestamp, iv);
+
+    lf->is_string = 1;
+    lf->u.s.s = (const char*)data;
+    lf->u.s.size = data_len;
+    lf->u.s.to_free = (char*)bin;
+
+  } else {
+    rewind(f);
+    lf->is_string = 0;
+    lf->u.f.f = f;
+    lf->u.f.n = 0;
   }
 
   IncludeState *inc = luaM_new(ls->L, IncludeState);
@@ -78,12 +220,8 @@ void luaX_pushincludefile(LexState *ls, const char *filename) {
   inc->prev = ls->inc_stack;
   ls->inc_stack = inc;
 
-  LoadF *lf = luaM_new(ls->L, LoadF);
-  lf->n = 0;
-  lf->f = f;
-
   ZIO *z = luaM_new(ls->L, ZIO);
-  luaZ_init(ls->L, z, getF, lf);
+  luaZ_init(ls->L, z, getReader, lf);
 
   ls->z = z;
   ls->linenumber = 1;
@@ -97,8 +235,14 @@ static void luaX_popincludefile(LexState *ls) {
   IncludeState *inc = ls->inc_stack;
   if (inc) {
     /* Free current ZIO resources */
-    LoadF *lf = (LoadF *)ls->z->data;
-    fclose(lf->f);
+    LoadState *lf = (LoadState *)ls->z->data;
+
+    if (lf->is_string) {
+      if (lf->u.s.to_free) free(lf->u.s.to_free);
+    } else {
+      fclose(lf->u.f.f);
+    }
+
     luaM_free(ls->L, lf);
     luaM_free(ls->L, ls->z);
 

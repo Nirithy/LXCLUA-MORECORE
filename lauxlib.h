@@ -366,6 +366,14 @@ LUALIB_API int (luaL_loadstring) (lua_State *L, const char *s);
 LUALIB_API lua_State *(luaL_newstate) (void);
 
 /**
+ * @brief Computes a seed for pseudo-random number generation.
+ *
+ * @param L The Lua state.
+ * @return The computed seed.
+ */
+LUALIB_API unsigned int (luaL_makeseed) (lua_State *L);
+
+/**
  * @brief Returns the "length" of the value at the given index as a number.
  *
  * @param L The Lua state.
