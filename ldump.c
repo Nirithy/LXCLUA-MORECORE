@@ -36,7 +36,6 @@
 #include "stb_image_write.h"
 
 #include "sha256.h"
-#include "aes.h"
 
 
 typedef struct {
@@ -75,58 +74,6 @@ static void dumpBlock (DumpState *D, const void *b, size_t size) {
 
 
 #define dumpVar(D,x)		dumpVector(D,&x,1)
-
-
-/* Helper to dump a block of data encrypted with AES-128-CTR */
-static void dumpEncryptedBlock(DumpState *D, const void *data, size_t len, const char *salt_suffix) {
-  uint8_t iv[16];
-  uint8_t key[16];
-  uint8_t hash[32];
-  uint8_t *buffer;
-  size_t salt_len = strlen(salt_suffix);
-  size_t total_len = sizeof(D->timestamp) + salt_len;
-  uint8_t *key_input;
-
-  /* Generate random IV */
-  for (int i = 0; i < 16; i++) {
-    iv[i] = (uint8_t)(rand() & 0xFF);
-  }
-
-  /* Derive Key: SHA256(timestamp + salt) */
-  key_input = (uint8_t *)luaM_malloc_(D->L, total_len, 0);
-  if (key_input == NULL) {
-    D->status = LUA_ERRMEM;
-    return;
-  }
-  memcpy(key_input, &D->timestamp, sizeof(D->timestamp));
-  memcpy(key_input + sizeof(D->timestamp), salt_suffix, salt_len);
-
-  SHA256(key_input, total_len, hash);
-  memcpy(key, hash, 16); /* Use first 16 bytes for AES-128 key */
-
-  luaM_free_(D->L, key_input, total_len);
-
-  /* Prepare buffer for encryption */
-  buffer = (uint8_t *)luaM_malloc_(D->L, len, 0);
-  if (buffer == NULL) {
-    D->status = LUA_ERRMEM;
-    return;
-  }
-  memcpy(buffer, data, len);
-
-  /* Encrypt */
-  struct AES_ctx ctx;
-  AES_init_ctx_iv(&ctx, key, iv);
-  AES_CTR_xcrypt_buffer(&ctx, buffer, (uint32_t)len);
-
-  /* Write IV */
-  dumpVector(D, iv, 16);
-
-  /* Write Encrypted Data */
-  dumpVector(D, buffer, len);
-
-  luaM_free_(D->L, buffer, len);
-}
 
 
 /* 生成随机OPcode映射表 */
@@ -291,12 +238,10 @@ static void dumpString (DumpState *D, const TString *s) {
     /* 生成字符串映射表（用于动态加密） */
     generateStringMap(D, 256);
     
-    /* 写入字符串映射表（用于加载时解密） - 使用AES加密 */
-    uint8_t map_buffer[256];
+    /* 写入字符串映射表（用于加载时解密） */
     for (int i = 0; i < 256; i++) {
-      map_buffer[i] = (uint8_t)D->string_map[i];
+      dumpByte(D, D->string_map[i]);
     }
-    dumpEncryptedBlock(D, map_buffer, 256, "string_map");
     
     /* 计算并写入字符串映射表的SHA-256哈希值（完整性验证） */
     uint8_t string_map_hash[SHA256_DIGEST_SIZE];
@@ -304,17 +249,24 @@ static void dumpString (DumpState *D, const TString *s) {
     dumpVector(D, string_map_hash, SHA256_DIGEST_SIZE);
 
     if (size < 0xFF) {
-      /* 短字符串：使用映射表和AES加密 */
-      char *substituted_str = (char *)luaM_malloc_(D->L, size, 0);
+      /* 短字符串：使用映射表加密 */
+      char *encrypted_str = (char *)luaM_malloc_(D->L, size, 0);
       
       for (size_t i = 0; i < size; i++) {
-        substituted_str[i] = (char)D->string_map[(unsigned char)str[i]];
+        /* 先使用映射表加密，再使用时间戳进行XOR加密 */
+        unsigned char mapped_char = D->string_map[(unsigned char)str[i]];
+        encrypted_str[i] = mapped_char ^ ((char *)&D->timestamp)[i % sizeof(D->timestamp)];
       }
       
-      dumpEncryptedBlock(D, substituted_str, size, "string_content");
-      luaM_free_(D->L, substituted_str, size);
+      dumpVector(D, encrypted_str, size);
+      luaM_free_(D->L, encrypted_str, size);
     } else {
       /* 长字符串：使用图片加密 */
+      char *encrypted_data = (char *)luaM_malloc_(D->L, size, 0);
+      if (encrypted_data == NULL) {
+        D->status = LUA_ERRMEM;
+        return;
+      }
       
       /* 计算原始字符串的SHA-256哈希值（完整性验证） */
       uint8_t string_content_hash[SHA256_DIGEST_SIZE];
@@ -322,42 +274,16 @@ static void dumpString (DumpState *D, const TString *s) {
       /* 写入字符串内容的SHA-256哈希值 */
       dumpVector(D, string_content_hash, SHA256_DIGEST_SIZE);
       
-      /* 准备加密数据：IV + AES(Substituted(Data)) */
-      size_t encrypted_size = 16 + size;
-      unsigned char *encrypted_data = (unsigned char *)luaM_malloc_(D->L, encrypted_size, 0);
-      if (encrypted_data == NULL) {
-        D->status = LUA_ERRMEM;
-        return;
-      }
-
-      /* Generate IV */
-      for (int i = 0; i < 16; i++) encrypted_data[i] = (unsigned char)(rand() & 0xFF);
-
-      /* Derive Key */
-      uint8_t key[16], hash[32];
-      const char *salt = "string_content";
-      size_t salt_len = strlen(salt);
-      size_t total_len = sizeof(D->timestamp) + salt_len;
-      uint8_t *key_input = (uint8_t *)luaM_malloc_(D->L, total_len, 0);
-      memcpy(key_input, &D->timestamp, sizeof(D->timestamp));
-      memcpy(key_input + sizeof(D->timestamp), salt, salt_len);
-      SHA256(key_input, total_len, hash);
-      memcpy(key, hash, 16);
-      luaM_free_(D->L, key_input, total_len);
-
-      /* Substitute and copy to buffer */
+      /* 使用映射表和时间戳加密数据 */
       for (size_t i = 0; i < size; i++) {
-        encrypted_data[16 + i] = (unsigned char)D->string_map[(unsigned char)str[i]];
+        /* 先使用映射表加密，再使用时间戳进行XOR加密 */
+        unsigned char mapped_char = D->string_map[(unsigned char)str[i]];
+        encrypted_data[i] = mapped_char ^ ((char *)&D->timestamp)[i % sizeof(D->timestamp)];
       }
-
-      /* Encrypt (skip IV) */
-      struct AES_ctx ctx;
-      AES_init_ctx_iv(&ctx, key, encrypted_data);
-      AES_CTR_xcrypt_buffer(&ctx, encrypted_data + 16, (uint32_t)size);
-
-      /* 写入图像尺寸和PNG数据 */
-      int width = (int)sqrt(encrypted_size) + 1;
-      int height = (encrypted_size + width - 1) / width;
+      
+      /* 写入图像尺寸和PNG数据（模仿dumpCode中的图片加密逻辑） */
+      int width = (int)sqrt(size) + 1;
+      int height = (size + width - 1) / width;
       size_t image_size = (size_t)width * height;
       
       dumpInt(D, width);
@@ -365,13 +291,13 @@ static void dumpString (DumpState *D, const TString *s) {
       
       unsigned char *image_data = (unsigned char *)luaM_malloc_(D->L, image_size, 0);
       if (image_data == NULL) {
-        luaM_free_(D->L, encrypted_data, encrypted_size);
+        luaM_free_(D->L, encrypted_data, size);
         D->status = LUA_ERRMEM;
         return;
       }
       
       memset(image_data, 0, image_size);
-      memcpy(image_data, encrypted_data, encrypted_size);
+      memcpy(image_data, encrypted_data, size);
       
       int png_len;
       unsigned char *png_data = stbi_write_png_to_mem(image_data, width, width, height, 1, &png_len);
@@ -426,56 +352,34 @@ static void dumpCode (DumpState *D, const Proto *f) {
     mapped_code[i] = inst;
   }
 
-  /* 准备加密缓冲区：IV (16) + 数据 */
-  size_t encrypted_size = 16 + data_size;
-  encrypted_data = (char *)luaM_malloc_(D->L, encrypted_size, 0);
+  encrypted_data = (char *)luaM_malloc_(D->L, data_size, 0);
   if (encrypted_data == NULL) {
     luaM_free_(D->L, mapped_code, data_size);
     D->status = LUA_ERRMEM;
     return;
   }
 
-  /* Generate IV */
-  for (i = 0; i < 16; i++) encrypted_data[i] = (char)(rand() & 0xFF);
-
-  /* Derive Key */
-  uint8_t key[16], hash[32];
-  const char *salt = "bytecode_instruction";
-  size_t salt_len = strlen(salt);
-  size_t total_len = sizeof(D->timestamp) + salt_len;
-  uint8_t *key_input = (uint8_t *)luaM_malloc_(D->L, total_len, 0);
-  memcpy(key_input, &D->timestamp, sizeof(D->timestamp));
-  memcpy(key_input + sizeof(D->timestamp), salt, salt_len);
-  SHA256(key_input, total_len, hash);
-  memcpy(key, hash, 16);
-  luaM_free_(D->L, key_input, total_len);
-
-  /* Copy mapped code to buffer */
-  memcpy(encrypted_data + 16, mapped_code, data_size);
-
-  /* Encrypt using AES-CTR (skip IV) */
-  struct AES_ctx ctx;
-  AES_init_ctx_iv(&ctx, key, (uint8_t *)encrypted_data);
-  AES_CTR_xcrypt_buffer(&ctx, (uint8_t *)(encrypted_data + 16), (uint32_t)data_size);
+  /* 使用时间戳加密映射后的数据（无压缩） */
+  for (i = 0; i < (int)data_size; i++) {
+    encrypted_data[i] = ((char *)mapped_code)[i] ^ ((char *)&D->timestamp)[i % sizeof(D->timestamp)];
+  }
 
   /* 写入原始大小 */
   dumpInt(D, orig_size);
   
-  /* 写入加密的反向OPcode映射表 */
-  uint8_t reverse_map_buffer[NUM_OPCODES];
-  for (i = 0; i < NUM_OPCODES; i++) {
-    reverse_map_buffer[i] = (uint8_t)D->reverse_opcode_map[i];
-  }
-  dumpEncryptedBlock(D, reverse_map_buffer, NUM_OPCODES, "opcode_map");
-
-  /* 写入加密的第三个OPcode映射表 */
-  uint8_t third_map_buffer[NUM_OPCODES];
-  for (i = 0; i < NUM_OPCODES; i++) {
-    third_map_buffer[i] = (uint8_t)D->third_opcode_map[i];
-  }
-  dumpEncryptedBlock(D, third_map_buffer, NUM_OPCODES, "opcode_map");
+  /* 时间戳已在dumpFunction开头写入，此处不再重复写入 */
   
-  /* 计算并写入OPcode映射表的SHA-256哈希值（完整性验证 - 保持不变，验证的是解密后的Map） */
+  /* 写入反向OPcode映射表，用于加载时恢复原始OPcode */
+  for (i = 0; i < NUM_OPCODES; i++) {
+    dumpByte(D, D->reverse_opcode_map[i]);
+  }
+  
+  /* 写入第三个OPcode映射表，用于加载时恢复 */
+  for (i = 0; i < NUM_OPCODES; i++) {
+    dumpByte(D, D->third_opcode_map[i]);
+  }
+  
+  /* 计算并写入OPcode映射表的SHA-256哈希值（完整性验证） */
   uint8_t opcode_map_hash[SHA256_DIGEST_SIZE];
   /* 合并两个映射表进行哈希计算 */
   int combined_map_size = NUM_OPCODES * 2;
@@ -493,8 +397,8 @@ static void dumpCode (DumpState *D, const Proto *f) {
   dumpVector(D, opcode_map_hash, SHA256_DIGEST_SIZE);
 
   /* 写入图像尺寸和PNG数据 */
-  int width = (int)sqrt(encrypted_size) + 1;
-  int height = (encrypted_size + width - 1) / width;
+  int width = (int)sqrt(data_size) + 1;
+  int height = (data_size + width - 1) / width;
 
   size_t image_size = (size_t)width * height;
 
@@ -503,20 +407,20 @@ static void dumpCode (DumpState *D, const Proto *f) {
 
   unsigned char *image_data = (unsigned char *)luaM_malloc_(D->L, image_size, 0);
   if (image_data == NULL) {
-    luaM_free_(D->L, encrypted_data, encrypted_size);
+    luaM_free_(D->L, encrypted_data, data_size);
     luaM_free_(D->L, mapped_code, data_size);
     D->status = LUA_ERRMEM;
     return;
   }
 
   memset(image_data, 0, image_size);
-  memcpy(image_data, encrypted_data, encrypted_size);
+  memcpy(image_data, encrypted_data, data_size);
   
 
   int png_len;
   unsigned char *png_data = stbi_write_png_to_mem(image_data, width, width, height, 1, &png_len);
   if (png_data == NULL) {
-    luaM_free_(D->L, encrypted_data, encrypted_size);
+    luaM_free_(D->L, encrypted_data, data_size);
     luaM_free_(D->L, image_data, image_size);
     luaM_free_(D->L, mapped_code, data_size);
     D->status = LUA_ERRMEM;
@@ -529,7 +433,7 @@ static void dumpCode (DumpState *D, const Proto *f) {
   STBIW_FREE(png_data);
 
   /* 释放内存 */
-  luaM_free_(D->L, encrypted_data, encrypted_size);
+  luaM_free_(D->L, encrypted_data, data_size);
   luaM_free_(D->L, image_data, image_size);
   luaM_free_(D->L, mapped_code, data_size);
 }

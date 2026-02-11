@@ -30,7 +30,6 @@
 
 #include "sha256.h"
 #include "lobfuscate.h"
-#include "aes.h"
 
 #include "stb_image.h"
 
@@ -87,42 +86,6 @@ static void loadBlock (LoadState *S, void *b, size_t size) {
 
 
 #define loadVar(S,x)		loadVector(S,&x,1)
-
-
-/* Helper to load a block of data encrypted with AES-128-CTR */
-static void loadEncryptedBlock(LoadState *S, void *data, size_t len, const char *salt_suffix) {
-  uint8_t iv[16];
-  uint8_t key[16];
-  uint8_t hash[32];
-  size_t salt_len = strlen(salt_suffix);
-  size_t total_len = sizeof(S->timestamp) + salt_len;
-  uint8_t *key_input;
-
-  /* Read IV */
-  loadVector(S, iv, 16);
-
-  /* Read Encrypted Data */
-  loadVector(S, data, len);
-
-  /* Derive Key: SHA256(timestamp + salt) */
-  key_input = (uint8_t *)luaM_malloc_(S->L, total_len, 0);
-  if (key_input == NULL) {
-    error(S, "memory allocation failed for key derivation");
-    return;
-  }
-  memcpy(key_input, &S->timestamp, sizeof(S->timestamp));
-  memcpy(key_input + sizeof(S->timestamp), salt_suffix, salt_len);
-
-  SHA256(key_input, total_len, hash);
-  memcpy(key, hash, 16); /* Use first 16 bytes for AES-128 key */
-
-  luaM_free_(S->L, key_input, total_len);
-
-  /* Decrypt */
-  struct AES_ctx ctx;
-  AES_init_ctx_iv(&ctx, key, iv);
-  AES_CTR_xcrypt_buffer(&ctx, (uint8_t *)data, (uint32_t)len);
-}
 
 
 static lu_byte loadByte (LoadState *S) {
@@ -184,11 +147,9 @@ static TString *loadStringN (LoadState *S, Proto *p) {
     /* 读取该字符串专用的时间戳 */
     loadVar(S, S->timestamp);
     
-    /* 读取并解密字符串映射表 */
-    uint8_t map_buffer[256];
-    loadEncryptedBlock(S, map_buffer, 256, "string_map");
+    /* 读取字符串映射表（用于解密） */
     for (int i = 0; i < 256; i++) {
-      S->string_map[i] = (int)map_buffer[i];
+      S->string_map[i] = loadByte(S);
     }
     
     /* 读取并验证字符串映射表的SHA-256哈希值（完整性验证） */
@@ -210,31 +171,13 @@ static TString *loadStringN (LoadState *S, Proto *p) {
     }
     
     char buff[LUAI_MAXSHORTLEN];
-    /* Load Encrypted Block Manually (IV + Data) */
-    uint8_t iv[16];
-    loadVector(S, iv, 16);
-    loadVector(S, buff, size);
-
-    /* Derive Key */
-    uint8_t key[16], hash[32];
-    const char *salt = "string_content";
-    size_t salt_len = strlen(salt);
-    size_t total_len = sizeof(S->timestamp) + salt_len;
-    uint8_t *key_input = (uint8_t *)luaM_malloc_(S->L, total_len, 0);
-    memcpy(key_input, &S->timestamp, sizeof(S->timestamp));
-    memcpy(key_input + sizeof(S->timestamp), salt, salt_len);
-    SHA256(key_input, total_len, hash);
-    memcpy(key, hash, 16);
-    luaM_free_(S->L, key_input, total_len);
-
-    /* Decrypt AES-CTR */
-    struct AES_ctx ctx;
-    AES_init_ctx_iv(&ctx, key, iv);
-    AES_CTR_xcrypt_buffer(&ctx, (uint8_t *)buff, (uint32_t)size);
+    loadVector(S, buff, size);  /* load encrypted string into buffer */
     
-    /* Apply Inverse Substitution */
+    // 对字符串进行解密，先使用时间戳XOR解密，再使用映射表解密
     for (size_t i = 0; i < size; i++) {
-      buff[i] = (char)reverse_string_map[(unsigned char)buff[i]];
+      /* 先使用时间戳进行XOR解密，再使用反向映射表解密 */
+      unsigned char decrypted_char = buff[i] ^ ((char *)&S->timestamp)[i % sizeof(S->timestamp)];
+      buff[i] = reverse_string_map[decrypted_char];
     }
     
     ts = luaS_newlstr(L, buff, size);  /* create string */
@@ -313,34 +256,13 @@ static TString *loadStringN (LoadState *S, Proto *p) {
       
       // 复制解密后的数据到字符串对象
       char *str = getlngstr(ts);
+      memcpy(str, image_data, size);
       
-      /* Extract IV (first 16 bytes of image_data) */
-      uint8_t iv[16];
-      memcpy(iv, image_data, 16);
-
-      /* Copy ciphertext to str */
-      memcpy(str, image_data + 16, size);
-
-      /* Derive Key */
-      uint8_t key[16], hash[32];
-      const char *salt = "string_content";
-      size_t salt_len = strlen(salt);
-      size_t total_len = sizeof(S->timestamp) + salt_len;
-      uint8_t *key_input = (uint8_t *)luaM_malloc_(S->L, total_len, 0);
-      memcpy(key_input, &S->timestamp, sizeof(S->timestamp));
-      memcpy(key_input + sizeof(S->timestamp), salt, salt_len);
-      SHA256(key_input, total_len, hash);
-      memcpy(key, hash, 16);
-      luaM_free_(S->L, key_input, total_len);
-
-      /* Decrypt */
-      struct AES_ctx ctx;
-      AES_init_ctx_iv(&ctx, key, iv);
-      AES_CTR_xcrypt_buffer(&ctx, (uint8_t *)str, (uint32_t)size);
-
-      /* Apply Inverse Substitution */
+      // 对字符串进行解密，先使用时间戳XOR解密，再使用映射表解密
       for (size_t i = 0; i < size; i++) {
-        str[i] = (char)reverse_string_map[(unsigned char)str[i]];
+        /* 先使用时间戳进行XOR解密，再使用反向映射表解密 */
+        unsigned char decrypted_char = str[i] ^ ((char *)&S->timestamp)[i % sizeof(S->timestamp)];
+        str[i] = reverse_string_map[decrypted_char];
       }
       
       // 验证字符串内容的SHA-256哈希值（完整性验证）
@@ -357,38 +279,18 @@ static TString *loadStringN (LoadState *S, Proto *p) {
       
       L->top.p--;  /* pop string */
     } else {
-      /* 普通长字符串（未启用PNG加密但长度>MAXSHORT）：逻辑与短字符串类似但使用createlngstrobj */
-
+      /* 普通长字符串：使用映射表解密 */
       ts = luaS_createlngstrobj(L, size);  /* create string */
-      setsvalue2s(L, L->top.p, ts);  /* anchor it */
+      setsvalue2s(L, L->top.p, ts);  /* anchor it ('loadVector' can GC) */
       luaD_inctop(L);
+      loadVector(S, getlngstr(ts), size);  /* load encrypted string directly into final place */
+      
+      // 对长字符串进行解密，先使用时间戳XOR解密，再使用映射表解密
       char *str = getlngstr(ts);
-
-      /* Load Encrypted Block Manually (IV + Data) */
-      uint8_t iv[16];
-      loadVector(S, iv, 16);
-      loadVector(S, str, size); /* Load directly into string buffer */
-
-      /* Derive Key */
-      uint8_t key[16], hash[32];
-      const char *salt = "string_content";
-      size_t salt_len = strlen(salt);
-      size_t total_len = sizeof(S->timestamp) + salt_len;
-      uint8_t *key_input = (uint8_t *)luaM_malloc_(S->L, total_len, 0);
-      memcpy(key_input, &S->timestamp, sizeof(S->timestamp));
-      memcpy(key_input + sizeof(S->timestamp), salt, salt_len);
-      SHA256(key_input, total_len, hash);
-      memcpy(key, hash, 16);
-      luaM_free_(S->L, key_input, total_len);
-
-      /* Decrypt */
-      struct AES_ctx ctx;
-      AES_init_ctx_iv(&ctx, key, iv);
-      AES_CTR_xcrypt_buffer(&ctx, (uint8_t *)str, (uint32_t)size);
-
-      /* Inverse Substitute */
       for (size_t i = 0; i < size; i++) {
-        str[i] = (char)reverse_string_map[(unsigned char)str[i]];
+        /* 先使用时间戳进行XOR解密，再使用反向映射表解密 */
+        unsigned char decrypted_char = str[i] ^ ((char *)&S->timestamp)[i % sizeof(S->timestamp)];
+        str[i] = reverse_string_map[decrypted_char];
       }
       
       L->top.p--;  /* pop string */
@@ -417,17 +319,14 @@ static void loadCode (LoadState *S, Proto *f) {
 
   /* 时间戳已在loadFunction开头读取，此处不再重复读取 */
   
-  // Read and decrypt OPcode映射表
-  uint8_t map_buffer[NUM_OPCODES];
-  loadEncryptedBlock(S, map_buffer, NUM_OPCODES, "opcode_map");
+  // Read OPcode映射表
   for (i = 0; i < NUM_OPCODES; i++) {
-    S->opcode_map[i] = (int)map_buffer[i];
+    S->opcode_map[i] = loadByte(S);
   }
   
-  // Read and decrypt third OPcode映射表
-  loadEncryptedBlock(S, map_buffer, NUM_OPCODES, "opcode_map");
+  // Read third OPcode映射表
   for (i = 0; i < NUM_OPCODES; i++) {
-    S->third_opcode_map[i] = (int)map_buffer[i];
+    S->third_opcode_map[i] = loadByte(S);
   }
   
   // 读取并验证OPcode映射表的SHA-256哈希值（完整性验证）
@@ -490,30 +389,11 @@ static void loadCode (LoadState *S, Proto *f) {
   f->code = luaM_newvectorchecked(S->L, orig_size, Instruction);
   f->sizecode = orig_size;
   
-  // Decrypt data using AES-CTR (IV is first 16 bytes of image_data)
-  uint8_t iv[16];
-  memcpy(iv, image_data, 16);
+  // Decrypt data using XOR with timestamp as password (no decompression)
+  for (i = 0; i < (int)data_size; i++) {
+    ((char *)f->code)[i] = image_data[i] ^ ((char *)&S->timestamp)[i % sizeof(S->timestamp)];
+  }
   
-  /* Derive Key */
-  uint8_t key[16], hash[32];
-  const char *salt = "bytecode_instruction";
-  size_t salt_len = strlen(salt);
-  size_t total_len = sizeof(S->timestamp) + salt_len;
-  uint8_t *key_input = (uint8_t *)luaM_malloc_(S->L, total_len, 0);
-  memcpy(key_input, &S->timestamp, sizeof(S->timestamp));
-  memcpy(key_input + sizeof(S->timestamp), salt, salt_len);
-  SHA256(key_input, total_len, hash);
-  memcpy(key, hash, 16);
-  luaM_free_(S->L, key_input, total_len);
-
-  /* Copy ciphertext to code buffer */
-  memcpy(f->code, image_data + 16, data_size);
-
-  /* Decrypt */
-  struct AES_ctx ctx;
-  AES_init_ctx_iv(&ctx, key, iv);
-  AES_CTR_xcrypt_buffer(&ctx, (uint8_t *)f->code, (uint32_t)data_size);
-
   // Free image and PNG data
   stbi_image_free(image_data);
   luaM_free_(S->L, png_data, png_len);
