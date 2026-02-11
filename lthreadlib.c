@@ -12,39 +12,60 @@
 #include <stdlib.h>
 #include <string.h>
 
+/**
+ * @brief Thread handle structure for managing Lua threads.
+ */
 typedef struct {
-    l_thread_t thread;
-    lua_State *L_thread;
-    int ref;
-    char name[64];
+    l_thread_t thread;      /**< Native thread handle */
+    lua_State *L_thread;    /**< Lua state associated with the thread */
+    int ref;                /**< Registry reference to the thread state */
+    char name[64];          /**< Thread name */
 } ThreadHandle;
 
+/**
+ * @brief Element in a channel's linked list.
+ */
 typedef struct ChannelElem {
-    int ref;
-    struct ChannelElem *next;
+    int ref;                    /**< Registry reference to the stored value */
+    struct ChannelElem *next;   /**< Next element in the list */
 } ChannelElem;
 
+/**
+ * @brief Selector structure for 'pick' operations.
+ */
 typedef struct Selector {
-    l_mutex_t lock;
-    l_cond_t cond;
-    int signaled;
+    l_mutex_t lock;     /**< Mutex for condition variable */
+    l_cond_t cond;      /**< Condition variable for signaling */
+    int signaled;       /**< Flag indicating if the selector has been signaled */
 } Selector;
 
+/**
+ * @brief Listener structure for channels to notify selectors.
+ */
 typedef struct Listener {
-    Selector *sel;
-    struct Listener *next;
+    Selector *sel;          /**< Pointer to the selector */
+    struct Listener *next;  /**< Next listener in the list */
 } Listener;
 
+/**
+ * @brief Channel structure for thread communication.
+ */
 typedef struct {
-    l_mutex_t lock;
-    l_cond_t cond;
-    ChannelElem *head;
-    ChannelElem *tail;
-    int closed;
-    Listener *listeners;
-    int type_ref;
+    l_mutex_t lock;         /**< Mutex for thread safety */
+    l_cond_t cond;          /**< Condition variable for waiting threads */
+    ChannelElem *head;      /**< Head of the message queue */
+    ChannelElem *tail;      /**< Tail of the message queue */
+    int closed;             /**< Flag indicating if the channel is closed */
+    Listener *listeners;    /**< List of listeners waiting on this channel */
+    int type_ref;           /**< Registry reference to the type constraint */
 } Channel;
 
+/**
+ * @brief Entry point for new threads.
+ *
+ * @param arg Pointer to the Lua state of the new thread.
+ * @return NULL.
+ */
 static void *thread_entry(void *arg) {
     lua_State *L = (lua_State *)arg;
     // Stack: func, args...
@@ -56,7 +77,13 @@ static void *thread_entry(void *arg) {
     return NULL;
 }
 
-/* Helper to register thread handle in registry */
+/**
+ * @brief Helper to register thread handle in the registry map.
+ *
+ * @param L The main Lua state.
+ * @param L_thread The thread state to register.
+ * @param th_idx Index of the thread handle userdata on the stack.
+ */
 static void register_thread_handle(lua_State *L, lua_State *L_thread, int th_idx) {
     th_idx = lua_absindex(L, th_idx);
     if (lua_getfield(L, LUA_REGISTRYINDEX, "_THREAD_MAP") != LUA_TTABLE) {
@@ -75,6 +102,14 @@ static void register_thread_handle(lua_State *L, lua_State *L_thread, int th_idx
     lua_pop(L, 1);
 }
 
+/**
+ * @brief Creates a new thread.
+ *
+ * Usage: thread.create(func, ...)
+ *
+ * @param L The Lua state.
+ * @return 1 (the thread object).
+ */
 static int thread_create(lua_State *L) {
     int n = lua_gettop(L);
     luaL_checktype(L, 1, LUA_TFUNCTION);
@@ -113,6 +148,14 @@ static int thread_create(lua_State *L) {
     return 1;
 }
 
+/**
+ * @brief Joins a thread, waiting for it to finish and retrieving results.
+ *
+ * Usage: th:join()
+ *
+ * @param L The Lua state.
+ * @return Number of results returned by the thread function.
+ */
 static int thread_join(lua_State *L) {
     ThreadHandle *th = (ThreadHandle *)luaL_checkudata(L, 1, "lthread");
     if (th->L_thread == NULL) {
@@ -132,6 +175,14 @@ static int thread_join(lua_State *L) {
     return nres;
 }
 
+/**
+ * @brief Creates a thread and immediately joins it (blocking execution).
+ *
+ * Usage: thread.createx(func, ...)
+ *
+ * @param L The Lua state.
+ * @return Results of the function execution.
+ */
 static int thread_createx(lua_State *L) {
     int n = lua_gettop(L);
     luaL_checktype(L, 1, LUA_TFUNCTION);
@@ -167,6 +218,14 @@ static int thread_createx(lua_State *L) {
     return nres;
 }
 
+/**
+ * @brief Returns the thread object for the current thread.
+ *
+ * Usage: thread.self() or thread.current()
+ *
+ * @param L The Lua state.
+ * @return The thread object.
+ */
 static int thread_self(lua_State *L) {
     if (lua_getfield(L, LUA_REGISTRYINDEX, "_THREAD_MAP") == LUA_TTABLE) {
         lua_pushlightuserdata(L, L);
@@ -201,6 +260,14 @@ static int thread_self(lua_State *L) {
     return 1;
 }
 
+/**
+ * @brief Gets or sets the name of the thread.
+ *
+ * Usage: th:name([new_name])
+ *
+ * @param L The Lua state.
+ * @return The thread name.
+ */
 static int thread_name(lua_State *L) {
     ThreadHandle *th = (ThreadHandle *)luaL_checkudata(L, 1, "lthread");
     if (lua_gettop(L) >= 2) {
@@ -212,12 +279,27 @@ static int thread_name(lua_State *L) {
     return 1;
 }
 
+/**
+ * @brief Returns the native thread ID.
+ *
+ * Usage: th:id()
+ *
+ * @param L The Lua state.
+ * @return The thread ID (integer).
+ */
 static int thread_id(lua_State *L) {
     ThreadHandle *th = (ThreadHandle *)luaL_checkudata(L, 1, "lthread");
     lua_pushinteger(L, (lua_Integer)l_thread_getid(&th->thread));
     return 1;
 }
 
+/**
+ * @brief Internal implementation of channel creation.
+ *
+ * @param L The Lua state.
+ * @param type_idx Index of the type specifier.
+ * @return 1 (the channel object).
+ */
 static int channel_create_impl(lua_State *L, int type_idx) {
     Channel *ch = (Channel *)lua_newuserdata(L, sizeof(Channel));
     l_mutex_init(&ch->lock);
@@ -236,10 +318,21 @@ static int channel_create_impl(lua_State *L, int type_idx) {
     return 1;
 }
 
+/**
+ * @brief Helper for factory calls.
+ */
 static int channel_factory_call(lua_State *L) {
     return channel_create_impl(L, lua_upvalueindex(1));
 }
 
+/**
+ * @brief Creates a new channel.
+ *
+ * Usage: thread.channel([type])
+ *
+ * @param L The Lua state.
+ * @return The channel object.
+ */
 static int thread_channel(lua_State *L) {
     if (lua_gettop(L) == 0) {
         return channel_create_impl(L, 0);
@@ -250,6 +343,12 @@ static int thread_channel(lua_State *L) {
     }
 }
 
+/**
+ * @brief Garbage collector for channels.
+ *
+ * @param L The Lua state.
+ * @return 0.
+ */
 static int channel_gc(lua_State *L) {
     Channel *ch = (Channel *)luaL_checkudata(L, 1, "lthread.channel");
     l_mutex_lock(&ch->lock);
@@ -278,6 +377,14 @@ static int channel_gc(lua_State *L) {
     return 0;
 }
 
+/**
+ * @brief Checks if a value matches the channel's type constraint.
+ *
+ * @param L The Lua state.
+ * @param type_idx Index of the type specifier in registry.
+ * @param val_idx Index of the value to check.
+ * @return 1 if match, 0 otherwise.
+ */
 static int check_type_match(lua_State *L, int type_idx, int val_idx) {
     if (lua_type(L, type_idx) == LUA_TSTRING) {
         const char *expected = lua_tostring(L, type_idx);
@@ -299,6 +406,14 @@ static int check_type_match(lua_State *L, int type_idx, int val_idx) {
     return 1; /* Match anything else or invalid type spec */
 }
 
+/**
+ * @brief Sends a value to the channel (blocking).
+ *
+ * Usage: ch:send(val) or ch:push(val)
+ *
+ * @param L The Lua state.
+ * @return 0 on success.
+ */
 static int channel_send(lua_State *L) {
     Channel *ch = (Channel *)luaL_checkudata(L, 1, "lthread.channel");
     luaL_checkany(L, 2);
@@ -351,6 +466,14 @@ static int channel_send(lua_State *L) {
     return 0;
 }
 
+/**
+ * @brief Tries to send a value to the channel (non-blocking).
+ *
+ * Usage: ch:try_send(val)
+ *
+ * @param L The Lua state.
+ * @return true on success, false otherwise.
+ */
 static int channel_try_send(lua_State *L) {
     Channel *ch = (Channel *)luaL_checkudata(L, 1, "lthread.channel");
     luaL_checkany(L, 2);
@@ -413,6 +536,14 @@ static int channel_try_send(lua_State *L) {
     return 1;
 }
 
+/**
+ * @brief Receives a value from the channel (blocking).
+ *
+ * Usage: ch:receive() or ch:pop()
+ *
+ * @param L The Lua state.
+ * @return The received value, or nil if closed.
+ */
 static int channel_receive(lua_State *L) {
     Channel *ch = (Channel *)luaL_checkudata(L, 1, "lthread.channel");
 
@@ -441,6 +572,14 @@ static int channel_receive(lua_State *L) {
     return 1;
 }
 
+/**
+ * @brief Tries to receive a value from the channel (non-blocking).
+ *
+ * Usage: ch:try_recv()
+ *
+ * @param L The Lua state.
+ * @return The received value, or nil if empty.
+ */
 static int channel_try_receive(lua_State *L) {
     Channel *ch = (Channel *)luaL_checkudata(L, 1, "lthread.channel");
 
@@ -466,6 +605,14 @@ static int channel_try_receive(lua_State *L) {
     return 1;
 }
 
+/**
+ * @brief Closes the channel.
+ *
+ * Usage: ch:close()
+ *
+ * @param L The Lua state.
+ * @return 0.
+ */
 static int channel_close(lua_State *L) {
     Channel *ch = (Channel *)luaL_checkudata(L, 1, "lthread.channel");
     l_mutex_lock(&ch->lock);
@@ -485,6 +632,14 @@ static int channel_close(lua_State *L) {
     return 0;
 }
 
+/**
+ * @brief Peeks at the next value in the channel without removing it.
+ *
+ * Usage: ch:peek()
+ *
+ * @param L The Lua state.
+ * @return The value, or nil if empty.
+ */
 static int channel_peek(lua_State *L) {
     Channel *ch = (Channel *)luaL_checkudata(L, 1, "lthread.channel");
     l_mutex_lock(&ch->lock);
@@ -497,6 +652,14 @@ static int channel_peek(lua_State *L) {
     return 1;
 }
 
+/**
+ * @brief Creates a receive operation descriptor for 'pick'.
+ *
+ * Usage: ch:recv_op()
+ *
+ * @param L The Lua state.
+ * @return A table describing the operation.
+ */
 static int channel_recv_op(lua_State *L) {
     luaL_checkudata(L, 1, "lthread.channel");
     lua_newtable(L);
@@ -507,6 +670,14 @@ static int channel_recv_op(lua_State *L) {
     return 1;
 }
 
+/**
+ * @brief Creates a receive operation descriptor.
+ *
+ * Usage: thread.on(channel)
+ *
+ * @param L The Lua state.
+ * @return A table describing the operation.
+ */
 static int thread_on(lua_State *L) {
     if (lua_type(L, 1) == LUA_TUSERDATA) {
         lua_newtable(L);
@@ -522,6 +693,14 @@ static int thread_on(lua_State *L) {
     return luaL_error(L, "invalid argument to on()");
 }
 
+/**
+ * @brief Creates a timeout operation descriptor.
+ *
+ * Usage: thread.over(seconds)
+ *
+ * @param L The Lua state.
+ * @return A table describing the operation.
+ */
 static int thread_over(lua_State *L) {
     lua_Number n = luaL_checknumber(L, 1);
     lua_newtable(L);
@@ -532,6 +711,13 @@ static int thread_over(lua_State *L) {
     return 1;
 }
 
+/**
+ * @brief Unregisters the selector from all channels in the case list.
+ *
+ * @param L The Lua state.
+ * @param tab_idx Index of the cases table.
+ * @param sel The selector.
+ */
 static void unregister_all(lua_State *L, int tab_idx, Selector *sel) {
     int n = luaL_len(L, tab_idx);
     for (int i = 1; i <= n; i++) {
@@ -564,6 +750,14 @@ static void unregister_all(lua_State *L, int tab_idx, Selector *sel) {
     }
 }
 
+/**
+ * @brief Selects one of multiple channel operations to perform.
+ *
+ * Usage: thread.pick { {case1, func1}, {case2, func2}, ... }
+ *
+ * @param L The Lua state.
+ * @return The result of the selected function.
+ */
 static int thread_pick(lua_State *L) {
     luaL_checktype(L, 1, LUA_TTABLE);
     Selector sel;
@@ -778,6 +972,12 @@ static const luaL_Reg thread_funcs[] = {
     {NULL, NULL}
 };
 
+/**
+ * @brief Registers the thread library.
+ *
+ * @param L The Lua state.
+ * @return 1 (the table).
+ */
 int luaopen_thread(lua_State *L) {
     luaL_newmetatable(L, "lthread");
     lua_pushvalue(L, -1);

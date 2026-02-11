@@ -45,17 +45,17 @@
 
 
 
-/*
-** Union of all Lua values
-*/
+/**
+ * @brief Union of all Lua values.
+ */
 typedef union Value {
-  struct GCObject *gc;    /* collectable objects */
-  void *p;         /* light userdata */
-  void *ptr;       /* 真正的指针类型 */
-  struct Struct *struct_; /* struct values */
-  lua_CFunction f; /* light C functions */
-  lua_Integer i;   /* integer numbers */
-  lua_Number n;    /* float numbers */
+  struct GCObject *gc;    /**< collectable objects */
+  void *p;         /**< light userdata */
+  void *ptr;       /**< raw pointer type */
+  struct Struct *struct_; /**< struct values */
+  lua_CFunction f; /**< light C functions */
+  lua_Integer i;   /**< integer numbers */
+  lua_Number n;    /**< float numbers */
   /* not used, but may avoid warnings for uninitialized value */
   lu_byte ub;
 } Value;
@@ -150,14 +150,11 @@ typedef struct TValue {
 #define setobj2t	setobj
 
 
-/*
-** Entries in a Lua stack. Field 'tbclist' forms a list of all
-** to-be-closed variables active in this stack. Dummy entries are
-** used when the distance between two tbc variables does not fit
-** in an unsigned short. They are represented by delta==0, and
-** their real delta is always the maximum value that fits in
-** that field.
-*/
+/**
+ * @brief Entries in a Lua stack.
+ *
+ * Field 'tbclist' forms a list of all to-be-closed variables active in this stack.
+ */
 typedef union StackValue {
   TValue val;
   struct {
@@ -167,7 +164,7 @@ typedef union StackValue {
 } StackValue;
 
 
-/* index to stack elements */
+/** Index to stack elements */
 typedef StackValue *StkId;
 
 
@@ -307,14 +304,16 @@ typedef union {
 ** ========================================================
 */
 
-/*
-** Common Header for all collectable objects (in macro form, to be
-** included in other objects)
-*/
+/**
+ * @brief Common Header for all collectable objects.
+ * Included in other objects via macro.
+ */
 #define CommonHeader	struct GCObject *next; lu_byte tt; lu_byte marked
 
 
-/* Common type for all collectable objects */
+/**
+ * @brief Common type for all collectable objects.
+ */
 typedef struct GCObject {
   CommonHeader;
 } GCObject;
@@ -412,21 +411,21 @@ typedef struct GCObject {
 #define LSTRMEM		-3  /* external long string with deallocation */
 
 
-/*
-** Header for a string value.
-*/
+/**
+ * @brief Header for a string value.
+ */
 typedef struct TString {
   CommonHeader;
-  lu_byte extra;  /* reserved words for short strings; "has hash" for longs */
-  lu_byte shrlen;  /* length for short strings, 0xFF for long strings */
-  unsigned int hash;
+  lu_byte extra;  /**< reserved words for short strings; "has hash" for longs */
+  lu_byte shrlen;  /**< length for short strings, 0xFF for long strings */
+  unsigned int hash; /**< hash code */
   union {
-    size_t lnglen;  /* length for long strings */
-    struct TString *hnext;  /* linked list for hash table */
+    size_t lnglen;  /**< length for long strings */
+    struct TString *hnext;  /**< linked list for hash table */
   } u;
-  char contents[1];
-  lua_Alloc falloc;  /* deallocation function for external strings */
-  void *ud;  /* user data for external strings */
+  char contents[1]; /**< string data */
+  lua_Alloc falloc;  /**< deallocation function for external strings */
+  void *ud;  /**< user data for external strings */
 } TString;
 
 
@@ -468,13 +467,16 @@ typedef struct TString {
 
 #define structvalue(o)	check_exp(ttisstruct(o), gco2struct(val_(o).gc))
 
+/**
+ * @brief Struct object structure.
+ */
 typedef struct Struct {
   CommonHeader;
-  struct Table *def;
-  int *gc_offsets;
-  int n_gc_offsets;
-  size_t data_size;
-  lu_byte data[1];
+  struct Table *def;    /**< Struct definition (type info). */
+  int *gc_offsets;      /**< GC offsets array. */
+  int n_gc_offsets;     /**< Number of GC offsets. */
+  size_t data_size;     /**< Size of the data block. */
+  lu_byte data[1];      /**< Data block. */
 } Struct;
 
 #define gco2struct(o)	check_exp((o)->tt == LUA_VSTRUCT, &((cast_u(o) - offsetof(Struct, next))->struct_))
@@ -532,35 +534,31 @@ typedef union UValue {
 } UValue;
 
 
-/*
-** Header for userdata with user values;
-** memory area follows the end of this structure.
-*/
+/**
+ * @brief Header for userdata with user values.
+ * memory area follows the end of this structure.
+ */
 typedef struct Udata {
   CommonHeader;
-  unsigned short nuvalue;  /* number of user values */
-  size_t len;  /* number of bytes */
-  struct Table *metatable;
-  GCObject *gclist;
-  UValue uv[1];  /* user values */
+  unsigned short nuvalue;  /**< number of user values */
+  size_t len;  /**< number of bytes */
+  struct Table *metatable; /**< metatable */
+  GCObject *gclist; /**< garbage collector list */
+  UValue uv[1];  /**< user values */
 } Udata;
 
 
-/*
-** Header for userdata with no user values. These userdata do not need
-** to be gray during GC, and therefore do not need a 'gclist' field.
-** To simplify, the code always use 'Udata' for both kinds of userdata,
-** making sure it never accesses 'gclist' on userdata with no user values.
-** This structure here is used only to compute the correct size for
-** this representation. (The 'bindata' field in its end ensures correct
-** alignment for binary data following this header.)
-*/
+/**
+ * @brief Header for userdata with no user values.
+ *
+ * These userdata do not need to be gray during GC, and therefore do not need a 'gclist' field.
+ */
 typedef struct Udata0 {
   CommonHeader;
-  unsigned short nuvalue;  /* number of user values */
-  size_t len;  /* number of bytes */
-  struct Table *metatable;
-  union {LUAI_MAXALIGN;} bindata;
+  unsigned short nuvalue;  /**< number of user values */
+  size_t len;  /**< number of bytes */
+  struct Table *metatable; /**< metatable */
+  union {LUAI_MAXALIGN;} bindata; /**< data */
 } Udata0;
 
 
@@ -590,41 +588,34 @@ typedef struct Udata0 {
 typedef l_uint64 Instruction;
 
 
-/*
-** Description of an upvalue for function prototypes
-*/
+/**
+ * @brief Description of an upvalue for function prototypes.
+ */
 typedef struct Upvaldesc {
-  TString *name;  /* upvalue name (for debug information) */
-  lu_byte instack;  /* whether it is in stack (register) */
-  lu_byte idx;  /* index of upvalue (in stack or in outer function's list) */
-  lu_byte kind;  /* kind of corresponding variable */
+  TString *name;  /**< upvalue name (for debug information) */
+  lu_byte instack;  /**< whether it is in stack (register) */
+  lu_byte idx;  /**< index of upvalue (in stack or in outer function's list) */
+  lu_byte kind;  /**< kind of corresponding variable */
 } Upvaldesc;
 
 
-/*
-** Description of a local variable for function prototypes
-** (used for debug information)
-*/
+/**
+ * @brief Description of a local variable for function prototypes.
+ * (used for debug information)
+ */
 typedef struct LocVar {
-  TString *varname;
-  int startpc;  /* first point where variable is active */
-  int endpc;    /* first point where variable is dead */
+  TString *varname; /**< variable name */
+  int startpc;  /**< first point where variable is active */
+  int endpc;    /**< first point where variable is dead */
 } LocVar;
 
 
-/*
-** Associates the absolute line source for a given instruction ('pc').
-** The array 'lineinfo' gives, for each instruction, the difference in
-** lines from the previous instruction. When that difference does not
-** fit into a byte, Lua saves the absolute line for that instruction.
-** (Lua also saves the absolute line periodically, to speed up the
-** computation of a line number: we can use binary search in the
-** absolute-line array, but we must traverse the 'lineinfo' array
-** linearly to compute a line.)
-*/
+/**
+ * @brief Associates the absolute line source for a given instruction ('pc').
+ */
 typedef struct AbsLineInfo {
-  int pc;
-  int line;
+  int pc;   /**< instruction index */
+  int line; /**< line number */
 } AbsLineInfo;
 
 
@@ -679,8 +670,8 @@ LUAI_FUNC int luaF_callqueuepop (lua_State *L, CallQueue *q, int *nargs, TValue 
 typedef struct Proto {
   CommonHeader;
   lu_byte numparams;  /**< Number of fixed (named) parameters. */
-  lu_byte flag;
-  lu_byte is_vararg;
+  lu_byte flag;       /**< Flags. */
+  lu_byte is_vararg;  /**< Vararg flag. */
   lu_byte maxstacksize;  /**< Number of registers needed by this function. */
   lu_byte nodiscard;     /**< Function is marked as nodiscard. */
   lu_byte difierline_mode;      /**< Obfuscation mode flags. */
@@ -689,9 +680,9 @@ typedef struct Proto {
   int sizeupvalues;  /**< Size of 'upvalues' array. */
   int sizek;  /**< Size of 'k' (constants) array. */
   int sizecode;      /**< Size of 'code' array. */
-  int sizelineinfo;
+  int sizelineinfo; /**< Size of 'lineinfo' array. */
   int sizep;  /**< Size of 'p' (nested prototypes) array. */
-  int sizelocvars;
+  int sizelocvars; /**< Size of 'locvars' array. */
   int sizeabslineinfo;  /**< Size of 'abslineinfo' array. */
   int linedefined;  /**< Debug information: start line. */
   int lastlinedefined;  /**< Debug information: end line. */
@@ -703,9 +694,9 @@ typedef struct Proto {
   AbsLineInfo *abslineinfo;  /**< Map from opcodes to absolute source lines. */
   LocVar *locvars;  /**< Information about local variables. */
   TString  *source;  /**< Source file name. */
-  GCObject *gclist;
-  int is_sleeping;
-  CallQueue *call_queue;
+  GCObject *gclist; /**< garbage collector list */
+  int is_sleeping; /**< sleep status */
+  CallQueue *call_queue; /**< call queue for sleep/wake */
   struct VMCodeTable *vm_code_table;  /**< VM protection code table pointer. */
 } Proto;
 
@@ -758,21 +749,21 @@ typedef struct Proto {
     checkliveness(L,io); }
 
 
-/*
-** Upvalues for Lua closures
-*/
+/**
+ * @brief Upvalues for Lua closures.
+ */
 typedef struct UpVal {
   CommonHeader;
   union {
-    TValue *p;  /* points to stack or to its own value */
-    ptrdiff_t offset;  /* used while the stack is being reallocated */
+    TValue *p;  /**< points to stack or to its own value */
+    ptrdiff_t offset;  /**< used while the stack is being reallocated */
   } v;
   union {
     struct {  /* (when open) */
-      struct UpVal *next;  /* linked list */
+      struct UpVal *next;  /**< linked list */
       struct UpVal **previous;
     } open;
-    TValue value;  /* the value (when closed) */
+    TValue value;  /**< the value (when closed) */
   } u;
 } UpVal;
 
@@ -781,20 +772,29 @@ typedef struct UpVal {
 #define ClosureHeader \
 	CommonHeader; lu_byte nupvalues; lu_byte ishotfixed; GCObject *gclist
 
+/**
+ * @brief C closure structure.
+ */
 typedef struct CClosure {
   ClosureHeader;
-  lua_CFunction f;
-  TValue upvalue[1];  /* list of upvalues */
+  lua_CFunction f; /**< C function */
+  TValue upvalue[1];  /**< list of upvalues */
 } CClosure;
 
 
+/**
+ * @brief Lua closure structure.
+ */
 typedef struct LClosure {
   ClosureHeader;
-  struct Proto *p;
-  UpVal *upvals[1];  /* list of upvalues */
+  struct Proto *p; /**< function prototype */
+  UpVal *upvals[1];  /**< list of upvalues */
 } LClosure;
 
 
+/**
+ * @brief Union of closures.
+ */
 typedef union Closure {
   CClosure c;
   LClosure l;
@@ -883,7 +883,7 @@ typedef struct Table {
   Node *node;      /**< Hash part. */
   Node *lastfree;  /**< Any free position is before this position. */
   struct Table *metatable; /**< Metatable pointer. */
-  GCObject *gclist;
+  GCObject *gclist; /**< garbage collector list */
   lu_byte type;    /**< Custom type flag. */
   l_rwlock_t lock; /**< Lock for thread safety. */
 } Table;
@@ -966,4 +966,3 @@ LUAI_FUNC lu_byte luaO_codeparam (unsigned int p);
 
 
 #endif
-

@@ -1,8 +1,10 @@
-/*
-** $Id: lfunc.c $
-** Auxiliary functions to manipulate prototypes and closures
-** See Copyright Notice in lua.h
-*/
+/**
+ * @file lfunc.c
+ * @brief Auxiliary functions to manipulate prototypes and closures.
+ *
+ * This file contains functions to create and manipulate function prototypes,
+ * closures, and upvalues.
+ */
 
 #define lfunc_c
 #define LUA_CORE
@@ -23,7 +25,13 @@
 #include "lstate.h"
 
 
-
+/**
+ * @brief Creates a new C closure.
+ *
+ * @param L The Lua state.
+ * @param nupvals Number of upvalues.
+ * @return The new C closure.
+ */
 CClosure *luaF_newCclosure (lua_State *L, int nupvals) {
   GCObject *o = luaC_newobj(L, LUA_VCCL, sizeCclosure(nupvals));
   CClosure *c = gco2ccl(o);
@@ -33,6 +41,13 @@ CClosure *luaF_newCclosure (lua_State *L, int nupvals) {
 }
 
 
+/**
+ * @brief Creates a new Lua closure.
+ *
+ * @param L The Lua state.
+ * @param nupvals Number of upvalues.
+ * @return The new Lua closure.
+ */
 LClosure *luaF_newLclosure (lua_State *L, int nupvals) {
   GCObject *o = luaC_newobj(L, LUA_VLCL, sizeLclosure(nupvals));
   LClosure *c = gco2lcl(o);
@@ -44,9 +59,12 @@ LClosure *luaF_newLclosure (lua_State *L, int nupvals) {
 }
 
 
-/*
-** fill a closure with new closed upvalues
-*/
+/**
+ * @brief Fills a closure with new closed upvalues.
+ *
+ * @param L The Lua state.
+ * @param cl The Lua closure.
+ */
 void luaF_initupvals (lua_State *L, LClosure *cl) {
   int i;
   for (i = 0; i < cl->nupvalues; i++) {
@@ -60,10 +78,15 @@ void luaF_initupvals (lua_State *L, LClosure *cl) {
 }
 
 
-/*
-** hotfix: replace closure prototype while keeping upvalues
-** This allows runtime code replacement for closures.
-*/
+/**
+ * @brief Hotfix: replaces closure prototype while keeping upvalues.
+ *
+ * This allows runtime code replacement for closures.
+ *
+ * @param L The Lua state.
+ * @param cl The closure object (as GCObject*).
+ * @param newproto The new prototype.
+ */
 void luaF_hotreplace (lua_State *L, GCObject *cl, Proto *newproto) {
   if (cl->tt == LUA_VLCL) {
     LClosure *lcl = gco2lcl(cl);
@@ -97,10 +120,13 @@ static UpVal *newupval (lua_State *L, StkId level, UpVal **prev) {
 }
 
 
-/*
-** Find and reuse, or create if it does not exist, an upvalue
-** at the given level.
-*/
+/**
+ * @brief Finds and reuses, or creates if it does not exist, an upvalue at the given level.
+ *
+ * @param L The Lua state.
+ * @param level The stack level.
+ * @return The upvalue.
+ */
 UpVal *luaF_findupval (lua_State *L, StkId level) {
   UpVal **pp = &L->openupval;
   UpVal *p;
@@ -187,9 +213,12 @@ static void prepcallclosemth (lua_State *L, StkId level, TStatus status,
 #define MAXDELTA       USHRT_MAX
 
 
-/*
-** Insert a variable in the list of to-be-closed variables.
-*/
+/**
+ * @brief Inserts a variable in the list of to-be-closed variables.
+ *
+ * @param L The Lua state.
+ * @param level The stack level of the variable.
+ */
 void luaF_newtbcupval (lua_State *L, StkId level) {
   lua_assert(level > L->tbclist.p);
   if (l_isfalse(s2v(level)))
@@ -204,6 +233,11 @@ void luaF_newtbcupval (lua_State *L, StkId level) {
 }
 
 
+/**
+ * @brief Unlinks an upvalue from the list of open upvalues.
+ *
+ * @param uv The upvalue.
+ */
 void luaF_unlinkupval (UpVal *uv) {
   lua_assert(upisopen(uv));
   *uv->u.open.previous = uv->u.open.next;
@@ -212,9 +246,12 @@ void luaF_unlinkupval (UpVal *uv) {
 }
 
 
-/*
-** Close all upvalues up to the given stack level.
-*/
+/**
+ * @brief Closes all upvalues up to the given stack level.
+ *
+ * @param L The Lua state.
+ * @param level The stack level.
+ */
 void luaF_closeupval (lua_State *L, StkId level) {
   UpVal *uv;
   while ((uv = L->openupval) != NULL && uplevel(uv) >= level) {
@@ -244,10 +281,15 @@ static void poptbclist (lua_State *L) {
 }
 
 
-/*
-** Close all upvalues and to-be-closed variables up to the given stack
-** level. Return restored 'level'.
-*/
+/**
+ * @brief Closes all upvalues and to-be-closed variables up to the given stack level.
+ *
+ * @param L The Lua state.
+ * @param level The stack level.
+ * @param status The status code (LUA_OK or error code).
+ * @param yy Whether calls can yield.
+ * @return The restored 'level'.
+ */
 StkId luaF_close (lua_State *L, StkId level, TStatus status, int yy) {
   ptrdiff_t levelrel = savestack(L, level);
   luaF_closeupval(L, level);  /* first, close the upvalues */
@@ -261,6 +303,12 @@ StkId luaF_close (lua_State *L, StkId level, TStatus status, int yy) {
 }
 
 
+/**
+ * @brief Creates a new function prototype.
+ *
+ * @param L The Lua state.
+ * @return The new prototype.
+ */
 Proto *luaF_newproto (lua_State *L) {
   GCObject *o = luaC_newobj(L, LUA_VPROTO, sizeof(Proto));
   Proto *f = gco2p(o);
@@ -294,6 +342,12 @@ Proto *luaF_newproto (lua_State *L) {
 }
 
 
+/**
+ * @brief Calculates the memory size of a prototype.
+ *
+ * @param p The prototype.
+ * @return The size in bytes.
+ */
 lu_mem luaF_protosize (Proto *p) {
   lu_mem sz = cast(lu_mem, sizeof(Proto))
             + cast_uint(p->sizep) * sizeof(Proto*)
@@ -309,6 +363,12 @@ lu_mem luaF_protosize (Proto *p) {
 }
 
 
+/**
+ * @brief Frees a prototype and its associated memory.
+ *
+ * @param L The Lua state.
+ * @param f The prototype.
+ */
 void luaF_freeproto (lua_State *L, Proto *f) {
   luaM_freearray(L, f->code, f->sizecode);
   luaM_freearray(L, f->p, f->sizep);
@@ -322,10 +382,14 @@ void luaF_freeproto (lua_State *L, Proto *f) {
 }
 
 
-/*
-** Look for n-th local variable at line 'line' in function 'func'.
-** Returns NULL if not found.
-*/
+/**
+ * @brief Looks for the name of a local variable at a given instruction pointer.
+ *
+ * @param f The function prototype.
+ * @param local_number The index of the local variable.
+ * @param pc The program counter.
+ * @return The name of the variable, or NULL if not found.
+ */
 const char *luaF_getlocalname (const Proto *f, int local_number, int pc) {
   int i;
   for (i = 0; i<f->sizelocvars && f->locvars[i].startpc <= pc; i++) {
@@ -345,6 +409,12 @@ const char *luaF_getlocalname (const Proto *f, int local_number, int pc) {
 ** ========================================================
 */
 
+/**
+ * @brief Creates a new call queue.
+ *
+ * @param L The Lua state.
+ * @return The new call queue.
+ */
 CallQueue *luaF_newcallqueue (lua_State *L) {
   CallQueue *q = (CallQueue *)luaM_new(L, CallQueue);
   q->head = NULL;
@@ -353,6 +423,12 @@ CallQueue *luaF_newcallqueue (lua_State *L) {
   return q;
 }
 
+/**
+ * @brief Frees a call queue.
+ *
+ * @param L The Lua state.
+ * @param q The call queue.
+ */
 void luaF_freecallqueue (lua_State *L, CallQueue *q) {
   if (q == NULL) return;
   CallNode *node = q->head;
@@ -364,6 +440,13 @@ void luaF_freecallqueue (lua_State *L, CallQueue *q) {
   luaM_free(L, q);
 }
 
+/**
+ * @brief Pushes arguments into the call queue.
+ *
+ * @param L The Lua state.
+ * @param q The call queue.
+ * @param nargs Number of arguments.
+ */
 void luaF_callqueuepush (lua_State *L, CallQueue *q, int nargs) {
   CallNode *node = (CallNode *)luaM_new(L, CallNode);
   node->nargs = nargs;
@@ -383,6 +466,15 @@ void luaF_callqueuepush (lua_State *L, CallQueue *q, int nargs) {
   q->size++;
 }
 
+/**
+ * @brief Pops arguments from the call queue.
+ *
+ * @param L The Lua state.
+ * @param q The call queue.
+ * @param nargs Output for number of arguments.
+ * @param args Buffer to store arguments.
+ * @return 1 if queue was not empty, 0 otherwise.
+ */
 int luaF_callqueuepop (lua_State *L, CallQueue *q, int *nargs, TValue *args) {
   if (q->head == NULL) {
     return 0;
@@ -404,4 +496,3 @@ int luaF_callqueuepop (lua_State *L, CallQueue *q, int *nargs, TValue *args) {
   luaM_free(L, node);
   return 1;
 }
-

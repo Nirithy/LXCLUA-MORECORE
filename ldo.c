@@ -1,8 +1,9 @@
-/*
-** $Id: ldo.c $
-** Stack and Call structure of Lua
-** See Copyright Notice in lua.h
-*/
+/**
+ * @file ldo.c
+ * @brief Stack and Call structure of Lua.
+ *
+ * This file handles the stack management and function calls in Lua.
+ */
 
 #define ldo_c
 #define LUA_CORE
@@ -111,6 +112,13 @@ static void LUAI_TRY (lua_State *L, lua_longjmp *c, Pfunc f, void *ud) {
 
 
 
+/**
+ * @brief Sets an error object on the stack.
+ *
+ * @param L The Lua state.
+ * @param errcode The error code.
+ * @param oldtop The stack top before the error occurred.
+ */
 void luaD_seterrorobj (lua_State *L, TStatus errcode, StkId oldtop) {
   if (errcode == LUA_ERRMEM) {  /* memory error? */
     setsvalue2s(L, oldtop, G(L)->memerrmsg); /* reuse preregistered msg. */
@@ -124,6 +132,12 @@ void luaD_seterrorobj (lua_State *L, TStatus errcode, StkId oldtop) {
 }
 
 
+/**
+ * @brief Throws a Lua error.
+ *
+ * @param L The Lua state.
+ * @param errcode The error code.
+ */
 l_noret luaD_throw (lua_State *L, TStatus errcode) {
   if (L->errorJmp) {  /* thread has an error handler? */
     L->errorJmp->status = errcode;  /* set status */
@@ -148,6 +162,14 @@ l_noret luaD_throw (lua_State *L, TStatus errcode) {
 }
 
 
+/**
+ * @brief Runs a function in protected mode (catching errors).
+ *
+ * @param L The Lua state.
+ * @param f The function to call.
+ * @param ud User data for the function.
+ * @return The status code (LUA_OK or error code).
+ */
 int luaD_rawrunprotected (lua_State *L, Pfunc f, void *ud) {
   l_uint32 oldnCcalls = L->nCcalls;
   struct lua_longjmp lj;
@@ -309,17 +331,14 @@ static void correctstack (lua_State *L, StkId oldstack) {
 #endif
 
 
-/*
-** Reallocate the stack to a new size, correcting all pointers into it.
-** In ISO C, any pointer use after the pointer has been deallocated is
-** undefined behavior. So, before the reallocation, all pointers are
-** changed to offsets, and after the reallocation they are changed back
-** to pointers. As during the reallocation the pointers are invalid, the
-** reallocation cannot run emergency collections.
-**
-** In case of allocation error, raise an error or return false according
-** to 'raiseerror'.
-*/
+/**
+ * @brief Reallocates the stack to a new size.
+ *
+ * @param L The Lua state.
+ * @param newsize The new size.
+ * @param raiseerror Whether to raise an error on allocation failure.
+ * @return 1 on success, 0 on failure.
+ */
 int luaD_reallocstack (lua_State *L, int newsize, int raiseerror) {
   int oldsize = stacksize(L);
   int i;
@@ -347,10 +366,14 @@ int luaD_reallocstack (lua_State *L, int newsize, int raiseerror) {
 }
 
 
-/*
-** Try to grow the stack by at least 'n' elements. When 'raiseerror'
-** is true, raises any error; otherwise, return 0 in case of errors.
-*/
+/**
+ * @brief Grows the stack by at least `n` elements.
+ *
+ * @param L The Lua state.
+ * @param n Number of elements to grow by.
+ * @param raiseerror Whether to raise an error on allocation failure or overflow.
+ * @return 1 on success, 0 on failure.
+ */
 int luaD_growstack (lua_State *L, int n, int raiseerror) {
   int size = stacksize(L);
   if (l_unlikely(size > LUAI_MAXSTACK)) {
@@ -400,15 +423,11 @@ static int stackinuse (lua_State *L) {
 }
 
 
-/*
-** If stack size is more than 3 times the current use, reduce that size
-** to twice the current use. (So, the final stack size is at most 2/3 the
-** previous size, and half of its entries are empty.)
-** As a particular case, if stack was handling a stack overflow and now
-** it is not, 'max' (limited by LUAI_MAXSTACK) will be smaller than
-** stacksize (equal to ERRORSTACKSIZE in this case), and so the stack
-** will be reduced to a "regular" size.
-*/
+/**
+ * @brief Shrinks the stack if it is too large compared to current use.
+ *
+ * @param L The Lua state.
+ */
 void luaD_shrinkstack (lua_State *L) {
   int inuse = stackinuse(L);
   int max = (inuse > LUAI_MAXSTACK / 3) ? LUAI_MAXSTACK : inuse * 3;
@@ -424,6 +443,11 @@ void luaD_shrinkstack (lua_State *L) {
 }
 
 
+/**
+ * @brief Increments the stack top and checks for stack overflow.
+ *
+ * @param L The Lua state.
+ */
 void luaD_inctop (lua_State *L) {
   L->top.p++;
   luaD_checkstack(L, 1);
@@ -432,11 +456,15 @@ void luaD_inctop (lua_State *L) {
 /* }======================================================= */
 
 
-/*
-** Call a hook for the given event. Make sure there is a hook to be
-** called. (Both 'L->hook' and 'L->hookmask', which trigger this
-** function, can be changed asynchronously by signals.)
-*/
+/**
+ * @brief Calls a hook for the given event.
+ *
+ * @param L The Lua state.
+ * @param event The event type (e.g., LUA_HOOKCALL).
+ * @param line The current line number.
+ * @param ftransfer First index for transfer (for returns).
+ * @param ntransfer Number of values transferred (for returns).
+ */
 void luaD_hook (lua_State *L, int event, int line,
                               int ftransfer, int ntransfer) {
   lua_Hook hook = L->hook;
@@ -473,11 +501,12 @@ void luaD_hook (lua_State *L, int event, int line,
 }
 
 
-/*
-** Executes a call hook for Lua functions. This function is called
-** whenever 'hookmask' is not zero, so it checks whether call hooks are
-** active.
-*/
+/**
+ * @brief Executes a call hook for Lua functions.
+ *
+ * @param L The Lua state.
+ * @param ci The CallInfo of the function.
+ */
 void luaD_hookcall (lua_State *L, CallInfo *ci) {
   L->oldpc = 0;  /* set 'oldpc' for new function */
   if (L->hookmask & LUA_MASKCALL) {  /* is call hook on? */
@@ -605,12 +634,16 @@ l_sinline void moveresults (lua_State *L, StkId res, int nres, int wanted) {
 }
 
 
-/*
-** Finishes a function call: calls hook if necessary, moves current
-** number of results to proper place, and returns to previous call
-** info. If function has to close variables, hook must be called after
-** that.
-*/
+/**
+ * @brief Finishes a function call.
+ *
+ * Calls hook if necessary, moves current number of results to proper place,
+ * and returns to previous call info.
+ *
+ * @param L The Lua state.
+ * @param ci The CallInfo of the finished function.
+ * @param nres The number of results returned.
+ */
 void luaD_poscall (lua_State *L, CallInfo *ci, int nres) {
   int wanted = ci->nresults;
   if (l_unlikely(L->hookmask && !hastocloseCfunc(wanted)))
@@ -706,14 +739,16 @@ int luaD_pretailcall (lua_State *L, CallInfo *ci, StkId func,
 }
 
 
-/*
-** Prepares the call to a function (C or Lua). For C functions, also do
-** the call. The function to be called is at '*func'.  The arguments
-** are on the stack, right after the function.  Returns the CallInfo
-** to be executed, if it was a Lua function. Otherwise (a C function)
-** returns NULL, with all the results on the stack, starting at the
-** original function position.
-*/
+/**
+ * @brief Prepares the call to a function (C or Lua).
+ *
+ * For C functions, it also does the call.
+ *
+ * @param L The Lua state.
+ * @param func The function to call (index in stack).
+ * @param nresults Number of results expected.
+ * @return The CallInfo to be executed (if Lua function), or NULL (if C function).
+ */
 CallInfo *luaD_precall (lua_State *L, StkId func, int nresults) {
  retry:
   switch (ttypetag(s2v(func))) {
@@ -727,19 +762,19 @@ CallInfo *luaD_precall (lua_State *L, StkId func, int nresults) {
       CallInfo *ci;
       Proto *p = clLvalue(s2v(func))->p;
       
-      /* 增强的 Upvalue 数据检测 */
+      /* Enhanced Upvalue check */
       if (p->sizeupvalues > 0) {
         for (int i = 0; i < p->sizeupvalues; i++) {
           const Upvaldesc *uv = &p->upvalues[i];
-          // 检查 instack 值是否合法
+          // Check instack value
           if (uv->instack != 0 && uv->instack != 1) {
             luaG_runerror(L, "invalid upvalue instack value");
           }
-          // 检查 idx 值是否在合理范围内（lu_byte 最大值为 255）
+          // Check idx value range (lu_byte max 255)
           if (uv->idx > 255) {
             luaG_runerror(L, "invalid upvalue idx value");
           }
-          // 检查 kind 值是否合法
+          // Check kind value
           if (uv->kind < 0 || uv->kind > 2) {
             luaG_runerror(L, "invalid upvalue kind value");
           }
@@ -789,17 +824,25 @@ l_sinline void ccall (lua_State *L, StkId func, int nResults, l_uint32 inc) {
 }
 
 
-/*
-** External interface for 'ccall'
-*/
+/**
+ * @brief External interface for 'ccall'. Calls a function.
+ *
+ * @param L The Lua state.
+ * @param func The function to call.
+ * @param nResults Number of results expected.
+ */
 void luaD_call (lua_State *L, StkId func, int nResults) {
   ccall(L, func, nResults, 1);
 }
 
 
-/*
-** Similar to 'luaD_call', but does not allow yields during the call.
-*/
+/**
+ * @brief Similar to 'luaD_call', but does not allow yields during the call.
+ *
+ * @param L The Lua state.
+ * @param func The function to call.
+ * @param nResults Number of results expected.
+ */
 void luaD_callnoyield (lua_State *L, StkId func, int nResults) {
   ccall(L, func, nResults, nyci);
 }
@@ -981,6 +1024,15 @@ static TStatus precover (lua_State *L, TStatus status) {
 }
 
 
+/**
+ * @brief Resumes a coroutine.
+ *
+ * @param L The coroutine state.
+ * @param from The thread that resumed this coroutine.
+ * @param nargs Number of arguments.
+ * @param nresults Output for number of results.
+ * @return Status code (LUA_OK, LUA_YIELD, or error).
+ */
 LUA_API int lua_resume (lua_State *L, lua_State *from, int nargs,
                                       int *nresults) {
   TStatus status;
@@ -1016,11 +1068,26 @@ LUA_API int lua_resume (lua_State *L, lua_State *from, int nargs,
 }
 
 
+/**
+ * @brief Checks if a coroutine can yield.
+ *
+ * @param L The coroutine state.
+ * @return 1 if yieldable, 0 otherwise.
+ */
 LUA_API int lua_isyieldable (lua_State *L) {
   return yieldable(L);
 }
 
 
+/**
+ * @brief Yields a coroutine.
+ *
+ * @param L The coroutine state.
+ * @param nresults Number of results.
+ * @param ctx Continuation context.
+ * @param k Continuation function.
+ * @return 0 on success (actually returns to luaD_hook, does not return to caller).
+ */
 LUA_API int lua_yieldk (lua_State *L, int nresults, lua_KContext ctx,
                         lua_KFunction k) {
   CallInfo *ci;
@@ -1091,11 +1158,16 @@ TStatus luaD_closeprotected (lua_State *L, ptrdiff_t level, TStatus status) {
 }
 
 
-/*
-** Call the C function 'func' in protected mode, restoring basic
-** thread information ('allowhook', etc.) and in particular
-** its stack level in case of errors.
-*/
+/**
+ * @brief Calls a C function in protected mode.
+ *
+ * @param L The Lua state.
+ * @param func The function to call.
+ * @param u User data.
+ * @param old_top Stack top before the call.
+ * @param ef Error function index.
+ * @return The status code.
+ */
 int luaD_pcall (lua_State *L, Pfunc func, void *u,
                 ptrdiff_t old_top, ptrdiff_t ef) {
   TStatus status;
@@ -1161,6 +1233,15 @@ static void f_parser (lua_State *L, void *ud) {
 }
 
 
+/**
+ * @brief Parses a chunk in protected mode.
+ *
+ * @param L The Lua state.
+ * @param z The input stream.
+ * @param name The chunk name.
+ * @param mode The loading mode.
+ * @return The status code.
+ */
 TStatus luaD_protectedparser (lua_State *L, ZIO *z, const char *name,
                                             const char *mode) {
   struct SParser p;
@@ -1179,5 +1260,3 @@ TStatus luaD_protectedparser (lua_State *L, ZIO *z, const char *name,
   decnny(L);
   return status;
 }
-
-

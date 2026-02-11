@@ -1,8 +1,10 @@
-/*
-** $Id: lgc.c $
-** Garbage Collector
-** See Copyright Notice in lua.h
-*/
+/**
+ * @file lgc.c
+ * @brief Garbage Collector implementation.
+ *
+ * This file contains the implementation of the Lua garbage collector (GC),
+ * supporting both incremental and generational modes.
+ */
 
 #define lgc_c
 #define LUA_CORE
@@ -193,19 +195,22 @@ static int iscleared (global_State *g, const GCObject *o) {
 }
 
 
-/*
-** Barrier that moves collector forward, that is, marks the white object
-** 'v' being pointed by the black object 'o'.  In the generational
-** mode, 'v' must also become old, if 'o' is old; however, it cannot
-** be changed directly to OLD, because it may still point to non-old
-** objects. So, it is marked as OLD0. In the next cycle it will become
-** OLD1, and in the next it will finally become OLD (regular old). By
-** then, any object it points to will also be old.  If called in the
-** incremental sweep phase, it clears the black object to white (sweep
-** it) to avoid other barrier calls for this same object. (That cannot
-** be done is generational mode, as its sweep does not distinguish
-** whites from deads.)
-*/
+/**
+ * @brief Barrier that moves collector forward.
+ *
+ * Marks the white object 'v' being pointed by the black object 'o'.
+ * In the generational mode, 'v' must also become old, if 'o' is old; however, it cannot
+ * be changed directly to OLD, because it may still point to non-old
+ * objects. So, it is marked as OLD0. In the next cycle it will become
+ * OLD1, and in the next it will finally become OLD (regular old). By
+ * then, any object it points to will also be old.
+ * If called in the incremental sweep phase, it clears the black object to white (sweep
+ * it) to avoid other barrier calls for this same object.
+ *
+ * @param L The Lua state.
+ * @param o The parent object (black).
+ * @param v The child object (white).
+ */
 void luaC_barrier_ (lua_State *L, GCObject *o, GCObject *v) {
   global_State *g = G(L);
   lua_assert(isblack(o) && iswhite(v) && !isdead(g, v) && !isdead(g, o));
@@ -224,10 +229,14 @@ void luaC_barrier_ (lua_State *L, GCObject *o, GCObject *v) {
 }
 
 
-/*
-** barrier that moves collector backward, that is, mark the black object
-** pointing to a white object as gray again.
-*/
+/**
+ * @brief Barrier that moves collector backward.
+ *
+ * Marks the black object pointing to a white object as gray again.
+ *
+ * @param L The Lua state.
+ * @param o The parent object (black).
+ */
 void luaC_barrierback_ (lua_State *L, GCObject *o) {
   global_State *g = G(L);
   lua_assert(isblack(o) && !isdead(g, o));
@@ -241,6 +250,12 @@ void luaC_barrierback_ (lua_State *L, GCObject *o) {
 }
 
 
+/**
+ * @brief Moves an object to the fixed list, so it will never be collected.
+ *
+ * @param L The Lua state.
+ * @param o The object to fix.
+ */
 void luaC_fix (lua_State *L, GCObject *o) {
   global_State *g = G(L);
   lua_assert(g->allgc == o);  /* object must be 1st in 'allgc' list! */
@@ -252,10 +267,15 @@ void luaC_fix (lua_State *L, GCObject *o) {
 }
 
 
-/*
-** create a new collectable object (with given type, size, and offset)
-** and link it to 'allgc' list.
-*/
+/**
+ * @brief Creates a new collectable object and links it to the 'allgc' list.
+ *
+ * @param L The Lua state.
+ * @param tt Object type tag.
+ * @param sz Size of the object.
+ * @param offset Offset to the GCObject header.
+ * @return The new GCObject.
+ */
 GCObject *luaC_newobjdt (lua_State *L, int tt, size_t sz, size_t offset) {
   global_State *g = G(L);
   char *p = cast_charp(luaM_newobject(L, novariant(tt), sz));
@@ -270,6 +290,14 @@ GCObject *luaC_newobjdt (lua_State *L, int tt, size_t sz, size_t offset) {
 }
 
 
+/**
+ * @brief Creates a new collectable object.
+ *
+ * @param L The Lua state.
+ * @param tt Object type tag.
+ * @param sz Size of the object.
+ * @return The new GCObject.
+ */
 GCObject *luaC_newobj (lua_State *L, int tt, size_t sz) {
   return luaC_newobjdt(L, tt, sz, 0);
 }
@@ -1036,10 +1064,16 @@ static void correctpointers (global_State *g, GCObject *o) {
 }
 
 
-/*
-** if object 'o' has a finalizer, remove it from 'allgc' list (must
-** search the list to find it) and link it in 'finobj' list.
-*/
+/**
+ * @brief Checks if an object needs to be moved to the finalization list.
+ *
+ * If object 'o' has a finalizer and hasn't been finalized yet, remove it from the 'allgc' list
+ * and link it in the 'finobj' list.
+ *
+ * @param L The Lua state.
+ * @param o The object to check.
+ * @param mt The metatable of the object.
+ */
 void luaC_checkfinalizer (lua_State *L, GCObject *o, Table *mt) {
   global_State *g = G(L);
   if (tofinalize(o) ||                 /* obj. is already marked... */
@@ -1378,9 +1412,12 @@ static void enterinc (global_State *g) {
 }
 
 
-/*
-** Change collector mode to 'newmode'.
-*/
+/**
+ * @brief Changes the collector mode.
+ *
+ * @param L The Lua state.
+ * @param newmode The new mode (KGC_GENH or KGC_INC).
+ */
 void luaC_changemode (lua_State *L, int newmode) {
   global_State *g = G(L);
   if (newmode != g->gckind) {
@@ -1528,10 +1565,11 @@ static void deletelist (lua_State *L, GCObject *p, GCObject *limit) {
 }
 
 
-/*
-** Call all finalizers of the objects in the given Lua state, and
-** then free all objects, except for the main thread.
-*/
+/**
+ * @brief Calls all finalizers of the objects in the given Lua state, and then frees all objects, except for the main thread.
+ *
+ * @param L The Lua state.
+ */
 void luaC_freeallobjects (lua_State *L) {
   global_State *g = G(L);
   g->gcstp = GCSTPCLS;  /* no extra finalizers after here */
@@ -1670,10 +1708,12 @@ static lu_mem singlestep (lua_State *L) {
 }
 
 
-/*
-** advances the garbage collector until it reaches a state allowed
-** by 'statemask'
-*/
+/**
+ * @brief Advances the garbage collector until it reaches a state allowed by 'statemask'.
+ *
+ * @param L The Lua state.
+ * @param statesmask Bitmask of allowed states.
+ */
 void luaC_runtilstate (lua_State *L, int statesmask) {
   global_State *g = G(L);
   while (!testbit(statesmask, g->gcstate))
@@ -1707,11 +1747,13 @@ static void incstep (lua_State *L, global_State *g) {
   }
 }
 
-/*
-** Performs a basic GC step if collector is running. (If collector is
-** not running, set a reasonable debt to avoid it being called at
-** every single check.)
-*/
+/**
+ * @brief Performs a basic GC step if collector is running.
+ *
+ * If collector is not running, set a reasonable debt to avoid it being called at every single check.
+ *
+ * @param L The Lua state.
+ */
 void luaC_step (lua_State *L) {
   global_State *g = G(L);
   l_mutex_lock(&g->lock);
@@ -1749,11 +1791,12 @@ static void fullinc (lua_State *L, global_State *g) {
 }
 
 
-/*
-** Performs a full GC cycle; if 'isemergency', set a flag to avoid
-** some operations which could change the interpreter state in some
-** unexpected ways (running finalizers and shrinking some structures).
-*/
+/**
+ * @brief Performs a full GC cycle.
+ *
+ * @param L The Lua state.
+ * @param isemergency If true, sets a flag to avoid some operations which could change the interpreter state in some unexpected ways.
+ */
 void luaC_fullgc (lua_State *L, int isemergency) {
   global_State *g = G(L);
   l_mutex_lock(&g->lock);
@@ -1763,11 +1806,9 @@ void luaC_fullgc (lua_State *L, int isemergency) {
     fullinc(L, g);
   else
     fullgen(L, g);
-  luaM_poolgc(L);  /* 完整GC后回收内存池缓存 */
+  luaM_poolgc(L);  /* 回收内存池缓存 */
   g->gcemergency = 0;
   l_mutex_unlock(&g->lock);
 }
 
 /* }=========================================== */
-
-
