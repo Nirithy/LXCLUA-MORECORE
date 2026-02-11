@@ -16,7 +16,7 @@ assert_eq(p2.y, 2, "p2.y default")
 print("Testing Struct Arrays...")
 struct Vector3 { x=0.0, y=0.0, z=0.0 }
 local N = 10
-local arr = array Vector3[N]
+local arr = array(Vector3)[N]
 assert_eq(#arr, N, "array len")
 
 local v = Vector3{x=1, y=2, z=3}
