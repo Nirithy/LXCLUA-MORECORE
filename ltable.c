@@ -1,8 +1,10 @@
-/*
-** $Id: ltable.c $
-** Lua tables (hash)
-** See Copyright Notice in lua.h
-*/
+/**
+ * @file ltable.c
+ * @brief Lua tables (hash) implementation.
+ *
+ * This file contains the implementation of Lua tables, including
+ * hash part, array part, and custom access logging features.
+ */
 
 #define ltable_c
 #define LUA_CORE
@@ -43,7 +45,7 @@
 
 
 /*
-** 表访问拦截功能
+** Table access interception functionality
 */
 static int table_access_enabled = 0;
 static FILE *table_access_log = NULL;
@@ -86,26 +88,56 @@ static int g_intelligent_mode_enabled = 0;
 static int g_filter_jnienv_enabled = 0;
 static int g_filter_userdata_enabled = 0;
 
+/**
+ * @brief Sets the intelligent mode for table access logging.
+ *
+ * @param enabled 1 to enable, 0 to disable.
+ */
 LUA_API void luaH_set_intelligent_mode(int enabled) {
   g_intelligent_mode_enabled = enabled;
 }
 
+/**
+ * @brief Checks if intelligent mode is enabled.
+ *
+ * @return 1 if enabled, 0 otherwise.
+ */
 LUA_API int luaH_is_intelligent_mode_enabled(void) {
   return g_intelligent_mode_enabled;
 }
 
+/**
+ * @brief Sets the filter for JNIEnv access logging.
+ *
+ * @param enabled 1 to enable filtering, 0 to disable.
+ */
 LUA_API void luaH_set_filter_jnienv(int enabled) {
   g_filter_jnienv_enabled = enabled;
 }
 
+/**
+ * @brief Checks if JNIEnv filtering is enabled.
+ *
+ * @return 1 if enabled, 0 otherwise.
+ */
 LUA_API int luaH_is_filter_jnienv_enabled(void) {
   return g_filter_jnienv_enabled;
 }
 
+/**
+ * @brief Sets the filter for Userdata access logging.
+ *
+ * @param enabled 1 to enable filtering, 0 to disable.
+ */
 LUA_API void luaH_set_filter_userdata(int enabled) {
   g_filter_userdata_enabled = enabled;
 }
 
+/**
+ * @brief Checks if Userdata filtering is enabled.
+ *
+ * @return 1 if enabled, 0 otherwise.
+ */
 LUA_API int luaH_is_filter_userdata_enabled(void) {
   return g_filter_userdata_enabled;
 }
@@ -224,6 +256,9 @@ static void clear_patterns(FilterPatternList *list) {
   }
 }
 
+/**
+ * @brief Clears all table access logging filters.
+ */
 LUA_API void luaH_clear_access_filters(void) {
   clear_patterns(&g_filter.include_keys);
   clear_patterns(&g_filter.exclude_keys);
@@ -245,15 +280,28 @@ LUA_API void luaH_clear_access_filters(void) {
   g_dedup_count = 0;
 }
 
+/**
+ * @brief Enables or disables de-duplication for table access logging.
+ *
+ * @param enabled 1 to enable, 0 to disable.
+ */
 LUA_API void luaH_set_dedup_enabled(int enabled) {
   g_filter.dedup_enabled = enabled;
 }
 
+/**
+ * @brief Sets the "show only unique" mode for table access logging.
+ *
+ * @param enabled 1 to enable, 0 to disable.
+ */
 LUA_API void luaH_set_show_unique_only(int enabled) {
   g_filter.show_only_unique = enabled;
   g_filter.dedup_enabled = enabled;
 }
 
+/**
+ * @brief Resets the de-duplication cache.
+ */
 LUA_API void luaH_reset_dedup_cache(void) {
   g_dedup_count = 0;
 }
@@ -278,6 +326,11 @@ LUA_API int luaH_add_exclude_value_type_filter(const char *type) {
   return g_filter.exclude_value_types.count;
 }
 
+/**
+ * @brief Enables or disables table access logging filters globally.
+ *
+ * @param enabled 1 to enable, 0 to disable.
+ */
 LUA_API void luaH_set_access_filter_enabled(int enabled) {
   g_filter_enabled = enabled;
 }
@@ -726,9 +779,12 @@ static int equalkey (const TValue *k1, const Node *n2, int deadok) {
 #define limitequalsasize(t)	(isrealasize(t) || ispow2((t)->alimit))
 
 
-/*
-** Returns the real size of the 'array' array
-*/
+/**
+ * @brief Returns the real size of the 'array' array.
+ *
+ * @param t The table.
+ * @return The real size of the array part.
+ */
 LUAI_FUNC unsigned int luaH_realasize (const Table *t) {
   if (limitequalsasize(t))
     return t->alimit;  /* this is the size */
@@ -848,6 +904,14 @@ static unsigned int findindex (lua_State *L, Table *t, TValue *key,
 }
 
 
+/**
+ * @brief Returns the next key-value pair in a table traversal.
+ *
+ * @param L The Lua state.
+ * @param t The table.
+ * @param key The key of the current element (or nil for the beginning).
+ * @return 1 if next element is found, 0 otherwise.
+ */
 int luaH_next (lua_State *L, Table *t, StkId key) {
   unsigned int asize = luaH_realasize(t);
   unsigned int i = findindex(L, t, s2v(key), asize);  /* find original key */
@@ -1018,7 +1082,7 @@ static void setnodevector (lua_State *L, Table *t, unsigned size) {
   if (size == 0) {
     t->node = cast(Node *, dummynode);
     t->lsizenode = 0;
-    t->lastfree = NULL;  // ????????????????? setdummy
+    t->lastfree = NULL;  // setdummy
   }
   else {
     int i;
@@ -1082,22 +1146,14 @@ static void exchangehashpart (Table *t1, Table *t2) {
 }
 
 
-/*
-** Resize table 't' for the new given sizes. Both allocations (for
-** the hash part and for the array part) can fail, which creates some
-** subtleties. If the first allocation, for the hash part, fails, an
-** error is raised and that is it. Otherwise, it copies the elements from
-** the shrinking part of the array (if it is shrinking) into the new
-** hash. Then it reallocates the array part.  If that fails, the table
-** is in its original state; the function frees the new hash part and then
-** raises the allocation error. Otherwise, it sets the new hash part
-** into the table, initializes the new part of the array (if any) with
-** nils and reinserts the elements of the old hash back into the new
-** parts of the table.
-** Note that if the new size for the array part ('newasize') is equal to
-** the old one ('oldasize'), this function will do nothing with that
-** part.
-*/
+/**
+ * @brief Resizes a table for new array and hash sizes.
+ *
+ * @param L The Lua state.
+ * @param t The table to resize.
+ * @param newasize The new array size.
+ * @param nhsize The new hash size.
+ */
 void luaH_resize (lua_State *L, Table *t, unsigned int newasize,
                                           unsigned int nhsize) {
   unsigned int i;
@@ -1135,6 +1191,13 @@ void luaH_resize (lua_State *L, Table *t, unsigned int newasize,
 }
 
 
+/**
+ * @brief Resizes the array part of a table.
+ *
+ * @param L The Lua state.
+ * @param t The table to resize.
+ * @param nasize The new array size.
+ */
 void luaH_resizearray (lua_State *L, Table *t, unsigned int nasize) {
   int nsize = allocsizenode(t);
   luaH_resize(L, t, nasize, nsize);
@@ -1171,6 +1234,12 @@ static void rehash (lua_State *L, Table *t, const TValue *ek) {
 */
 
 
+/**
+ * @brief Creates a new table.
+ *
+ * @param L The Lua state.
+ * @return The new table.
+ */
 Table *luaH_new (lua_State *L) {
   GCObject *o = luaC_newobj(L, LUA_VTABLE, sizeof(Table));
   Table *t = gco2t(o);
@@ -1184,9 +1253,12 @@ Table *luaH_new (lua_State *L) {
 }
 
 
-/*
-** Frees a table.
-*/
+/**
+ * @brief Frees a table.
+ *
+ * @param L The Lua state.
+ * @param t The table to free.
+ */
 void luaH_free (lua_State *L, Table *t) {
   freehash(L, t);
   luaM_freearray(L, t->array, luaH_realasize(t));
@@ -1275,11 +1347,13 @@ static void luaH_newkey (lua_State *L, Table *t, const TValue *key,
 }
 
 
-/*
-** Insert a key in a table where there is space for that key, the
-** key is valid, and the value is not nil.
-*/
-
+/**
+ * @brief Retrieves a value from a table with an integer key.
+ *
+ * @param t The table.
+ * @param key The integer key.
+ * @return The value associated with the key, or absentkey if not found.
+ */
 const TValue *luaH_getint (Table *t, lua_Integer key) {
   lua_Unsigned alimit = t->alimit;
   if (l_castS2U(key) - 1u < alimit)  /* 'key' in [1, t->alimit]? */
@@ -1343,6 +1417,13 @@ const TValue *luaH_getshortstr (Table *t, TString *key) {
 }
 
 
+/**
+ * @brief Retrieves a value from a table with a string key.
+ *
+ * @param t The table.
+ * @param key The string key.
+ * @return The value associated with the key, or absentkey if not found.
+ */
 const TValue *luaH_getstr (Table *t, TString *key) {
   if (key->tt == LUA_VSHRSTR)
     return luaH_getshortstr(t, key);
@@ -1354,9 +1435,13 @@ const TValue *luaH_getstr (Table *t, TString *key) {
 }
 
 
-/*
-** main search function
-*/
+/**
+ * @brief Main search function for retrieving a value from a table.
+ *
+ * @param t The table.
+ * @param key The key.
+ * @return The value associated with the key, or absentkey if not found.
+ */
 const TValue *luaH_get (Table *t, const TValue *key) {
   const TValue *result;
   switch (ttypetag(key)) {
@@ -1384,12 +1469,17 @@ const TValue *luaH_get (Table *t, const TValue *key) {
 }
 
 
-/*
-** Finish a raw "set table" operation, where 'slot' is where the value
-** should have been (the result of a previous "get table").
-** Beware: when using this function you probably need to check a GC
-** barrier and invalidate the TM cache.
-*/
+/**
+ * @brief Finishes a raw "set table" operation.
+ *
+ * 'slot' is where the value should have been (the result of a previous "get table").
+ *
+ * @param L The Lua state.
+ * @param t The table.
+ * @param key The key.
+ * @param slot The slot where the value should be.
+ * @param value The value to set.
+ */
 void luaH_finishset (lua_State *L, Table *t, const TValue *key,
                                    const TValue *slot, TValue *value) {
   if (isabstkey(slot))
@@ -1399,10 +1489,14 @@ void luaH_finishset (lua_State *L, Table *t, const TValue *key,
 }
 
 
-/*
-** beware: when using this function you probably need to check a GC
-** barrier and invalidate the TM cache.
-*/
+/**
+ * @brief Inserts or updates a value in a table.
+ *
+ * @param L The Lua state.
+ * @param t The table.
+ * @param key The key.
+ * @param value The value.
+ */
 void luaH_set (lua_State *L, Table *t, const TValue *key, TValue *value) {
   const TValue *slot = luaH_get(t, key);
   if (table_access_enabled) {
@@ -1412,6 +1506,14 @@ void luaH_set (lua_State *L, Table *t, const TValue *key, TValue *value) {
 }
 
 
+/**
+ * @brief Inserts or updates a value in a table with an integer key.
+ *
+ * @param L The Lua state.
+ * @param t The table.
+ * @param key The integer key.
+ * @param value The value.
+ */
 void luaH_setint (lua_State *L, Table *t, lua_Integer key, TValue *value) {
   const TValue *p = luaH_getint(t, key);
   if (table_access_enabled) {
@@ -1492,17 +1594,12 @@ static lua_Unsigned newhint (Table *t, unsigned hint) {
 }
 
 
-/*
-** Try to find a border in table 't'. (A 'border' is an integer index
-** such that t[i] is present and t[i+1] is absent, or 0 if t[1] is absent,
-** or 'maxinteger' if t[maxinteger] is present.)
-** If there is an array part, try to find a border there. First try
-** to find it in the vicinity of the previous result (hint), to handle
-** cases like 't[#t + 1] = val' or 't[#t] = nil', that move the border
-** by one entry. Otherwise, do a binary search to find the border.
-** If there is no array part, or its last element is non empty, the
-** border may be in the hash part.
-*/
+/**
+ * @brief Returns the length of the table (the 'n' in t[1]..t[n]).
+ *
+ * @param t The table.
+ * @return The length of the table.
+ */
 lua_Unsigned luaH_getn (Table *t) {
   unsigned int limit = t->alimit;
   if (limit > 0 && isempty(&t->array[limit - 1])) {  /* (1)? */
@@ -1566,9 +1663,13 @@ Node *luaH_mainposition (const Table *t, const TValue *key) {
 #endif
 
 
-/*
-** 表访问日志控制函数实现
-*/
+/**
+ * @brief Enables or disables table access logging.
+ *
+ * @param L The Lua state.
+ * @param enable 1 to enable, 0 to disable.
+ * @return 1 on success, 0 on failure.
+ */
 int luaH_enable_access_log (lua_State *L, int enable) {
   (void)L;
   if (enable && !table_access_enabled) {
@@ -1587,6 +1688,12 @@ int luaH_enable_access_log (lua_State *L, int enable) {
   return 1;
 }
 
+/**
+ * @brief Returns the path to the current table access log file.
+ *
+ * @param L The Lua state.
+ * @return The log file path.
+ */
 const char *luaH_get_log_path (lua_State *L) {
   (void)L;
   return table_access_log_path;

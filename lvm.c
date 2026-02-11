@@ -1,6 +1,9 @@
 /**
  * @file lvm.c
  * @brief Lua virtual machine implementation.
+ *
+ * This file contains the implementation of the Lua virtual machine (VM).
+ * It handles the execution of Lua bytecode instructions.
  */
 
 #define lvm_c
@@ -121,10 +124,15 @@ static int l_strton (const TValue *obj, TValue *result) {
 }
 
 
-/*
-** Try to convert a value to a float. The float case is already handled
-** by the macro 'tonumber'.
-*/
+/**
+ * @brief Tries to convert a value to a float.
+ *
+ * The float case is already handled by the macro 'tonumber'.
+ *
+ * @param obj The object to convert.
+ * @param n Pointer to store the result.
+ * @return 1 on success, 0 on failure.
+ */
 int luaV_tonumber_ (const TValue *obj, lua_Number *n) {
   TValue v;
   if (ttisinteger(obj)) {
@@ -140,9 +148,14 @@ int luaV_tonumber_ (const TValue *obj, lua_Number *n) {
 }
 
 
-/*
-** try to convert a float to an integer, rounding according to 'mode'.
-*/
+/**
+ * @brief Tries to convert a float to an integer, rounding according to 'mode'.
+ *
+ * @param n The float number.
+ * @param p Pointer to store the result.
+ * @param mode The rounding mode (F2Ieq, F2Ifloor, F2Iceil).
+ * @return 1 on success, 0 on failure.
+ */
 int luaV_flttointeger (lua_Number n, lua_Integer *p, F2Imod mode) {
   lua_Number f = l_floor(n);
   if (n != f) {  /* not an integral value? */
@@ -154,11 +167,14 @@ int luaV_flttointeger (lua_Number n, lua_Integer *p, F2Imod mode) {
 }
 
 
-/*
-** try to convert a value to an integer, rounding according to 'mode',
-** without string coercion.
-** ("Fast track" handled by macro 'tointegerns'.)
-*/
+/**
+ * @brief Tries to convert a value to an integer, rounding according to 'mode', without string coercion.
+ *
+ * @param obj The object to convert.
+ * @param p Pointer to store the result.
+ * @param mode The rounding mode.
+ * @return 1 on success, 0 on failure.
+ */
 int luaV_tointegerns (const TValue *obj, lua_Integer *p, F2Imod mode) {
   if (ttisfloat(obj))
     return luaV_flttointeger(fltvalue(obj), p, mode);
@@ -171,9 +187,14 @@ int luaV_tointegerns (const TValue *obj, lua_Integer *p, F2Imod mode) {
 }
 
 
-/*
-** try to convert a value to an integer.
-*/
+/**
+ * @brief Tries to convert a value to an integer.
+ *
+ * @param obj The object to convert.
+ * @param p Pointer to store the result.
+ * @param mode The rounding mode.
+ * @return 1 on success, 0 on failure.
+ */
 int luaV_tointeger (const TValue *obj, lua_Integer *p, F2Imod mode) {
   TValue v;
   if (l_strton(obj, &v))  /* does 'obj' point to a numerical string? */
@@ -305,11 +326,18 @@ static int floatforloop (StkId ra) {
 }
 
 
-/*
-** Finish the table access 'val = t[key]'.
-** if 'slot' is NULL, 't' is not a table; otherwise, 'slot' points to
-** t[k] entry (which must be empty).
-*/
+/**
+ * @brief Finishes the table access 'val = t[key]'.
+ *
+ * If 'slot' is NULL, 't' is not a table; otherwise, 'slot' points to
+ * t[k] entry (which must be empty).
+ *
+ * @param L The Lua state.
+ * @param t The table or object being indexed.
+ * @param key The key.
+ * @param val Where to store the result.
+ * @param slot Pointer to the slot in the table (if found but empty), or NULL.
+ */
 void luaV_finishget (lua_State *L, const TValue *t, TValue *key, StkId val,
                       const TValue *slot) {
   int loop;  /* counter to avoid infinite loops */
@@ -392,13 +420,20 @@ void luaV_finishget (lua_State *L, const TValue *t, TValue *key, StkId val,
 }
 
 
-/*
-** Finish a table assignment 't[key] = val'.
-** If 'slot' is NULL, 't' is not a table.  Otherwise, 'slot' points
-** to the entry 't[key]', or to a value with an absent key if there
-** is no such entry.  (The value at 'slot' must be empty, otherwise
-** 'luaV_fastget' would have done the job.)
-*/
+/**
+ * @brief Finishes a table assignment 't[key] = val'.
+ *
+ * If 'slot' is NULL, 't' is not a table. Otherwise, 'slot' points
+ * to the entry 't[key]', or to a value with an absent key if there
+ * is no such entry. (The value at 'slot' must be empty, otherwise
+ * 'luaV_fastget' would have done the job.)
+ *
+ * @param L The Lua state.
+ * @param t The table or object being indexed.
+ * @param key The key.
+ * @param val The value to assign.
+ * @param slot Pointer to the slot in the table, or NULL.
+ */
 void luaV_finishset (lua_State *L, const TValue *t, TValue *key,
                      TValue *val, const TValue *slot) {
   int loop;  /* counter to avoid infinite loops */
@@ -668,9 +703,14 @@ static int lessthanothers (lua_State *L, const TValue *l, const TValue *r) {
 }
 
 
-/*
-** Main operation less than; return 'l < r'.
-*/
+/**
+ * @brief Main operation less than; return 'l < r'.
+ *
+ * @param L The Lua state.
+ * @param l Left operand.
+ * @param r Right operand.
+ * @return 1 if l < r, 0 otherwise.
+ */
 int luaV_lessthan (lua_State *L, const TValue *l, const TValue *r) {
   if (ttisnumber(l) && ttisnumber(r))  /* both operands are numbers? */
     return LTnum(l, r);
@@ -690,9 +730,14 @@ static int lessequalothers (lua_State *L, const TValue *l, const TValue *r) {
 }
 
 
-/*
-** Main operation less than or equal to; return 'l <= r'.
-*/
+/**
+ * @brief Main operation less than or equal to; return 'l <= r'.
+ *
+ * @param L The Lua state.
+ * @param l Left operand.
+ * @param r Right operand.
+ * @return 1 if l <= r, 0 otherwise.
+ */
 int luaV_lessequal (lua_State *L, const TValue *l, const TValue *r) {
   if (ttisnumber(l) && ttisnumber(r))  /* both operands are numbers? */
     return LEnum(l, r);
@@ -700,10 +745,16 @@ int luaV_lessequal (lua_State *L, const TValue *l, const TValue *r) {
 }
 
 
-/*
-** Main operation for equality of Lua values; return 't1 == t2'.
-** L == LUA_NULLPTR means raw equality (no metamethods)
-*/
+/**
+ * @brief Main operation for equality of Lua values; return 't1 == t2'.
+ *
+ * L == LUA_NULLPTR means raw equality (no metamethods).
+ *
+ * @param L The Lua state (optional, for metamethods).
+ * @param t1 First value.
+ * @param t2 Second value.
+ * @return 1 if equal, 0 otherwise.
+ */
 int luaV_equalobj (lua_State *L, const TValue *t1, const TValue *t2) {
   const TValue *tm;
   if (ttypetag(t1) != ttypetag(t2)) {  /* not the same variant? */
@@ -775,10 +826,14 @@ static void copy2buff (StkId top, int n, char *buff) {
 }
 
 
-/*
-** Main operation for concatenation: concat 'total' values in the stack,
-** from 'L->top.p - total' up to 'L->top.p - 1'.
-*/
+/**
+ * @brief Main operation for concatenation: concat 'total' values in the stack.
+ *
+ * Concatenates 'total' values in the stack, from 'L->top.p - total' up to 'L->top.p - 1'.
+ *
+ * @param L The Lua state.
+ * @param total Number of elements to concatenate.
+ */
 void luaV_concat (lua_State *L, int total) {
   if (total == 1)
     return;  /* "all" values already concatenated */
@@ -823,9 +878,13 @@ void luaV_concat (lua_State *L, int total) {
 }
 
 
-/*
-** Main operation 'ra = #rb'.
-*/
+/**
+ * @brief Main operation 'ra = #rb'.
+ *
+ * @param L The Lua state.
+ * @param ra Destination register.
+ * @param rb Source value.
+ */
 void luaV_objlen (lua_State *L, StkId ra, const TValue *rb) {
   const TValue *tm;
   switch (ttypetag(rb)) {
@@ -855,12 +914,18 @@ void luaV_objlen (lua_State *L, StkId ra, const TValue *rb) {
 }
 
 
-/*
-** Integer division; return 'm // n', that is, floor(m/n).
-** C division truncates its result (rounds towards zero).
-** 'floor(q) == trunc(q)' when 'q >= 0' or when 'q' is integer,
-** otherwise 'floor(q) == trunc(q) - 1'.
-*/
+/**
+ * @brief Integer division; return 'm // n', that is, floor(m/n).
+ *
+ * C division truncates its result (rounds towards zero).
+ * 'floor(q) == trunc(q)' when 'q >= 0' or when 'q' is integer,
+ * otherwise 'floor(q) == trunc(q) - 1'.
+ *
+ * @param L The Lua state.
+ * @param m Dividend.
+ * @param n Divisor.
+ * @return The result of integer division.
+ */
 lua_Integer luaV_idiv (lua_State *L, lua_Integer m, lua_Integer n) {
   if (l_unlikely(l_castS2U(n) + 1u <= 1u)) {  /* special cases: -1 or 0 */
     if (n == 0)
@@ -876,11 +941,16 @@ lua_Integer luaV_idiv (lua_State *L, lua_Integer m, lua_Integer n) {
 }
 
 
-/*
-** Integer modulus; return 'm % n'. (Assume that C '%' with
-** negative operands follows C99 behavior. See previous comment
-** about luaV_idiv.)
-*/
+/**
+ * @brief Integer modulus; return 'm % n'.
+ *
+ * Assume that C '%' with negative operands follows C99 behavior.
+ *
+ * @param L The Lua state.
+ * @param m Dividend.
+ * @param n Divisor.
+ * @return The result of modulus.
+ */
 lua_Integer luaV_mod (lua_State *L, lua_Integer m, lua_Integer n) {
   if (l_unlikely(l_castS2U(n) + 1u <= 1u)) {  /* special cases: -1 or 0 */
     if (n == 0)
@@ -896,9 +966,14 @@ lua_Integer luaV_mod (lua_State *L, lua_Integer m, lua_Integer n) {
 }
 
 
-/*
-** Float modulus
-*/
+/**
+ * @brief Float modulus.
+ *
+ * @param L The Lua state.
+ * @param m Dividend.
+ * @param n Divisor.
+ * @return The result of modulus.
+ */
 lua_Number luaV_modf (lua_State *L, lua_Number m, lua_Number n) {
   lua_Number r;
   luai_nummod(L, m, n, r);
@@ -910,9 +985,15 @@ lua_Number luaV_modf (lua_State *L, lua_Number m, lua_Number n) {
 #define NBITS	cast_int(sizeof(lua_Integer) * CHAR_BIT)
 
 
-/*
-** Shift left operation. (Shift right just negates 'y'.)
-*/
+/**
+ * @brief Shift left operation.
+ *
+ * Shift right just negates 'y'.
+ *
+ * @param x The value to shift.
+ * @param y The shift amount.
+ * @return The shifted value.
+ */
 lua_Integer luaV_shiftl (lua_Integer x, lua_Integer y) {
   if (y < 0) {  /* shift right? */
     if (y <= -NBITS) return 0;
@@ -1332,6 +1413,12 @@ static void inopr (lua_State *L, StkId ra, TValue *a, TValue *b) {
 
 /**
  * @brief Main virtual machine execution loop.
+ *
+ * This function interprets the bytecode instructions. It uses a dispatch
+ * loop (switch-case) or a jump table (if enabled) to execute each instruction.
+ *
+ * @param L The Lua state.
+ * @param ci The CallInfo for the function being executed.
  */
 void luaV_execute (lua_State *L, CallInfo *ci) {
   LClosure *cl;
@@ -1347,14 +1434,14 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
  returning:  /* trap already set */
   cl = ci_func(ci);
   
-  /* VM保护检测：如果函数启用了VM保护，使用自定义VM解释器执行 */
+  /* VM protection detection: If the function enables VM protection, use a custom VM interpreter */
   if (cl->p->difierline_mode & OBFUSCATE_VM_PROTECT) {
     int vm_result = luaO_executeVM(L, cl->p);
     if (vm_result == 0) {
-      /* VM执行成功，直接返回 */
+      /* VM execution successful, return directly */
       return;
     }
-    /* vm_result == 1 表示回退到原生VM继续执行 */
+    /* vm_result == 1 means fallback to native VM */
   }
   
   k = cl->p->k;
@@ -1784,9 +1871,9 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
       }
       vmcase(OP_SPACESHIP) {
         /*
-        ** 三路比较运算符 (spaceship operator): a <=> b
-        ** 返回: -1 如果 a < b, 0 如果 a == b, 1 如果 a > b
-        ** 支持数字和字符串的比较
+        ** Three-way comparison operator (spaceship operator): a <=> b
+        ** Returns: -1 if a < b, 0 if a == b, 1 if a > b
+        ** Supports number and string comparisons.
         */
         StkId ra = RA(i);
         TValue *rb = vRB(i);
@@ -1794,13 +1881,13 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
         lua_Integer result;
         
         if (ttisinteger(rb) && ttisinteger(rc)) {
-          /* 整数比较 */
+          /* integer comparison */
           lua_Integer ib = ivalue(rb);
           lua_Integer ic = ivalue(rc);
           result = (ib < ic) ? -1 : ((ib > ic) ? 1 : 0);
         }
         else if (ttisnumber(rb) && ttisnumber(rc)) {
-          /* 数字比较（至少有一个是浮点数） */
+          /* number comparison */
           lua_Number nb, nc;
           if (ttisinteger(rb)) {
             nb = cast_num(ivalue(rb));
@@ -1815,14 +1902,14 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
           result = (nb < nc) ? -1 : ((nb > nc) ? 1 : 0);
         }
         else if (ttisstring(rb) && ttisstring(rc)) {
-          /* 字符串比较 */
+          /* string comparison */
           int cmp = l_strcmp(tsvalue(rb), tsvalue(rc));
           result = (cmp < 0) ? -1 : ((cmp > 0) ? 1 : 0);
         }
         else {
-          /* 类型不同或不支持的类型 */
+          /* type mismatch or unsupported type */
           Protect(luaG_ordererror(L, rb, rc));
-          result = 0;  /* 不会到达这里 */
+          result = 0;  /* never reached */
         }
         
         setivalue(s2v(ra), result);
@@ -2258,9 +2345,9 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
       }
       vmcase(OP_IS) {
         /*
-        ** OP_IS: 类型判断指令
-        ** R[A] is K[B] - 检查R[A]的类型是否与K[B]字符串匹配
-        ** 支持__type元方法自定义类型名称
+        ** OP_IS: Check if R[A] is of type K[B]
+        ** R[A] is K[B] - checks if type of R[A] matches string K[B]
+        ** Supports __type metamethod for custom type names
         */
         TValue *ra = vRA(i);
         TValue *rb = KB(i);
@@ -2268,70 +2355,70 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
         const char *typename_actual;
         int cond;
         
-        /* 获取期望的类型名（必须是字符串） */
+        /* Expected type name must be a string */
         lua_assert(ttisstring(rb));
         typename_expected = getstr(tsvalue(rb));
         
-        /* 尝试获取__type元方法 */
+        /* Try to get __type metamethod */
         const TValue *tm = luaT_gettmbyobj(L, ra, TM_TYPE);
         if (!notm(tm) && ttisstring(tm)) {
-          /* 使用__type元方法返回的类型名 */
+          /* Use type name from __type metamethod */
           typename_actual = getstr(tsvalue(tm));
         }
         else {
-          /* 使用标准类型名 */
+          /* Use standard type name */
           typename_actual = luaT_objtypename(L, ra);
         }
         
-        /* 比较类型名 */
+        /* Compare type names */
         cond = (strcmp(typename_actual, typename_expected) == 0);
         docondjump();
         vmbreak;
       }
       vmcase(OP_TESTNIL) {
         /*
-        ** OP_TESTNIL: nil值测试指令（用于可选链运算符）
-        ** 格式: OP_TESTNIL A B k
-        ** 功能: 如果 (R[B] is nil) != k 则跳过下一条指令(pc++)
-        ** 参数说明:
-        **   A - 未使用（保留）
-        **   B - 源寄存器（被测试的值）
-        **   k - 条件标志（0表示nil时跳过，1表示非nil时跳过）
-        ** 使用场景:
-        **   k=1 用于可选链: a?.b 时，非nil跳过JMP继续执行GETFIELD
-        **   k=0 用于空值合并: a ?? b 时，nil跳过JMP继续执行b的计算
+        ** OP_TESTNIL: Nil test instruction (for optional chaining)
+        ** Format: OP_TESTNIL A B k
+        ** Function: if (R[B] is nil) != k then pc++
+        ** Arguments:
+        **   A - Unused (reserved)
+        **   B - Source register (value to test)
+        **   k - Condition flag (0: skip if nil, 1: skip if not nil)
+        ** Use cases:
+        **   k=1 for optional chaining: a?.b -> skip JMP if not nil
+        **   k=0 for null coalescing: a ?? b -> skip JMP if nil
         */
         TValue *rb = vRB(i);
         if (ttisnil(rb) != GETARG_k(i))
-          pc++;  /* 条件不满足，跳过下一条指令 */
+          pc++;  /* Condition not met, skip next instruction */
         vmbreak;
       }
       /*
       ** =====================================================================
-      ** 面向对象系统操作码实现
+      ** Object-Oriented System Opcodes
       ** =====================================================================
       */
       vmcase(OP_NEWCLASS) {
         /*
-        ** 创建新类
-        ** 格式: OP_NEWCLASS A Bx
-        ** 功能: R[A] := 创建新类，类名为K[Bx]
+        ** Create new class
+        ** Format: OP_NEWCLASS A Bx
+        ** Function: R[A] := create new class with name K[Bx]
         */
         TString *classname = tsvalue(&k[GETARG_Bx(i)]);
         
-        /* 手动保存状态 */
+        /* Manually save state */
         savepc(L);
         
-        /* 调用 luaC_newclass，它会在栈顶创建类表 */
+        /* Call luaC_newclass, creates class table at stack top */
         luaC_newclass(L, classname);
         
-        /* Protect 后需要重新获取 ra，因为 base 可能已改变 */
-        base = ci->func.p + 1;  /* Stack might have moved */
+        /* Re-fetch ra after potential stack reallocation */
+        base = ci->func.p + 1;
         StkId ra = RA(i);
         
-        /* 将创建的类表从栈顶移动到目标寄存器 */
+        /* Move created class from top to target register */
         setobj2s(L, ra, s2v(L->top.p - 1));
-        L->top.p--;  /* 弹出栈顶的类表 */
+        L->top.p--;  /* Pop class table */
         
         updatetrap(ci);
         checkGC(L, ra + 1);
@@ -2339,19 +2426,19 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
       }
       vmcase(OP_INHERIT) {
         /*
-        ** 设置类继承关系
-        ** 格式: OP_INHERIT A B
-        ** 功能: R[A].__parent := R[B]，子类继承父类
+        ** Set class inheritance
+        ** Format: OP_INHERIT A B
+        ** Function: R[A].__parent := R[B]
         */
         StkId ra = RA(i);
         TValue *rb = vRB(i);
-        /* 保护调用，将子类和父类压入栈顶 */
+        /* Protect call */
         savestate(L, ci);
         setobj2s(L, L->top.p, s2v(ra));
         L->top.p++;
         setobj2s(L, L->top.p, rb);
         L->top.p++;
-        /* 调用继承函数 */
+        /* Call inherit function */
         luaC_inherit(L, -2, -1);
         L->top.p -= 2;
         updatetrap(ci);
@@ -2359,20 +2446,20 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
       }
       vmcase(OP_GETSUPER) {
         /*
-        ** 获取父类方法
-        ** 格式: OP_GETSUPER A B C
-        ** 功能: R[A] := R[B].__parent[K[C]:shortstring]
+        ** Get super method
+        ** Format: OP_GETSUPER A B C
+        ** Function: R[A] := R[B].__parent[K[C]:shortstring]
         */
         StkId ra = RA(i);
         TValue *rb = vRB(i);
         TString *key = tsvalue(&k[GETARG_C(i)]);
-        /* 保护调用 */
+        /* Protect call */
         savestate(L, ci);
         setobj2s(L, L->top.p, rb);
         L->top.p++;
-        /* 调用super获取函数 */
+        /* Call super get function */
         luaC_super(L, -1, key);
-        base = ci->func.p + 1;  /* Stack might have moved */
+        base = ci->func.p + 1;
         ra = RA(i);
         setobj2s(L, ra, s2v(L->top.p - 1));
         L->top.p -= 2;
@@ -2381,20 +2468,20 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
       }
       vmcase(OP_SETMETHOD) {
         /*
-        ** 设置类方法
-        ** 格式: OP_SETMETHOD A B C
-        ** 功能: R[A][K[B]:shortstring] := R[C]，设置类方法
+        ** Set class method
+        ** Format: OP_SETMETHOD A B C
+        ** Function: R[A][K[B]:shortstring] := R[C]
         */
         StkId ra = RA(i);
         TString *key = tsvalue(&k[GETARG_B(i)]);
         TValue *rc = vRC(i);
-        /* 保护调用 */
+        /* Protect call */
         savestate(L, ci);
         setobj2s(L, L->top.p, s2v(ra));
         L->top.p++;
         setobj2s(L, L->top.p, rc);
         L->top.p++;
-        /* 调用设置方法函数 */
+        /* Call set method function */
         luaC_setmethod(L, -2, key, -1);
         L->top.p -= 2;
         updatetrap(ci);
@@ -2402,20 +2489,20 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
       }
       vmcase(OP_SETSTATIC) {
         /*
-        ** 设置静态成员
-        ** 格式: OP_SETSTATIC A B C
-        ** 功能: R[A].__static[K[B]:shortstring] := R[C]
+        ** Set static member
+        ** Format: OP_SETSTATIC A B C
+        ** Function: R[A].__static[K[B]:shortstring] := R[C]
         */
         StkId ra = RA(i);
         TString *key = tsvalue(&k[GETARG_B(i)]);
         TValue *rc = vRC(i);
-        /* 保护调用 */
+        /* Protect call */
         savestate(L, ci);
         setobj2s(L, L->top.p, s2v(ra));
         L->top.p++;
         setobj2s(L, L->top.p, rc);
         L->top.p++;
-        /* 调用设置静态成员函数 */
+        /* Call set static function */
         luaC_setstatic(L, -2, key, -1);
         L->top.p -= 2;
         updatetrap(ci);
@@ -2423,26 +2510,26 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
       }
       vmcase(OP_NEWOBJ) {
         /*
-        ** 创建类实例
-        ** 格式: OP_NEWOBJ A B C
-        ** 功能: R[A] := R[B]()，使用R[B]类创建新对象，C-1个参数
+        ** Create class instance
+        ** Format: OP_NEWOBJ A B C
+        ** Function: R[A] := R[B](args...), C-1 arguments
         */
         StkId ra = RA(i);
         TValue *rb = vRB(i);
         int nargs = GETARG_C(i) - 1;
-        /* 保护调用 */
+        /* Protect call */
         savestate(L, ci);
-        /* 将类压入栈 */
+        /* Push class */
         setobj2s(L, L->top.p, rb);
         L->top.p++;
-        /* 复制参数 */
+        /* Copy arguments */
         for (int j = 0; j < nargs; j++) {
           setobj2s(L, L->top.p, s2v(ra + 1 + j));
           L->top.p++;
         }
-        /* 调用创建对象函数 */
+        /* Call new object function */
         luaC_newobject(L, -(nargs + 1), nargs);
-        base = ci->func.p + 1;  /* Stack might have moved */
+        base = ci->func.p + 1;
         ra = RA(i);
         setobj2s(L, ra, s2v(L->top.p - 1));
         L->top.p -= (nargs + 2);
@@ -2452,20 +2539,20 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
       }
       vmcase(OP_GETPROP) {
         /*
-        ** 获取属性（考虑继承链）
-        ** 格式: OP_GETPROP A B C
-        ** 功能: R[A] := R[B][K[C]:shortstring]，从对象获取属性
+        ** Get property (considering inheritance chain)
+        ** Format: OP_GETPROP A B C
+        ** Function: R[A] := R[B][K[C]:shortstring]
         */
         StkId ra = RA(i);
         TValue *rb = vRB(i);
         TString *key = tsvalue(&k[GETARG_C(i)]);
-        /* 保护调用 */
+        /* Protect call */
         savestate(L, ci);
         setobj2s(L, L->top.p, rb);
         L->top.p++;
-        /* 调用获取属性函数 */
+        /* Call get property function */
         luaC_getprop(L, -1, key);
-        base = ci->func.p + 1;  /* Stack might have moved */
+        base = ci->func.p + 1;
         ra = RA(i);
         setobj2s(L, ra, s2v(L->top.p - 1));
         L->top.p -= 2;
@@ -2474,20 +2561,20 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
       }
       vmcase(OP_SETPROP) {
         /*
-        ** 设置对象属性
-        ** 格式: OP_SETPROP A B C
-        ** 功能: R[A][K[B]:shortstring] := RK(C)
+        ** Set object property
+        ** Format: OP_SETPROP A B C
+        ** Function: R[A][K[B]:shortstring] := RK(C)
         */
         StkId ra = RA(i);
         TString *key = tsvalue(&k[GETARG_B(i)]);
         TValue *rc = RKC(i);
-        /* 保护调用 */
+        /* Protect call */
         savestate(L, ci);
         setobj2s(L, L->top.p, s2v(ra));
         L->top.p++;
         setobj2s(L, L->top.p, rc);
         L->top.p++;
-        /* 调用设置属性函数 */
+        /* Call set property function */
         luaC_setprop(L, -2, key, -1);
         L->top.p -= 2;
         updatetrap(ci);
@@ -2495,49 +2582,49 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
       }
       vmcase(OP_INSTANCEOF) {
         /*
-        ** 检查实例类型
-        ** 格式: OP_INSTANCEOF A B C k
-        ** 功能: if ((R[A] instanceof R[B]) ~= k) then pc++
+        ** Check instance type
+        ** Format: OP_INSTANCEOF A B C k
+        ** Function: if ((R[A] instanceof R[B]) ~= k) then pc++
         */
 
-        /* 确保堆栈有足够空间 */
+        /* Ensure stack has enough space */
         luaD_checkstack(L, 2);
 
-        /* 重新获取寄存器指针（因为 checkstack 可能导致堆栈重分配） */
+        /* Re-fetch registers */
         base = ci->func.p + 1;
         StkId ra = RA(i);
         TValue *rb = vRB(i);
         int result;
 
-        /* 保护调用 */
+        /* Protect call */
         savestate(L, ci);
         setobj2s(L, L->top.p, s2v(ra));
         L->top.p++;
         setobj2s(L, L->top.p, rb);
         L->top.p++;
-        /* 检查instanceof */
+        /* Check instanceof */
         result = luaC_instanceof(L, -2, -1);
         L->top.p -= 2;
         updatetrap(ci);
         if (result != GETARG_k(i))
-          pc++;  /* 条件不满足，跳过下一条指令 */
+          pc++;  /* Condition not met, skip */
         vmbreak;
       }
       vmcase(OP_IMPLEMENT) {
         /*
-        ** 类实现接口
-        ** 格式: OP_IMPLEMENT A B
-        ** 功能: R[A] implements R[B]，将接口添加到类的接口列表
+        ** Implement interface
+        ** Format: OP_IMPLEMENT A B
+        ** Function: R[A] implements R[B]
         */
         StkId ra = RA(i);
         TValue *rb = vRB(i);
-        /* 保护调用 */
+        /* Protect call */
         savestate(L, ci);
         setobj2s(L, L->top.p, s2v(ra));
         L->top.p++;
         setobj2s(L, L->top.p, rb);
         L->top.p++;
-        /* 调用实现接口函数 */
+        /* Call implement function */
         luaC_implement(L, -2, -1);
         L->top.p -= 2;
         updatetrap(ci);
@@ -2545,17 +2632,17 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
       }
       vmcase(OP_SETIFACEFLAG) {
         /*
-        ** 设置接口标志
-        ** 格式: OP_SETIFACEFLAG A
-        ** 功能: 将R[A]标记为接口（设置CLASS_FLAG_INTERFACE）
+        ** Set interface flag
+        ** Format: OP_SETIFACEFLAG A
+        ** Function: Mark R[A] as an interface
         */
         StkId ra = RA(i);
         if (ttistable(s2v(ra))) {
           Table *t = hvalue(s2v(ra));
-          /* 设置 __flags 字段 */
+          /* Set __flags field */
           TValue key, val;
           setsvalue(L, &key, luaS_newliteral(L, "__flags"));
-          /* 获取当前flags */
+          /* Get current flags */
           const TValue *oldflags = luaH_getstr(t, tsvalue(&key));
           lua_Integer flags = ttisinteger(oldflags) ? ivalue(oldflags) : 0;
           flags |= CLASS_FLAG_INTERFACE;
@@ -2566,26 +2653,25 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
       }
       vmcase(OP_ADDMETHOD) {
         /*
-        ** 添加接口方法签名
-        ** 格式: OP_ADDMETHOD A B C
-        ** 功能: R[A].__methods[K[B]] := C，记录方法签名及参数个数
-        ** 说明：C 为方法的参数个数，用于验证实现类的方法签名
+        ** Add method signature to interface
+        ** Format: OP_ADDMETHOD A B C
+        ** Function: R[A].__methods[K[B]] := C (param count)
         */
         StkId ra = RA(i);
         TString *method_name = tsvalue(&k[GETARG_B(i)]);
-        int param_count = GETARG_C(i);  /* 获取参数个数 */
+        int param_count = GETARG_C(i);
         if (ttistable(s2v(ra))) {
           Table *t = hvalue(s2v(ra));
-          /* 获取 __methods 表 */
+          /* Get __methods table */
           TValue key;
           setsvalue(L, &key, luaS_newliteral(L, "__methods"));
           const TValue *methods_tv = luaH_getstr(t, tsvalue(&key));
           if (ttistable(methods_tv)) {
             Table *methods = hvalue(methods_tv);
-            /* 设置方法签名为参数个数（用于参数验证） */
+            /* Set method signature */
             TValue method_key, method_val;
             setsvalue(L, &method_key, method_name);
-            setivalue(&method_val, param_count);  /* 存储参数个数 */
+            setivalue(&method_val, param_count);
             luaH_set(L, methods, &method_key, &method_val);
           }
         }
@@ -2600,25 +2686,24 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
       }
       vmcase(OP_SLICE) {
         /*
-        ** 切片操作 - 支持 Python 风格的切片语法 t[start:end:step]
-        ** 格式: OP_SLICE A B C
-        ** 功能: R[A] := slice(R[B], R[B+1], R[B+2], R[B+3])
-        **   B = 源表寄存器
-        **   B+1 = start (起始索引，nil表示1)
-        **   B+2 = end (结束索引，nil表示#t)  
-        **   B+3 = step (步长，nil表示1)
-        **   C = 标志位（保留）
-        ** 
-        ** 支持负索引：-1 表示最后一个元素，-2 表示倒数第二个，以此类推
-        ** 结果包含两端边界元素（Lua 风格，非 Python 左闭右开）
+        ** Slice operation - Python-style slice t[start:end:step]
+        ** Format: OP_SLICE A B C
+        ** Function: R[A] := slice(R[B], R[B+1], R[B+2], R[B+3])
+        **   B = Source table
+        **   B+1 = start (nil -> 1)
+        **   B+2 = end (nil -> #t)
+        **   B+3 = step (nil -> 1)
+        **   C = Flags (reserved)
+        **
+        ** Supports negative indices. Result includes end element.
         */
         StkId ra = RA(i);
         int b = GETARG_B(i);
         StkId base_reg = base + b;
-        TValue *src_table = s2v(base_reg);      /* 源表 */
-        TValue *start_val = s2v(base_reg + 1);  /* start */
-        TValue *end_val = s2v(base_reg + 2);    /* end */
-        TValue *step_val = s2v(base_reg + 3);   /* step */
+        TValue *src_table = s2v(base_reg);
+        TValue *start_val = s2v(base_reg + 1);
+        TValue *end_val = s2v(base_reg + 2);
+        TValue *step_val = s2v(base_reg + 3);
         
         Table *t;
         Table *result_t;
@@ -2626,17 +2711,16 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
         lua_Integer start_idx, end_idx, step;
         lua_Integer result_idx;
         
-        /* 检查源表是否为 table */
+        /* Check if source is a table */
         if (l_unlikely(!ttistable(src_table))) {
-          /* 非表类型，尝试调用 __slice 元方法或报错 */
           luaG_typeerror(L, src_table, "slice");
         }
         t = hvalue(src_table);
-        tlen = luaH_getn(t);  /* 获取数组长度 */
+        tlen = luaH_getn(t);
         
-        /* 解析 start 参数 */
+        /* Parse start */
         if (ttisnil(start_val)) {
-          start_idx = 1;  /* 默认从 1 开始 */
+          start_idx = 1;
         }
         else if (ttisinteger(start_val)) {
           start_idx = ivalue(start_val);
@@ -2648,16 +2732,16 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
             start_idx = ni;
           }
           else {
-            luaG_runerror(L, "切片起始索引必须是整数");
+            luaG_runerror(L, "slice start index must be integer");
           }
         }
         else {
-          luaG_runerror(L, "切片起始索引必须是整数或nil");
+          luaG_runerror(L, "slice start index must be integer or nil");
         }
         
-        /* 解析 end 参数 */
+        /* Parse end */
         if (ttisnil(end_val)) {
-          end_idx = tlen;  /* 默认到末尾 */
+          end_idx = tlen;
         }
         else if (ttisinteger(end_val)) {
           end_idx = ivalue(end_val);
@@ -2669,16 +2753,16 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
             end_idx = ni;
           }
           else {
-            luaG_runerror(L, "切片结束索引必须是整数");
+            luaG_runerror(L, "slice end index must be integer");
           }
         }
         else {
-          luaG_runerror(L, "切片结束索引必须是整数或nil");
+          luaG_runerror(L, "slice end index must be integer or nil");
         }
         
-        /* 解析 step 参数 */
+        /* Parse step */
         if (ttisnil(step_val)) {
-          step = 1;  /* 默认步长为 1 */
+          step = 1;
         }
         else if (ttisinteger(step_val)) {
           step = ivalue(step_val);
@@ -2690,42 +2774,41 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
             step = ni;
           }
           else {
-            luaG_runerror(L, "切片步长必须是整数");
+            luaG_runerror(L, "slice step must be integer");
           }
         }
         else {
-          luaG_runerror(L, "切片步长必须是整数或nil");
+          luaG_runerror(L, "slice step must be integer or nil");
         }
         
-        /* 步长不能为 0 */
         if (step == 0) {
-          luaG_runerror(L, "切片步长不能为0");
+          luaG_runerror(L, "slice step cannot be 0");
         }
         
-        /* 处理负索引 */
+        /* Handle negative indices */
         if (start_idx < 0) {
-          start_idx = tlen + start_idx + 1;  /* -1 -> tlen, -2 -> tlen-1, etc. */
+          start_idx = tlen + start_idx + 1;
         }
         if (end_idx < 0) {
           end_idx = tlen + end_idx + 1;
         }
         
-        /* 边界检查和调整 */
+        /* Clamp indices */
         if (step > 0) {
           if (start_idx < 1) start_idx = 1;
           if (end_idx > tlen) end_idx = tlen;
         }
-        else {  /* step < 0 */
+        else {
           if (start_idx > tlen) start_idx = tlen;
           if (end_idx < 1) end_idx = 1;
         }
         
-        /* 创建结果表 */
-        L->top.p = ra + 1;  /* 用于 GC 保护 */
+        /* Create result table */
+        L->top.p = ra + 1;
         result_t = luaH_new(L);
         sethvalue2s(L, ra, result_t);
         
-        /* 执行切片复制 */
+        /* Copy elements */
         result_idx = 1;
         if (step > 0) {
           lua_Integer idx;
@@ -2757,16 +2840,9 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
       }
       vmcase(OP_NOP) {
         /*
-        ** 空操作指令 - 不执行任何操作
-        ** 用于控制流混淆的占位指令
-        ** A/B/C参数被忽略，仅用于干扰反编译分析
-        ** 
-        ** 使用场景：
-        ** 1. 控制流扁平化中的填充指令
-        ** 2. 基本块之间的随机插入
-        ** 3. 增加代码体积，提高分析难度
+        ** No Operation
+        ** Used for padding or obfuscation.
         */
-        /* 获取虚假参数（仅为了触发反编译器解析，实际不使用） */
         UNUSED(GETARG_A(i));
         UNUSED(GETARG_B(i));
         UNUSED(GETARG_C(i));

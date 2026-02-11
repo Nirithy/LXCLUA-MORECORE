@@ -1,8 +1,9 @@
-/*
-** $Id: lstate.c $
-** Global State
-** See Copyright Notice in lua.h
-*/
+/**
+ * @file lstate.c
+ * @brief Global State implementation.
+ *
+ * This file contains functions to manage the Lua state (threads) and global state.
+ */
 
 #define lstate_c
 #define LUA_CORE
@@ -76,10 +77,15 @@ typedef struct LG {
 #endif
 
 
-/*
-** set GCdebt to a new value keeping the value (GCtotalbytes + GCdebt)
-** invariant (and avoiding underflows in 'GCtotalbytes')
-*/
+/**
+ * @brief Sets GCdebt to a new value keeping the value (GCtotalbytes + GCdebt) invariant.
+ *
+ * This function updates the GC debt while ensuring that the total perceived memory usage remains consistent.
+ * It also avoids underflows in 'GCtotalbytes'.
+ *
+ * @param g The global state.
+ * @param debt The new debt value.
+ */
 void luaE_setdebt (global_State *g, l_mem debt) {
   l_mem tb = gettotalbytes(g);
   lua_assert(tb > 0);
@@ -90,12 +96,25 @@ void luaE_setdebt (global_State *g, l_mem debt) {
 }
 
 
+/**
+ * @brief Sets the C stack limit.
+ *
+ * @param L The Lua state.
+ * @param limit The new limit (unused in this implementation).
+ * @return The maximum number of C calls (LUAI_MAXCCALLS).
+ */
 LUA_API int lua_setcstacklimit (lua_State *L, unsigned int limit) {
   UNUSED(L); UNUSED(limit);
   return LUAI_MAXCCALLS;  /* warning?? */
 }
 
 
+/**
+ * @brief Extends the CallInfo list for a thread.
+ *
+ * @param L The Lua state.
+ * @return A pointer to the new CallInfo structure.
+ */
 CallInfo *luaE_extendCI (lua_State *L) {
   CallInfo *ci;
   lua_assert(L->ci->next == NULL);
@@ -110,9 +129,11 @@ CallInfo *luaE_extendCI (lua_State *L) {
 }
 
 
-/*
-** free all CallInfo structures not in use by a thread
-*/
+/**
+ * @brief Frees all CallInfo structures not in use by a thread.
+ *
+ * @param L The Lua state.
+ */
 static void freeCI (lua_State *L) {
   CallInfo *ci = L->ci;
   CallInfo *next = ci->next;
@@ -125,10 +146,11 @@ static void freeCI (lua_State *L) {
 }
 
 
-/*
-** free half of the CallInfo structures not in use by a thread,
-** keeping the first one.
-*/
+/**
+ * @brief Frees half of the CallInfo structures not in use by a thread, keeping the first one.
+ *
+ * @param L The Lua state.
+ */
 void luaE_shrinkCI (lua_State *L) {
   CallInfo *ci = L->ci->next;  /* first free CallInfo */
   CallInfo *next;
@@ -149,13 +171,17 @@ void luaE_shrinkCI (lua_State *L) {
 }
 
 
-/*
-** Called when 'getCcalls(L)' larger or equal to LUAI_MAXCCALLS.
-** If equal, raises an overflow error. If value is larger than
-** LUAI_MAXCCALLS (which means it is handling an overflow) but
-** not much larger, does not report an error (to allow overflow
-** handling to work).
-*/
+/**
+ * @brief Checks if the C stack has overflowed or is approaching overflow.
+ *
+ * Called when 'getCcalls(L)' is larger or equal to LUAI_MAXCCALLS.
+ * If equal, raises an overflow error. If value is larger than
+ * LUAI_MAXCCALLS (which means it is handling an overflow) but
+ * not much larger, does not report an error (to allow overflow
+ * handling to work).
+ *
+ * @param L The Lua state.
+ */
 void luaE_checkcstack (lua_State *L) {
   if (getCcalls(L) == LUAI_MAXCCALLS)
     luaG_runerror(L, "C stack overflow");
@@ -164,6 +190,11 @@ void luaE_checkcstack (lua_State *L) {
 }
 
 
+/**
+ * @brief Increments the C call depth and checks for stack overflow.
+ *
+ * @param L The Lua state.
+ */
 LUAI_FUNC void luaE_incCstack (lua_State *L) {
   L->nCcalls++;
   if (l_unlikely(getCcalls(L) >= LUAI_MAXCCALLS))
@@ -171,6 +202,12 @@ LUAI_FUNC void luaE_incCstack (lua_State *L) {
 }
 
 
+/**
+ * @brief Initializes the stack for a new thread.
+ *
+ * @param L1 The new thread.
+ * @param L The existing thread (used for memory allocation).
+ */
 static void stack_init (lua_State *L1, lua_State *L) {
   int i; CallInfo *ci;
   /* initialize stack array */
@@ -194,6 +231,11 @@ static void stack_init (lua_State *L1, lua_State *L) {
 }
 
 
+/**
+ * @brief Frees the stack of a thread.
+ *
+ * @param L The Lua state.
+ */
 static void freestack (lua_State *L) {
   if (L->stack.p == NULL)
     return;  /* stack not completely built yet */
@@ -204,9 +246,12 @@ static void freestack (lua_State *L) {
 }
 
 
-/*
-** Create registry table and its predefined values
-*/
+/**
+ * @brief Creates the registry table and its predefined values.
+ *
+ * @param L The Lua state.
+ * @param g The global state.
+ */
 static void init_registry (lua_State *L, global_State *g) {
   /* create registry */
   Table *registry = luaH_new(L);
@@ -219,9 +264,12 @@ static void init_registry (lua_State *L, global_State *g) {
 }
 
 
-/*
-** open parts of the state that may cause memory-allocation errors.
-*/
+/**
+ * @brief Opens parts of the state that may cause memory-allocation errors.
+ *
+ * @param L The Lua state.
+ * @param ud User data (unused).
+ */
 static void f_luaopen (lua_State *L, void *ud) {
   global_State *g = G(L);
   UNUSED(ud);
@@ -236,10 +284,12 @@ static void f_luaopen (lua_State *L, void *ud) {
 }
 
 
-/*
-** preinitialize a thread with consistent values without allocating
-** any memory (to avoid errors)
-*/
+/**
+ * @brief Pre-initializes a thread with consistent values without allocating any memory.
+ *
+ * @param L The thread to initialize.
+ * @param g The global state.
+ */
 static void preinit_thread (lua_State *L, global_State *g) {
   G(L) = g;
   L->stack.p = NULL;
@@ -260,6 +310,11 @@ static void preinit_thread (lua_State *L, global_State *g) {
 }
 
 
+/**
+ * @brief Closes a Lua state, cleaning up all resources.
+ *
+ * @param L The Lua state to close.
+ */
 static void close_state (lua_State *L) {
   global_State *g = G(L);
   if (!completestate(g))  /* closing a partially built state? */
@@ -273,7 +328,7 @@ static void close_state (lua_State *L) {
     luai_userstateclose(L);
   }
   luaM_freearray(L, G(L)->strt.hash, G(L)->strt.size);
-  luaM_poolshutdown(L);  /* 关闭内存池 */
+  luaM_poolshutdown(L);  /* shutdown memory pool */
   l_mutex_destroy(&g->lock);
   freestack(L);
   lua_assert(gettotalbytes(g) == sizeof(LG));
@@ -281,6 +336,12 @@ static void close_state (lua_State *L) {
 }
 
 
+/**
+ * @brief Creates a new thread (coroutine).
+ *
+ * @param L The Lua state.
+ * @return Pointer to the new thread (lua_State).
+ */
 LUA_API lua_State *lua_newthread (lua_State *L) {
   global_State *g = G(L);
   GCObject *o;
@@ -308,6 +369,12 @@ LUA_API lua_State *lua_newthread (lua_State *L) {
 }
 
 
+/**
+ * @brief Frees a thread.
+ *
+ * @param L The Lua state.
+ * @param L1 The thread to free.
+ */
 void luaE_freethread (lua_State *L, lua_State *L1) {
   LX *l = fromstate(L1);
   luaF_closeupval(L1, L1->stack.p);  /* close all upvalues */
@@ -318,6 +385,13 @@ void luaE_freethread (lua_State *L, lua_State *L1) {
 }
 
 
+/**
+ * @brief Resets a thread to its initial state.
+ *
+ * @param L The thread to reset.
+ * @param status The status code.
+ * @return The status code.
+ */
 int luaE_resetthread (lua_State *L, int status) {
   CallInfo *ci = L->ci = &L->base_ci;  /* unwind CallInfo list */
   setnilvalue(s2v(L->stack.p));  /* 'function' entry for basic 'ci' */
@@ -338,6 +412,13 @@ int luaE_resetthread (lua_State *L, int status) {
 }
 
 
+/**
+ * @brief Closes a thread or resets it if it's the main thread.
+ *
+ * @param L The thread to close.
+ * @param from The thread calling this function.
+ * @return The status code.
+ */
 LUA_API int lua_closethread (lua_State *L, lua_State *from) {
   int status;
   lua_lock(L);
@@ -348,14 +429,25 @@ LUA_API int lua_closethread (lua_State *L, lua_State *from) {
 }
 
 
-/*
-** Deprecated! Use 'lua_closethread' instead.
-*/
+/**
+ * @brief Deprecated! Use 'lua_closethread' instead.
+ *
+ * @param L The thread to reset.
+ * @return The status code.
+ */
 LUA_API int lua_resetthread (lua_State *L) {
   return lua_closethread(L, NULL);
 }
 
 
+/**
+ * @brief Creates a new, independent Lua state.
+ *
+ * @param f Memory allocator function.
+ * @param ud User data for the allocator.
+ * @param seed Random seed.
+ * @return Pointer to the new Lua state, or NULL on memory allocation failure.
+ */
 LUA_API lua_State *lua_newstate (lua_Alloc f, void *ud, unsigned seed) {
   int i;
   lua_State *L;
@@ -403,8 +495,8 @@ LUA_API lua_State *lua_newstate (lua_Alloc f, void *ud, unsigned seed) {
   setgcparam(g->genmajormul, LUAI_GENMAJORMUL);
   g->genminormul = LUAI_GENMINORMUL;
   for (i=0; i < LUA_NUMTAGS; i++) g->mt[i] = NULL;
-  g->vm_code_list = NULL;  /* 初始化VM代码表链表 */
-  luaM_poolinit(L);  /* 初始化内存池 */
+  g->vm_code_list = NULL;  /* initialize VM code list */
+  luaM_poolinit(L);  /* initialize memory pool */
   l_mutex_init(&g->lock);
   if (luaD_rawrunprotected(L, f_luaopen, NULL) != LUA_OK) {
     /* memory allocation error: free partial state */
@@ -415,6 +507,11 @@ LUA_API lua_State *lua_newstate (lua_Alloc f, void *ud, unsigned seed) {
 }
 
 
+/**
+ * @brief Destroys all objects in the given Lua state and frees all dynamic memory used by it.
+ *
+ * @param L The Lua state to close.
+ */
 LUA_API void lua_close (lua_State *L) {
   lua_lock(L);
   L = G(L)->mainthread;  /* only the main thread can be closed */
@@ -422,6 +519,13 @@ LUA_API void lua_close (lua_State *L) {
 }
 
 
+/**
+ * @brief Emits a warning message.
+ *
+ * @param L The Lua state.
+ * @param msg The warning message.
+ * @param tocont True if the message is continued in the next call.
+ */
 void luaE_warning (lua_State *L, const char *msg, int tocont) {
   lua_WarnFunction wf = G(L)->warnf;
   if (wf != NULL)
@@ -429,9 +533,12 @@ void luaE_warning (lua_State *L, const char *msg, int tocont) {
 }
 
 
-/*
-** Generate a warning from an error message
-*/
+/**
+ * @brief Generates a warning from an error message on the stack.
+ *
+ * @param L The Lua state.
+ * @param where The context where the error occurred.
+ */
 void luaE_warnerror (lua_State *L, const char *where) {
   TValue *errobj = s2v(L->top.p - 1);  /* error object */
   const char *msg = (ttisstring(errobj))
@@ -444,4 +551,3 @@ void luaE_warnerror (lua_State *L, const char *where) {
   luaE_warning(L, msg, 1);
   luaE_warning(L, ")", 0);
 }
-

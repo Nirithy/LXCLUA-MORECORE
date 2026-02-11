@@ -1,8 +1,10 @@
-/*
-** $Id: lstring.c $
-** String table (keeps all strings handled by Lua)
-** See Copyright Notice in lua.h
-*/
+/**
+ * @file lstring.c
+ * @brief String table (keeps all strings handled by Lua) implementation.
+ *
+ * This file handles the management of Lua strings, including interning of short strings,
+ * hashing, and the string cache.
+ */
 
 #define lstring_c
 #define LUA_CORE
@@ -38,9 +40,13 @@
 #endif
 
 
-/*
-** generic equality for strings
-*/
+/**
+ * @brief Checks if two long strings are equal.
+ *
+ * @param a First string.
+ * @param b Second string.
+ * @return 1 if equal, 0 otherwise.
+ */
 int luaS_eqlngstr (TString *a, TString *b) {
   size_t len = a->u.lnglen;
   lua_assert(a->tt == LUA_VLNGSTR && b->tt == LUA_VLNGSTR);
@@ -58,6 +64,12 @@ static unsigned luaS_hash (const char *str, size_t l, unsigned seed) {
 }
 
 
+/**
+ * @brief Computes the hash of a long string.
+ *
+ * @param ts The long string.
+ * @return The hash value.
+ */
 unsigned luaS_hashlongstr (TString *ts) {
   lua_assert(ts->tt == LUA_VLNGSTR);
   if (ts->extra == 0) {  /* no hash? */
@@ -87,11 +99,12 @@ static void tablerehash (TString **vect, int osize, int nsize) {
 }
 
 
-/*
-** Resize the string table. If allocation fails, keep the current size.
-** (This can degrade performance, but any non-zero size should work
-** correctly.)
-*/
+/**
+ * @brief Resizes the string table.
+ *
+ * @param L The Lua state.
+ * @param nsize The new size.
+ */
 void luaS_resize (lua_State *L, int nsize) {
   global_State *g = G(L);
   l_mutex_lock(&g->lock);
@@ -132,10 +145,11 @@ void luaS_resize (lua_State *L, int nsize) {
 }
 
 
-/*
-** Clear API string cache. (Entries cannot be empty, so fill them with
-** a non-collectable string.)
-*/
+/**
+ * @brief Clears the string cache.
+ *
+ * @param g The global state.
+ */
 void luaS_clearcache (global_State *g) {
   int i, j;
   for (i = 0; i < STRCACHE_N; i++)
@@ -146,9 +160,11 @@ void luaS_clearcache (global_State *g) {
 }
 
 
-/*
-** Initialize the string table and the string cache
-*/
+/**
+ * @brief Initializes the string table and the string cache.
+ *
+ * @param L The Lua state.
+ */
 void luaS_init (lua_State *L) {
   global_State *g = G(L);
   int i, j;
@@ -197,6 +213,13 @@ static TString *createstrobj (lua_State *L, size_t l, int tag, unsigned int h) {
 }
 
 
+/**
+ * @brief Creates a long string object.
+ *
+ * @param L The Lua state.
+ * @param l The length of the string.
+ * @return The new string.
+ */
 TString *luaS_createlngstrobj (lua_State *L, size_t l) {
   size_t totalsize = luaS_sizelngstr(l, LSTRREG);
   TString *ts = createstrobj(L, l, LUA_VLNGSTR, G(L)->seed);
@@ -206,6 +229,12 @@ TString *luaS_createlngstrobj (lua_State *L, size_t l) {
 }
 
 
+/**
+ * @brief Removes a string from the string table.
+ *
+ * @param L The Lua state.
+ * @param ts The string to remove.
+ */
 void luaS_remove (lua_State *L, TString *ts) {
   stringtable *tb = &G(L)->strt;
   TString **p = &tb->hash[lmod(ts->hash, tb->size)];
@@ -269,9 +298,14 @@ static TString *internshrstr (lua_State *L, const char *str, size_t l) {
 }
 
 
-/*
-** new string (with explicit length)
-*/
+/**
+ * @brief Creates a new string (or reuses an existing one).
+ *
+ * @param L The Lua state.
+ * @param str The string content.
+ * @param l The length of the string.
+ * @return The Lua string object.
+ */
 TString *luaS_newlstr (lua_State *L, const char *str, size_t l) {
   if (l <= LUAI_MAXSHORTLEN)  /* short string? */
     return internshrstr(L, str, l);
@@ -286,12 +320,13 @@ TString *luaS_newlstr (lua_State *L, const char *str, size_t l) {
 }
 
 
-/*
-** Create or reuse a zero-terminated string, first checking in the
-** cache (using the string address as a key). The cache can contain
-** only zero-terminated strings, so it is safe to use 'strcmp' to
-** check hits.
-*/
+/**
+ * @brief Creates a new zero-terminated string (or reuses an existing one).
+ *
+ * @param L The Lua state.
+ * @param str The string content.
+ * @return The Lua string object.
+ */
 TString *luaS_new (lua_State *L, const char *str) {
   unsigned int i = point2uint(str) % STRCACHE_N;  /* hash */
   int j;
@@ -309,6 +344,14 @@ TString *luaS_new (lua_State *L, const char *str) {
 }
 
 
+/**
+ * @brief Creates a new userdata.
+ *
+ * @param L The Lua state.
+ * @param s The size of the userdata.
+ * @param nuvalue Number of user values.
+ * @return The new userdata object.
+ */
 Udata *luaS_newudata (lua_State *L, size_t s, unsigned short nuvalue) {
   Udata *u;
   int i;
@@ -341,6 +384,16 @@ static void f_newext (lua_State *L, void *ud) {
 }
 
 
+/**
+ * @brief Creates a new external string.
+ *
+ * @param L The Lua state.
+ * @param s The string content.
+ * @param len The length of the string.
+ * @param falloc The deallocation function.
+ * @param ud User data for the deallocation function.
+ * @return The new string object.
+ */
 TString *luaS_newextlstr (lua_State *L,
 	          const char *s, size_t len, lua_Alloc falloc, void *ud) {
   struct NewExt ne;
@@ -364,9 +417,13 @@ TString *luaS_newextlstr (lua_State *L,
 }
 
 
-/*
-** Normalize an external string: If it is short, internalize it.
-*/
+/**
+ * @brief Normalizes an external string: if it is short, internalize it.
+ *
+ * @param L The Lua state.
+ * @param ts The string to normalize.
+ * @return The normalized string.
+ */
 TString *luaS_normstr (lua_State *L, TString *ts) {
   size_t len = ts->u.lnglen;
   if (len > LUAI_MAXSHORTLEN)
@@ -376,4 +433,3 @@ TString *luaS_normstr (lua_State *L, TString *ts) {
     return internshrstr(L, str, len);
   }
 }
-
