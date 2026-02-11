@@ -115,7 +115,7 @@ static void pushfuncname (lua_State *L, lua_Debug *ar) {
   else if (*ar->namewhat != '\0')  /* is there a name from code? */
     lua_pushfstring(L, "%s '%s'", ar->namewhat, ar->name);  /* use it */
   else if (*ar->what == 'm')  /* main? */
-      lua_pushliteral(L, "主代码块");
+      lua_pushliteral(L, "main chunk");
   else if (*ar->what != 'C')  /* for Lua functions, use <file:line> */
     lua_pushfstring(L, "function <%s:%d>", ar->short_src, ar->linedefined);
   else  /* nothing left... */
@@ -186,7 +186,7 @@ LUALIB_API int luaL_argerror (lua_State *L, int arg, const char *extramsg) {
   lua_Debug ar;
   const char *argword;
   if (!lua_getstack(L, 0, &ar))  /* no stack frame? */
-    return luaL_error(L, "错误的参数 #%d (%s)", arg, extramsg);
+    return luaL_error(L, "bad argument #%d (%s)", arg, extramsg);
   lua_getinfo(L, "nt", &ar);
   if (arg <= ar.extraargs)  /* error in an extra argument? */
     argword =  "extra argument";
@@ -195,7 +195,7 @@ LUALIB_API int luaL_argerror (lua_State *L, int arg, const char *extramsg) {
     if (strcmp(ar.namewhat, "method") == 0) {  /* colon syntax? */
       arg--;  /* do not count (extra) self argument */
       if (arg == 0)  /* error in self argument? */
-        return luaL_error(L, "调用 '%s' 时错误的 self (%s)",
+        return luaL_error(L, "calling '%s' with bad self (%s)",
                                ar.name, extramsg);
       /* else go through; error in a regular argument */
     }
@@ -203,7 +203,7 @@ LUALIB_API int luaL_argerror (lua_State *L, int arg, const char *extramsg) {
   }
   if (ar.name == NULL)
     ar.name = (pushglobalfuncname(L, &ar)) ? lua_tostring(L, -1) : "?";
-  return luaL_error(L, "错误的 %s #%d 传递给 '%s' (%s)",
+  return luaL_error(L, "bad %s #%d to '%s' (%s)",
                        argword, arg, ar.name, extramsg);
 }
 
@@ -269,7 +269,7 @@ LUALIB_API int luaL_fileresult (lua_State *L, int stat, const char *fname) {
   else {
     const char *msg;
     luaL_pushfail(L);
-    msg = (en != 0) ? strerror(en) : "(无额外信息)";
+    msg = (en != 0) ? strerror(en) : "(no extra info)";
     if (fname)
       lua_pushfstring(L, "%s: %s", fname, msg);
     else
@@ -386,7 +386,7 @@ LUALIB_API int luaL_checkoption (lua_State *L, int arg, const char *def,
     if (strcmp(lst[i], name) == 0)
       return i;
   return luaL_argerror(L, arg,
-                       lua_pushfstring(L, "invalid optionid option '%s'", name));
+                       lua_pushfstring(L, "invalid option '%s'", name));
 }
 
 
@@ -400,7 +400,7 @@ LUALIB_API int luaL_checkoption (lua_State *L, int arg, const char *def,
 LUALIB_API void luaL_checkstack (lua_State *L, int space, const char *msg) {
   if (l_unlikely(!lua_checkstack(L, space))) {
     if (msg)
-      luaL_error(L, "栈溢出 (%s)", msg);
+      luaL_error(L, "stack overflow (%s)", msg);
     else
       luaL_error(L, "stack overflow");
   }
@@ -415,7 +415,7 @@ LUALIB_API void luaL_checktype (lua_State *L, int arg, int t) {
 
 LUALIB_API void luaL_checkany (lua_State *L, int arg) {
   if (l_unlikely(lua_type(L, arg) == LUA_TNONE))
-    luaL_argerror(L, arg, "需要值");
+    luaL_argerror(L, arg, "value expected");
 }
 
 
@@ -453,7 +453,7 @@ LUALIB_API lua_Number luaL_optnumber (lua_State *L, int arg, lua_Number def) {
 
 static void interror (lua_State *L, int arg) {
   if (lua_isnumber(L, arg))
-    luaL_argerror(L, arg, "数字没有整数表示");
+    luaL_argerror(L, arg, "number has no integer representation");
   else
     tag_error(L, arg, LUA_TNUMBER);
 }
@@ -625,21 +625,21 @@ LUALIB_API void luaL_addstring (luaL_Buffer *B, const char *s) {
 
 LUALIB_API void luaL_pushresult (luaL_Buffer *B) {
   lua_State *L = B->L;
-  int top = lua_gettop(L);  /* 保存当前栈顶位置 */
+  int top = lua_gettop(L);  /* save current stack top */
   checkbufferlevel(B, -1);
-  lua_pushlstring(L, B->b, B->n);  /* 将缓冲区内容转换为字符串并推送栈顶 */
+  lua_pushlstring(L, B->b, B->n);  /* push the contents of the buffer as a string */
   
-  /* 清理旧的占位符或用户数据框 */
+  /* clean up the old placeholder or userdata box */
   if (buffonstack(B))
-    lua_closeslot(L, top);  /* 关闭用户数据框 */
-  lua_remove(L, top);  /* 移除占位符或用户数据框 */
+    lua_closeslot(L, top);  /* close the userdata box */
+  lua_remove(L, top);  /* remove the placeholder or userdata box */
   
-  /* 重新初始化缓冲区，保持可用状态 */
-  B->b = B->init.b;  /* 重置为初始缓冲区 */
-  B->n = 0;  /* 重置已使用大小 */
-  B->size = LUAL_BUFFERSIZE;  /* 重置大小 */
-  lua_pushlightuserdata(L, (void*)B);  /* 推送新的占位符 */
-  lua_insert(L, top);  /* 将占位符插入到原来的位置 */
+  /* reinitialize the buffer to a valid state */
+  B->b = B->init.b;  /* reset to initial buffer */
+  B->n = 0;  /* reset used size */
+  B->size = LUAL_BUFFERSIZE;  /* reset size */
+  lua_pushlightuserdata(L, (void*)B);  /* push new placeholder */
+  lua_insert(L, top);  /* insert placeholder at the original position */
 }
 
 
@@ -778,7 +778,7 @@ static int errfile (lua_State *L, const char *what, int fnameindex) {
   if (err != 0)
     lua_pushfstring(L, "cannot %s %s: %s", what, filename, strerror(err));
   else
-    lua_pushfstring(L, "无法%s %s", what, filename);
+    lua_pushfstring(L, "cannot %s %s", what, filename);
   lua_remove(L, fnameindex);
   return LUA_ERRFILE;
 }
@@ -823,7 +823,7 @@ static int skipcomment (FILE *f, int *cp) {
 
 
 
-/* 定义字符串加载结构体，用于lua_load函数 */
+/* Defining string loading structure, for lua_load function */
 typedef struct LoadS {
   const char *s;
   size_t size;
@@ -880,38 +880,38 @@ LUALIB_API int luaL_loadfilex (lua_State *L, const char *filename,
     if (first_char == EOF) break;
   }
   
-  /* 如果第一个非空白字符是{，则认为是JSON格式 */
+  /* If the first non-whitespace character is '{', consider it JSON format */
   if (first_char == '{') {
-    /* 重置文件指针到开头，以便重新读取整个文件 */
+    /* Reset file pointer to beginning to re-read the entire file */
     if (filename) {
       fseek(lf.f, 0, SEEK_SET);
     } else {
-      /* 标准输入无法重置，重新打开文件 */
+      /* Standard input cannot be reset, reopen file */
       lf.f = freopen(NULL, "r", stdin);
     }
     
-    /* 重新读取初始部分 */
+    /* Re-read initial portion */
     lf.n = 0;
     if (skipcomment(lf.f, &c))  /* read initial portion */
       lf.buff[lf.n++] = '\n';  /* add newline to correct line numbers */
     
-    /* 读取整个文件内容 */
+    /* Read the entire file content */
     fseek(lf.f, 0, SEEK_END);
     long file_size = ftell(lf.f);
     fseek(lf.f, 0, SEEK_SET);
     
-    /* 分配足够大的缓冲区 */
+    /* Allocate a buffer large enough */
     char *json_content = (char *)malloc(file_size + 1);
     if (!json_content) {
       if (filename) fclose(lf.f);
       return errfile(L, "allocate", fnameindex);
     }
     
-    /* 读取文件内容 */
+    /* Read file content */
     size_t content_len = fread(json_content, 1, file_size, lf.f);
     json_content[content_len] = '\0';
     
-    /* 分配足够大的输出缓冲区 */
+    /* Allocate a large enough output buffer */
     char *lua_buffer = (char *)malloc(file_size * 2 + 1024);
     if (!lua_buffer) {
       free(json_content);
@@ -919,51 +919,51 @@ LUALIB_API int luaL_loadfilex (lua_State *L, const char *filename,
       return errfile(L, "allocate", fnameindex);
     }
     
-    /* 转换JSON为Lua表 */
+    /* Convert JSON to Lua table */
     if (json_to_lua(L, json_content, content_len, lua_buffer, file_size * 2 + 1024)) {
-      /* 使用luaL_loadbuffer加载转换后的Lua代码 */
+      /* Use luaL_loadbuffer to load the converted Lua code */
       status = luaL_loadbuffer(L, lua_buffer, strlen(lua_buffer), lua_tostring(L, -1));
       readstatus = 0;
       
-      /* 关闭文件 */
+      /* Close file */
       if (filename) fclose(lf.f);
       
-      /* 释放缓冲区 */
+      /* Free buffers */
       free(json_content);
       free(lua_buffer);
       
-      /* 移除文件名并返回状态 */
+      /* Remove filename and return status */
       lua_remove(L, fnameindex);
       return status;
     }
     
-    /* 释放缓冲区 */
+    /* Free buffers */
     free(json_content);
     free(lua_buffer);
   }
   
-  /* 不是JSON格式或JSON转换失败，重置文件指针 */
+  /* Not JSON format or JSON conversion failed, reset file pointer */
   if (filename) {
     fseek(lf.f, 0, SEEK_SET);
   }
   lf.n = 0;
-  if (skipcomment(lf.f, &c))  /* 重新读取初始部分 */
-    lf.buff[lf.n++] = '\n';  /* 添加换行符以纠正行号 */
+  if (skipcomment(lf.f, &c))  /* Re-read initial portion */
+    lf.buff[lf.n++] = '\n';  /* Add newline to correct line numbers */
   if (c != EOF)
-    lf.buff[lf.n++] = c;  /* 'c'是第一个字符 */
+    lf.buff[lf.n++] = c;  /* 'c' is the first character */
   
-  /* 检查是否为PNG文件 */
+  /* Check if it is a PNG file */
   if (c == 0x89) {
     unsigned char png_sig[7] = {0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
     unsigned char check_sig[7] = {0};
     if (fread(check_sig, 1, 7, lf.f) == 7 && memcmp(check_sig, png_sig, 7) == 0) {
-      /* 是PNG文件，重新读取整个文件 */
+      /* It is a PNG file, re-read the entire file */
       if (filename) {
         fseek(lf.f, 0, SEEK_END);
         long png_size_long = ftell(lf.f);
         fseek(lf.f, 0, SEEK_SET);
         
-        if (png_size_long > 0 && png_size_long < 100 * 1024 * 1024) {  /* 限制100MB */
+        if (png_size_long > 0 && png_size_long < 100 * 1024 * 1024) {  /* Limit 100MB */
           size_t png_size = (size_t)png_size_long;
           unsigned char *png_data = (unsigned char *)malloc(png_size);
           if (!png_data) {
@@ -979,7 +979,7 @@ LUALIB_API int luaL_loadfilex (lua_State *L, const char *filename,
             return errfile(L, "read", fnameindex);
           }
           
-          /* 解码PNG */
+          /* Decode PNG */
           int img_width, img_height, img_comp;
           unsigned char *image_data = stbi_load_from_memory(png_data, (int)png_size, &img_width, &img_height, &img_comp, STBI_rgb);
           free(png_data);
@@ -988,9 +988,9 @@ LUALIB_API int luaL_loadfilex (lua_State *L, const char *filename,
             return errfile(L, "decode png", fnameindex);
           }
           
-          /* 检查大小是否安全 */
+          /* Check if size is safe */
           long expected_size_long = (long)img_width * img_height;
-          if (expected_size_long < 0 || expected_size_long > 50 * 1024 * 1024) {  /* 限制50MB */
+          if (expected_size_long < 0 || expected_size_long > 50 * 1024 * 1024) {  /* Limit 50MB */
             stbi_image_free(image_data);
             return errfile(L, "file too large", fnameindex);
           }
@@ -1006,18 +1006,18 @@ LUALIB_API int luaL_loadfilex (lua_State *L, const char *filename,
             int x = i % img_width;
             int y = i / img_width;
             int img_idx = (y * img_width + x) * 3;
-            // 按照用户要求的三通道存储模式
+            // 3-channel storage pattern as requested
             int channel_index;
             int pos = i % 9;
-            if (pos == 0) channel_index = 0;    // 第1字节 → 通道1
-            else if (pos == 1) channel_index = 1;   // 第2字节 → 通道2
-            else if (pos == 2) channel_index = 2;   // 第3字节 → 通道3
-            else if (pos == 3) channel_index = 2;   // 第4字节 → 通道3
-            else if (pos == 4) channel_index = 1;   // 第5字节 → 通道2
-            else if (pos == 5) channel_index = 0;   // 第6字节 → 通道1
-            else if (pos == 6) channel_index = 2;   // 第7字节 → 通道3
-            else if (pos == 7) channel_index = 1;   // 第8字节 → 通道2
-            else channel_index = 0;   // 第9字节 → 通道1
+            if (pos == 0) channel_index = 0;    // Byte 1 -> Channel 1
+            else if (pos == 1) channel_index = 1;   // Byte 2 -> Channel 2
+            else if (pos == 2) channel_index = 2;   // Byte 3 -> Channel 3
+            else if (pos == 3) channel_index = 2;   // Byte 4 -> Channel 3
+            else if (pos == 4) channel_index = 1;   // Byte 5 -> Channel 2
+            else if (pos == 5) channel_index = 0;   // Byte 6 -> Channel 1
+            else if (pos == 6) channel_index = 2;   // Byte 7 -> Channel 3
+            else if (pos == 7) channel_index = 1;   // Byte 8 -> Channel 2
+            else channel_index = 0;   // Byte 9 -> Channel 1
             restored_data[i] = image_data[img_idx + channel_index] ^ 0x55;
           }
           
@@ -1032,7 +1032,7 @@ LUALIB_API int luaL_loadfilex (lua_State *L, const char *filename,
     }
   }
   
-  /* 正常加载文件 */
+  /* Load file normally */
   status = lua_load(L, getF, &lf, lua_tostring(L, -1), mode);
   readstatus = ferror(lf.f);
   
@@ -1118,7 +1118,7 @@ LUALIB_API void luaL_pushmodule(lua_State *L, const char *modname, int sizehint)
         lua_pushglobaltable(L);                            /* push _G */
         int gidx = lua_gettop(L);                          /* save _G's index */
         if (luaL_findtable(L, gidx, modname, sizehint) != NULL)
-            luaL_error(L, "模块 '%s' 命名冲突", modname);
+            luaL_error(L, "module '%s' naming conflict", modname);
         lua_newtable(L);                                   /* create module table */
         lua_pushvalue(L, -1);
         lua_setfield(L, -4, modname);                      /* _LOADED[modname] = module */
@@ -1176,7 +1176,7 @@ LUALIB_API lua_Integer luaL_len (lua_State *L, int idx) {
   lua_len(L, idx);
   l = lua_tointegerx(L, -1, &isnum);
   if (l_unlikely(!isnum))
-    luaL_error(L, "对象长度不是整数");
+    luaL_error(L, "object length is not an integer");
   lua_pop(L, 1);  /* remove object */
   return l;
 }
@@ -1186,7 +1186,7 @@ LUALIB_API const char *luaL_tolstring (lua_State *L, int idx, size_t *len) {
   idx = lua_absindex(L,idx);
   if (luaL_callmeta(L, idx, "__tostring")) {  /* metafield? */
     if (!lua_isstring(L, -1))
-      luaL_error(L, "'__tostring' 必须返回字符串");
+      luaL_error(L, "'__tostring' must return a string");
   }
   else {
     switch (lua_type(L, idx)) {
@@ -1327,8 +1327,8 @@ void *luaL_alloc (void *ud, void *ptr, size_t osize, size_t nsize) {
 static int panic (lua_State *L) {
   const char *msg = (lua_type(L, -1) == LUA_TSTRING)
                   ? lua_tostring(L, -1)
-                  : "错误对象不是字符串";
-  lua_writestringerror("PANIC: Lua API 调用中未捕获错误 (%s)\n",
+                  : "error object is not a string";
+  lua_writestringerror("PANIC: unprotected error in call to Lua API (%s)\n",
                         msg);
   return 0;  /* return to Lua to abort */
 }
@@ -1386,7 +1386,7 @@ static void warnfcont (void *ud, const char *message, int tocont) {
 static void warnfon (void *ud, const char *message, int tocont) {
   if (checkcontrol((lua_State *)ud, message, tocont))  /* control message? */
     return;  /* nothing else to be done */
-  lua_writestringerror("%s", "Lua 警告: ");  /* start a new warning */
+  lua_writestringerror("%s", "Lua warning: ");  /* start a new warning */
   warnfcont(ud, message, tocont);  /* finish processing */
 }
 
@@ -1459,7 +1459,6 @@ LUALIB_API void luaL_checkversion_ (lua_State *L, lua_Number ver, size_t sz) {
   if (sz != LUAL_NUMSIZES)  /* check numeric types */
     luaL_error(L, "core and library have incompatible numeric types");
   else if (v != ver)
-    luaL_error(L, "版本不匹配: 程序需要 %f, Lua核心提供 %f",
+    luaL_error(L, "version mismatch: app. needs %f, Lua core provides %f",
                   (LUAI_UACNUMBER)ver, (LUAI_UACNUMBER)v);
 }
-

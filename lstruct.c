@@ -43,14 +43,24 @@
 #define F_DEFAULT "default"
 #define F_DEF "def" /* For nested structs */
 
-/* Array support */
+/**
+ * @brief Array structure for contiguous memory storage.
+ */
 typedef struct {
-    size_t len;
-    size_t size; /* size of each element */
-    Table *def;
-    lu_byte data[];
+    size_t len;     /**< Number of elements in the array. */
+    size_t size;    /**< Size of each element in bytes. */
+    Table *def;     /**< Struct definition table. */
+    lu_byte data[]; /**< Raw data buffer. */
 } Array;
 
+/**
+ * @brief Retrieves an integer field from a table.
+ *
+ * @param L The Lua state.
+ * @param table_idx Index of the table.
+ * @param key The key string.
+ * @return The integer value of the field.
+ */
 static int get_int_field(lua_State *L, int table_idx, const char *key) {
     int res;
     lua_pushstring(L, key);
@@ -60,6 +70,14 @@ static int get_int_field(lua_State *L, int table_idx, const char *key) {
     return res;
 }
 
+/**
+ * @brief Retrieves the GC offsets array from a struct definition.
+ *
+ * @param L The Lua state.
+ * @param def The struct definition table.
+ * @param[out] offsets Pointer to the array of offsets.
+ * @param[out] count Number of offsets.
+ */
 static void get_gc_offsets(lua_State *L, Table *def, int **offsets, int *count) {
     *offsets = NULL;
     *count = 0;
@@ -73,6 +91,17 @@ static void get_gc_offsets(lua_State *L, Table *def, int **offsets, int *count) 
     }
 }
 
+/**
+ * @brief Retrieves information about a struct field.
+ *
+ * @param L The Lua state.
+ * @param fields The fields table.
+ * @param key The field name.
+ * @param[out] offset Field offset.
+ * @param[out] type Field type.
+ * @param[out] size Field size.
+ * @param[out] nested_def Nested struct definition (if applicable).
+ */
 static void get_field_info(lua_State *L, Table *fields, TString *key, int *offset, int *type, int *size, Table **nested_def) {
     const TValue *v = luaH_getstr(fields, key);
     if (ttistable(v)) {
@@ -104,6 +133,13 @@ static void get_field_info(lua_State *L, Table *fields, TString *key, int *offse
     }
 }
 
+/**
+ * @brief Copies a struct object.
+ *
+ * @param L The Lua state.
+ * @param dest Destination value.
+ * @param src Source value.
+ */
 void luaS_copystruct (lua_State *L, TValue *dest, const TValue *src) {
     Struct *s_src = structvalue(src);
     size_t size = s_src->data_size;
@@ -120,6 +156,14 @@ void luaS_copystruct (lua_State *L, TValue *dest, const TValue *src) {
     checkliveness(L, v);
 }
 
+/**
+ * @brief Handles struct field access (indexing).
+ *
+ * @param L The Lua state.
+ * @param t The struct value.
+ * @param key The field key.
+ * @param val The stack slot to store the result.
+ */
 void luaS_structindex (lua_State *L, const TValue *t, TValue *key, StkId val) {
     if (!ttisstring(key)) {
         setnilvalue(s2v(val));
@@ -196,6 +240,14 @@ void luaS_structindex (lua_State *L, const TValue *t, TValue *key, StkId val) {
     }
 }
 
+/**
+ * @brief Handles struct field assignment (newindex).
+ *
+ * @param L The Lua state.
+ * @param t The struct value.
+ * @param key The field key.
+ * @param val The value to assign.
+ */
 void luaS_structnewindex (lua_State *L, const TValue *t, TValue *key, TValue *val) {
     if (!ttisstring(key)) {
         luaG_runerror(L, "struct key must be string");
@@ -270,6 +322,13 @@ void luaS_structnewindex (lua_State *L, const TValue *t, TValue *key, TValue *va
     }
 }
 
+/**
+ * @brief Checks if two struct objects are equal.
+ *
+ * @param t1 First struct.
+ * @param t2 Second struct.
+ * @return 1 if equal, 0 otherwise.
+ */
 int luaS_structeq (const TValue *t1, const TValue *t2) {
     Struct *s1 = structvalue(t1);
     Struct *s2 = structvalue(t2);
@@ -279,6 +338,12 @@ int luaS_structeq (const TValue *t1, const TValue *t2) {
 }
 
 /* __call metamethod for StructDef */
+/**
+ * @brief Creates a new instance of a struct (metamethod).
+ *
+ * @param L The Lua state.
+ * @return 1 (the new struct).
+ */
 static int struct_call (lua_State *L) {
     /* Stack: Def, args... */
     if (!lua_istable(L, 1)) {
@@ -392,6 +457,12 @@ static int struct_call (lua_State *L) {
     return 1;
 }
 
+/**
+ * @brief Defines a new struct type.
+ *
+ * @param L The Lua state.
+ * @return 1 (the struct definition table).
+ */
 static int struct_define (lua_State *L) {
     const char *name = luaL_checkstring(L, 1);
     luaL_checktype(L, 2, LUA_TTABLE);
@@ -551,12 +622,24 @@ static int struct_define (lua_State *L) {
 
 /* Array Implementation */
 
+/**
+ * @brief Returns the length of the array.
+ *
+ * @param L The Lua state.
+ * @return 1 (length).
+ */
 static int array_len(lua_State *L) {
     Array *arr = (Array *)lua_touserdata(L, 1);
     lua_pushinteger(L, arr->len);
     return 1;
 }
 
+/**
+ * @brief Indexes into the array (reads a value).
+ *
+ * @param L The Lua state.
+ * @return 1 (the value) or error.
+ */
 static int array_index(lua_State *L) {
     Array *arr = (Array *)lua_touserdata(L, 1);
     int idx = (int)luaL_checkinteger(L, 2);
@@ -587,6 +670,12 @@ static int array_index(lua_State *L) {
     return 1;
 }
 
+/**
+ * @brief Writes a value to the array.
+ *
+ * @param L The Lua state.
+ * @return 0 or error.
+ */
 static int array_newindex(lua_State *L) {
     Array *arr = (Array *)lua_touserdata(L, 1);
     int idx = (int)luaL_checkinteger(L, 2);
@@ -607,6 +696,14 @@ static int array_newindex(lua_State *L) {
     return 0;
 }
 
+/**
+ * @brief Creates a new struct array.
+ *
+ * @param L The Lua state.
+ * @param def_idx Index of the struct definition.
+ * @param count Number of elements.
+ * @return 1 (the array).
+ */
 static int create_struct_array(lua_State *L, int def_idx, int count) {
     if (count < 0) return luaL_error(L, "size must be non-negative");
 
@@ -873,6 +970,13 @@ static int array_factory_index(lua_State *L) {
     }
 }
 
+/**
+ * @brief Factory function for creating arrays.
+ * Usage: array(type)[size]
+ *
+ * @param L The Lua state.
+ * @return 1 (the array factory table).
+ */
 static int array_call(lua_State *L) {
     /* array(type) */
     lua_newtable(L);
@@ -887,6 +991,13 @@ static int array_call(lua_State *L) {
     return 1;
 }
 
+/**
+ * @brief Creates a global array instance directly.
+ * Usage: array[size] -> creates array of nil (using table).
+ *
+ * @param L The Lua state.
+ * @return 1 (the new table).
+ */
 static int array_global_index(lua_State *L) {
     /* array[size] */
     int size = (int)luaL_checkinteger(L, 2);
@@ -899,6 +1010,12 @@ static const luaL_Reg struct_funcs[] = {
   {NULL, NULL}
 };
 
+/**
+ * @brief Registers the struct library.
+ *
+ * @param L The Lua state.
+ * @return 1 (the library table).
+ */
 int luaopen_struct (lua_State *L) {
   luaL_newlib(L, struct_funcs);
 
