@@ -2590,29 +2590,21 @@ static int str_file2png (lua_State *L) {
   memset(image_data, 0, image_data_size);
   
   // 处理所有字节，确保完整转换
-  for (long i = 0; i < file_size; i++) {
-    int x = i % img_width;
-    int y = i / img_width;
-    int img_idx = (y * img_width + x) * 3;
-    unsigned char byte = file_data[i];
-    
-    // 按照用户要求的三通道存储模式
-    int channel_index;
-    int pos = i % 9;
-    if (pos == 0) channel_index = 0;    // 第1字节 → 通道1
-    else if (pos == 1) channel_index = 1;   // 第2字节 → 通道2
-    else if (pos == 2) channel_index = 2;   // 第3字节 → 通道3
-    else if (pos == 3) channel_index = 2;   // 第4字节 → 通道3
-    else if (pos == 4) channel_index = 1;   // 第5字节 → 通道2
-    else if (pos == 5) channel_index = 0;   // 第6字节 → 通道1
-    else if (pos == 6) channel_index = 2;   // 第7字节 → 通道3
-    else if (pos == 7) channel_index = 1;   // 第8字节 → 通道2
-    else channel_index = 0;   // 第9字节 → 通道1
-    image_data[img_idx + channel_index] = byte ^ 0x55;
-    // 其他通道填充0，确保图像数据正确
-    if (channel_index != 0) image_data[img_idx] = 0;
-    if (channel_index != 1) image_data[img_idx + 1] = 0;
-    if (channel_index != 2) image_data[img_idx + 2] = 0;
+  {
+    unsigned char *dst = image_data;
+    long i = 0;
+    int pos = 0;
+    static const int channel_map[] = {0, 1, 2, 2, 1, 0, 2, 1, 0};
+    for (int y = 0; y < img_height; y++) {
+      for (int x = 0; x < img_width; x++) {
+        if (i >= file_size) goto end_file_loop;
+        dst[channel_map[pos]] = file_data[i] ^ 0x55;
+        dst += 3;
+        i++;
+        if (++pos == 9) pos = 0;
+      }
+    }
+    end_file_loop:;
   }
   
   free(file_data);
@@ -2704,28 +2696,27 @@ static int str_png2file (lua_State *L) {
     return luaL_error(L, "无法创建输出文件: %s", output_path);
   }
   
-  for (long i = 0; i < actual_size; i++) {
-    int x = i % img_width;
-    int y = i / img_width;
-    int img_idx = (y * img_width + x) * 3;
-    // 按照用户要求的三通道存储模式
-    int channel_index;
-    int pos = i % 9;
-    if (pos == 0) channel_index = 0;    // 第1字节 → 通道1
-    else if (pos == 1) channel_index = 1;   // 第2字节 → 通道2
-    else if (pos == 2) channel_index = 2;   // 第3字节 → 通道3
-    else if (pos == 3) channel_index = 2;   // 第4字节 → 通道3
-    else if (pos == 4) channel_index = 1;   // 第5字节 → 通道2
-    else if (pos == 5) channel_index = 0;   // 第6字节 → 通道1
-    else if (pos == 6) channel_index = 2;   // 第7字节 → 通道3
-    else if (pos == 7) channel_index = 1;   // 第8字节 → 通道2
-    else channel_index = 0;   // 第9字节 → 通道1
-    unsigned char byte = image_data[img_idx + channel_index] ^ 0x55;
-    if (fwrite(&byte, 1, 1, fp) != 1) {
-      fclose(fp);
-      stbi_image_free(image_data);
-      return luaL_error(L, "写入文件失败");
+  {
+    long i = 0;
+    int pos = 0;
+    static const int channel_map[] = {0, 1, 2, 2, 1, 0, 2, 1, 0};
+    unsigned char *src = image_data;
+    for (int y = 0; y < img_height; y++) {
+      for (int x = 0; x < img_width; x++) {
+        unsigned char byte;
+        if (i >= actual_size) goto end_png2file_loop;
+        byte = src[channel_map[pos]] ^ 0x55;
+        if (fwrite(&byte, 1, 1, fp) != 1) {
+          fclose(fp);
+          stbi_image_free(image_data);
+          return luaL_error(L, "写入文件失败");
+        }
+        src += 3;
+        i++;
+        if (++pos == 9) pos = 0;
+      }
     }
+    end_png2file_loop:;
   }
   
   fclose(fp);
@@ -2812,28 +2803,21 @@ static int str_data2png (lua_State *L) {
   
   memset(image_data, 0, img_width * img_height * 3);
   
-  for (size_t i = 0; i < data_size; i++) {
-    int x = i % img_width;
-    int y = i / img_width;
-    int img_idx = (y * img_width + x) * 3;
-    unsigned char byte = ((const unsigned char *)data)[i];
-    // 按照用户要求的三通道存储模式
-    int channel_index;
-    int pos = i % 9;
-    if (pos == 0) channel_index = 0;    // 第1字节 → 通道1
-    else if (pos == 1) channel_index = 1;   // 第2字节 → 通道2
-    else if (pos == 2) channel_index = 2;   // 第3字节 → 通道3
-    else if (pos == 3) channel_index = 2;   // 第4字节 → 通道3
-    else if (pos == 4) channel_index = 1;   // 第5字节 → 通道2
-    else if (pos == 5) channel_index = 0;   // 第6字节 → 通道1
-    else if (pos == 6) channel_index = 2;   // 第7字节 → 通道3
-    else if (pos == 7) channel_index = 1;   // 第8字节 → 通道2
-    else channel_index = 0;   // 第9字节 → 通道1
-    image_data[img_idx + channel_index] = byte ^ 0x55;
-    // 其他通道填充0，确保图像数据正确
-    if (channel_index != 0) image_data[img_idx] = 0;
-    if (channel_index != 1) image_data[img_idx + 1] = 0;
-    if (channel_index != 2) image_data[img_idx + 2] = 0;
+  {
+    unsigned char *dst = image_data;
+    size_t i = 0;
+    int pos = 0;
+    static const int channel_map[] = {0, 1, 2, 2, 1, 0, 2, 1, 0};
+    for (int y = 0; y < img_height; y++) {
+      for (int x = 0; x < img_width; x++) {
+        if (i >= data_size) goto end_data_loop;
+        dst[channel_map[pos]] = ((const unsigned char *)data)[i] ^ 0x55;
+        dst += 3;
+        i++;
+        if (++pos == 9) pos = 0;
+      }
+    }
+    end_data_loop:;
   }
   
   PngWriteContext ctx = {0};
@@ -2891,23 +2875,21 @@ static int str_png2data (lua_State *L) {
     return luaL_error(L, "内存分配失败");
   }
   
-  for (long i = 0; i < actual_size; i++) {
-    int x = i % img_width;
-    int y = i / img_width;
-    int img_idx = (y * img_width + x) * 3;
-    // 按照用户要求的三通道存储模式
-    int channel_index;
-    int pos = i % 9;
-    if (pos == 0) channel_index = 0;    // 第1字节 → 通道1
-    else if (pos == 1) channel_index = 1;   // 第2字节 → 通道2
-    else if (pos == 2) channel_index = 2;   // 第3字节 → 通道3
-    else if (pos == 3) channel_index = 2;   // 第4字节 → 通道3
-    else if (pos == 4) channel_index = 1;   // 第5字节 → 通道2
-    else if (pos == 5) channel_index = 0;   // 第6字节 → 通道1
-    else if (pos == 6) channel_index = 2;   // 第7字节 → 通道3
-    else if (pos == 7) channel_index = 1;   // 第8字节 → 通道2
-    else channel_index = 0;   // 第9字节 → 通道1
-    result_data[i] = image_data[img_idx + channel_index] ^ 0x55;
+  {
+    long i = 0;
+    int pos = 0;
+    static const int channel_map[] = {0, 1, 2, 2, 1, 0, 2, 1, 0};
+    unsigned char *src = image_data;
+    for (int y = 0; y < img_height; y++) {
+      for (int x = 0; x < img_width; x++) {
+        if (i >= actual_size) goto end_png2data_loop;
+        result_data[i] = src[channel_map[pos]] ^ 0x55;
+        src += 3;
+        i++;
+        if (++pos == 9) pos = 0;
+      }
+    }
+    end_png2data_loop:;
   }
   
   stbi_image_free(image_data);
@@ -2942,23 +2924,21 @@ static int str_data (lua_State *L) {
     return luaL_error(L, "内存分配失败");
   }
   
-  for (long i = 0; i < expected_size; i++) {
-    int x = i % img_width;
-    int y = i / img_width;
-    int img_idx = (y * img_width + x) * 3;
-    // 按照用户要求的三通道存储模式
-    int channel_index;
-    int pos = i % 9;
-    if (pos == 0) channel_index = 0;    // 第1字节 → 通道1
-    else if (pos == 1) channel_index = 1;   // 第2字节 → 通道2
-    else if (pos == 2) channel_index = 2;   // 第3字节 → 通道3
-    else if (pos == 3) channel_index = 2;   // 第4字节 → 通道3
-    else if (pos == 4) channel_index = 1;   // 第5字节 → 通道2
-    else if (pos == 5) channel_index = 0;   // 第6字节 → 通道1
-    else if (pos == 6) channel_index = 2;   // 第7字节 → 通道3
-    else if (pos == 7) channel_index = 1;   // 第8字节 → 通道2
-    else channel_index = 0;   // 第9字节 → 通道1
-    result_data[i] = image_data[img_idx + channel_index] ^ 0x55;
+  {
+    long i = 0;
+    int pos = 0;
+    static const int channel_map[] = {0, 1, 2, 2, 1, 0, 2, 1, 0};
+    unsigned char *src = image_data;
+    for (int y = 0; y < img_height; y++) {
+      for (int x = 0; x < img_width; x++) {
+        if (i >= expected_size) goto end_data_loop;
+        result_data[i] = src[channel_map[pos]] ^ 0x55;
+        src += 3;
+        i++;
+        if (++pos == 9) pos = 0;
+      }
+    }
+    end_data_loop:;
   }
   
   stbi_image_free(image_data);
