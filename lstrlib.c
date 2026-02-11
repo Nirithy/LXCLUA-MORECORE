@@ -20,6 +20,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <time.h>
+#include <stdint.h>
 
 #include "lua.h"
 
@@ -2953,6 +2955,73 @@ static int str_data (lua_State *L) {
   return lua_pcall(L, 0, LUA_MULTRET, 0);
 }
 
+/* Nirithy== Shell Generator */
+static const char* nirithy_b64 = "9876543210zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA-_";
+
+static char* nirithy_encode(const unsigned char* input, size_t len) {
+  size_t out_len = 4 * ((len + 2) / 3);
+  char* out = (char*)malloc(out_len + 1);
+  size_t i = 0, j = 0;
+  if (!out) return NULL;
+  while (i < len) {
+    uint32_t octet_a = i < len ? input[i++] : 0;
+    uint32_t octet_b = i < len ? input[i++] : 0;
+    uint32_t octet_c = i < len ? input[i++] : 0;
+    uint32_t triple = (octet_a << 16) + (octet_b << 8) + octet_c;
+    out[j++] = nirithy_b64[(triple >> 18) & 0x3F];
+    out[j++] = nirithy_b64[(triple >> 12) & 0x3F];
+    out[j++] = nirithy_b64[(triple >> 6) & 0x3F];
+    out[j++] = nirithy_b64[triple & 0x3F];
+  }
+  if (len % 3 == 1) {
+    out[out_len - 1] = '=';
+    out[out_len - 2] = '=';
+  } else if (len % 3 == 2) {
+    out[out_len - 1] = '=';
+  }
+  out[out_len] = '\0';
+  return out;
+}
+
+static void nirithy_encrypt(unsigned char* data, size_t len, uint64_t timestamp) {
+  uint64_t key = timestamp ^ 0xDEADBEEFCAFEBABEULL;
+  size_t i;
+  for (i = 0; i < len; i++) {
+    uint8_t k = (uint8_t)((key >> ((i % 8) * 8)) & 0xFF);
+    k ^= (uint8_t)((i * 13) & 0xFF);
+    data[i] ^= k;
+  }
+}
+
+static int str_envelop(lua_State *L) {
+  size_t l;
+  const char *s = luaL_checklstring(L, 1, &l);
+  uint64_t timestamp = (uint64_t)time(NULL);
+
+  size_t payload_len = 8 + l;
+  unsigned char *payload = (unsigned char *)malloc(payload_len);
+  if (!payload) return luaL_error(L, "memory allocation failed");
+
+  memcpy(payload, &timestamp, 8);
+  memcpy(payload + 8, s, l);
+
+  nirithy_encrypt(payload + 8, l, timestamp);
+
+  char *encoded = nirithy_encode(payload, payload_len);
+  free(payload);
+
+  if (!encoded) return luaL_error(L, "encoding failed");
+
+  luaL_Buffer b;
+  luaL_buffinit(L, &b);
+  luaL_addstring(&b, "Nirithy==");
+  luaL_addstring(&b, encoded);
+  free(encoded);
+
+  luaL_pushresult(&b);
+  return 1;
+}
+
 static const luaL_Reg strlib[] = {
   {"aes_decrypt", str_aes_decrypt},
   {"aes_encrypt", str_aes_encrypt},
@@ -2964,6 +3033,7 @@ static const luaL_Reg strlib[] = {
   {"data2png", str_data2png},
   {"dump", str_dump},
   {"endswith", str_endswith},
+  {"envelop", str_envelop},
   {"escape", str_escape},
   {"file", str_file},
   {"file2png", str_file2png},

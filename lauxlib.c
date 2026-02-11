@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
+#include <stdint.h>
 
 /*
 ** This file uses only the official API of Lua.
@@ -754,6 +755,57 @@ typedef struct LoadF {
 } LoadF;
 
 
+/* Nirithy== Shell Implementation */
+static const char* nirithy_b64 = "9876543210zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA-_";
+
+static int nirithy_b64_val(char c) {
+  const char *p = strchr(nirithy_b64, c);
+  if (p) return (int)(p - nirithy_b64);
+  return -1;
+}
+
+static unsigned char* nirithy_decode(const char* input, size_t input_len, size_t* out_len) {
+  size_t len;
+  unsigned char* out;
+  size_t i, j;
+
+  if (input_len % 4 != 0) return NULL;
+  len = input_len / 4 * 3;
+  if (input_len > 0 && input[input_len - 1] == '=') len--;
+  if (input_len > 1 && input[input_len - 2] == '=') len--;
+  out = (unsigned char*)malloc(len);
+  if (!out) return NULL;
+
+  for (i = 0, j = 0; i < input_len; i += 4) {
+    int a = input[i] == '=' ? 0 : nirithy_b64_val(input[i]);
+    int b = input[i+1] == '=' ? 0 : nirithy_b64_val(input[i+1]);
+    int c = input[i+2] == '=' ? 0 : nirithy_b64_val(input[i+2]);
+    int d = input[i+3] == '=' ? 0 : nirithy_b64_val(input[i+3]);
+    uint32_t triple;
+
+    if (a < 0 || b < 0 || c < 0 || d < 0) {
+      free(out);
+      return NULL;
+    }
+    triple = (uint32_t)((a << 18) + (b << 12) + (c << 6) + d);
+    if (j < len) out[j++] = (triple >> 16) & 0xFF;
+    if (j < len) out[j++] = (triple >> 8) & 0xFF;
+    if (j < len) out[j++] = (triple) & 0xFF;
+  }
+  *out_len = len;
+  return out;
+}
+
+static void nirithy_decrypt(unsigned char* data, size_t len, uint64_t timestamp) {
+  uint64_t key = timestamp ^ 0xDEADBEEFCAFEBABEULL;
+  size_t i;
+  for (i = 0; i < len; i++) {
+    uint8_t k = (uint8_t)((key >> ((i % 8) * 8)) & 0xFF);
+    k ^= (uint8_t)((i * 13) & 0xFF);
+    data[i] ^= k;
+  }
+}
+
 static const char *getF (lua_State *L, void *ud, size_t *size) {
   LoadF *lf = (LoadF *)ud;
   UNUSED(L);
@@ -869,6 +921,47 @@ LUALIB_API int luaL_loadfilex (lua_State *L, const char *filename,
       lf.f = freopen(filename, "rb", lf.f);  /* reopen in binary mode */
       if (lf.f == NULL) return errfile(L, "reopen", fnameindex);
       skipcomment(lf.f, &c);  /* re-read initial portion */
+    }
+  }
+
+  if (c == 'N') {
+    unsigned char check_sig[9];
+    if (filename) {
+      long cur_pos = ftell(lf.f);
+      fseek(lf.f, 0, SEEK_SET);
+      if (fread(check_sig, 1, 9, lf.f) == 9 && memcmp(check_sig, "Nirithy==", 9) == 0) {
+        fseek(lf.f, 0, SEEK_END);
+        long file_size = ftell(lf.f);
+        fseek(lf.f, 9, SEEK_SET);
+
+        long payload_len = file_size - 9;
+        if (payload_len > 0) {
+          char *payload = (char *)malloc(payload_len + 1);
+          if (payload) {
+            if (fread(payload, 1, payload_len, lf.f) == (size_t)payload_len) {
+              size_t bin_len;
+              unsigned char *bin = nirithy_decode(payload, payload_len, &bin_len);
+              if (bin && bin_len > 8) {
+                uint64_t timestamp = 0;
+                memcpy(&timestamp, bin, 8);
+                unsigned char *data = bin + 8;
+                size_t data_len = bin_len - 8;
+                nirithy_decrypt(data, data_len, timestamp);
+
+                status = luaL_loadbuffer(L, (char*)data, data_len, lua_tostring(L, -1));
+                free(bin);
+                free(payload);
+                if (filename) fclose(lf.f);
+                lua_remove(L, fnameindex);
+                return status;
+              }
+              if (bin) free(bin);
+            }
+            free(payload);
+          }
+        }
+      }
+      fseek(lf.f, cur_pos, SEEK_SET); // Restore if not match or failed
     }
   }
   
@@ -1049,6 +1142,21 @@ LUALIB_API int luaL_loadfilex (lua_State *L, const char *filename,
 
 LUALIB_API int luaL_loadbufferx (lua_State *L, const char *buff, size_t size,
                                  const char *name, const char *mode) {
+  if (size >= 9 && strncmp(buff, "Nirithy==", 9) == 0) {
+    size_t bin_len;
+    unsigned char *bin = nirithy_decode(buff + 9, size - 9, &bin_len);
+    if (bin) {
+      if (bin_len > 8) {
+        uint64_t timestamp = 0;
+        memcpy(&timestamp, bin, 8);
+        nirithy_decrypt(bin + 8, bin_len - 8, timestamp);
+        int status = luaL_loadbufferx(L, (char*)(bin + 8), bin_len - 8, name, mode);
+        free(bin);
+        return status;
+      }
+      free(bin);
+    }
+  }
   LoadS ls;
   ls.s = buff;
   ls.size = size;
