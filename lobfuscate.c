@@ -263,8 +263,8 @@ static int isReturnInstruction (OpCode op) {
 ** @param pc 当前PC
 ** @return 跳转目标PC，如果不是跳转指令返回-1
 */
-int luaO_getJumpTarget (lua_State *L, Instruction inst, int pc) {
-  OpCode op = G(L)->op_map[GET_OPCODE(inst)];
+int luaO_getJumpTarget (Instruction inst, int pc) {
+  OpCode op = GET_OPCODE(inst);
   switch (op) {
     case OP_JMP:
       return pc + 1 + GETARG_sJ(inst);
@@ -465,11 +465,11 @@ int luaO_identifyBlocks (CFFContext *ctx) {
   /* 第一遍扫描：识别基本块起始点 */
   for (int pc = 0; pc < code_size; pc++) {
     Instruction inst = f->code[pc];
-    OpCode op = G(ctx->L)->op_map[GET_OPCODE(inst)];
+    OpCode op = GET_OPCODE(inst);
     
     /* 跳转指令的目标是起始点 */
     if (luaO_isJumpInstruction(op)) {
-      int target = luaO_getJumpTarget(ctx->L, inst, pc);
+      int target = luaO_getJumpTarget(inst, pc);
       if (target >= 0 && target < code_size) {
         is_leader[target] = 1;
       }
@@ -504,7 +504,7 @@ int luaO_identifyBlocks (CFFContext *ctx) {
     /* 检查是否超过最大块大小，如果是则尝试在此处拆分 */
     if (pc < code_size && (pc - block_start >= MAX_BLOCK_SIZE)) {
       /* 只有当前一个指令不是成对指令时，才允许在此处拆分 */
-      OpCode prev_op = G(ctx->L)->op_map[GET_OPCODE(f->code[pc-1])];
+      OpCode prev_op = GET_OPCODE(f->code[pc-1]);
       if (!isPairedInstruction(prev_op)) {
         force_split = 1;
         CFF_LOG("  在 PC %d 强制拆分长基本块", pc);
@@ -532,7 +532,7 @@ int luaO_identifyBlocks (CFFContext *ctx) {
     if (last_pc < 0 || last_pc >= code_size) continue;
     
     Instruction inst = f->code[last_pc];
-    OpCode op = G(ctx->L)->op_map[GET_OPCODE(inst)];
+    OpCode op = GET_OPCODE(inst);
     
     CFF_LOG("  块 %d 的最后指令 [%d]: %s", i, last_pc, getOpName(op));
     
@@ -544,7 +544,7 @@ int luaO_identifyBlocks (CFFContext *ctx) {
     
     /* 分析跳转目标 */
     if (luaO_isJumpInstruction(op)) {
-      int target = luaO_getJumpTarget(ctx->L, inst, last_pc);
+      int target = luaO_getJumpTarget(inst, last_pc);
       if (target >= 0) {
         int target_block = findBlockStartingAt(ctx, target);
         block->original_target = target_block;
@@ -935,13 +935,13 @@ static int luaO_emitBlocksAndStubs (CFFContext *ctx, int *all_block_jmp_pcs, int
     CFF_LOG("块 %d: 原始PC [%d, %d), 新起始PC=%d", i, block->start_pc, block->end_pc, all_block_starts[i]);
     
     int last_pc = block->end_pc - 1;
-    OpCode last_op = (last_pc >= block->start_pc) ? G(ctx->L)->op_map[GET_OPCODE(f->code[last_pc])] : OP_NOP;
+    OpCode last_op = (last_pc >= block->start_pc) ? GET_OPCODE(f->code[last_pc]) : OP_NOP;
     
     /* 处理条件测试模式 */
     int has_cond_test = 0;
     int cond_test_pc = -1;
     if (last_op == OP_JMP && last_pc > block->start_pc) {
-      OpCode prev_op = G(ctx->L)->op_map[GET_OPCODE(f->code[last_pc - 1])];
+      OpCode prev_op = GET_OPCODE(f->code[last_pc - 1]);
       if (isConditionalTest(prev_op)) {
         has_cond_test = 1;
         cond_test_pc = last_pc - 1;
@@ -988,7 +988,7 @@ static int luaO_emitBlocksAndStubs (CFFContext *ctx, int *all_block_jmp_pcs, int
       
       int target_then = findBlockStartingAt(ctx, last_pc + 1);
       if (target_then < 0) target_then = block->fall_through;
-      int target_else = findBlockStartingAt(ctx, luaO_getJumpTarget(ctx->L, f->code[last_pc], last_pc));
+      int target_else = findBlockStartingAt(ctx, luaO_getJumpTarget(f->code[last_pc], last_pc));
       
       int state_then = ctx->blocks[target_then].state_id;
       int state_else = ctx->blocks[target_else].state_id;
@@ -1076,7 +1076,7 @@ int luaO_generateBinaryDispatcher (CFFContext *ctx) {
   CFF_LOG("========== 开始生成二分查找分发器 ==========");
 
   /* 稳定性保障：确保 VARARGPREP 始终作为第一条指令执行 */
-  if (G(ctx->L)->op_map[GET_OPCODE(ctx->f->code[0])] == OP_VARARGPREP) {
+  if (GET_OPCODE(ctx->f->code[0]) == OP_VARARGPREP) {
     CFF_LOG("检测到 VARARGPREP，将其保留在 PC 0");
     emitInstruction(ctx, ctx->f->code[0]);
     ctx->skip_pc0 = 1;
@@ -1180,7 +1180,7 @@ int luaO_generateDispatcher (CFFContext *ctx) {
   CFF_LOG("状态寄存器: R[%d]", state_reg);
 
   /* 稳定性保障：确保 VARARGPREP 始终作为第一条指令执行 */
-  if (G(ctx->L)->op_map[GET_OPCODE(ctx->f->code[0])] == OP_VARARGPREP) {
+  if (GET_OPCODE(ctx->f->code[0]) == OP_VARARGPREP) {
     CFF_LOG("检测到 VARARGPREP，将其保留在 PC 0");
     emitInstruction(ctx, ctx->f->code[0]);
     ctx->skip_pc0 = 1;
@@ -2023,11 +2023,11 @@ int luaO_generateNestedDispatcher (CFFContext *ctx) {
     int cond_test_pc = -1;
     
     if (last_pc >= block->start_pc) {
-      last_op = G(ctx->L)->op_map[GET_OPCODE(f->code[last_pc])];
+      last_op = GET_OPCODE(f->code[last_pc]);
       
       /* 检查条件测试+JMP模式 */
       if (last_op == OP_JMP && last_pc > block->start_pc) {
-        OpCode prev_op = G(ctx->L)->op_map[GET_OPCODE(f->code[last_pc - 1])];
+        OpCode prev_op = GET_OPCODE(f->code[last_pc - 1]);
         if (isConditionalTest(prev_op)) {
           has_cond_test = 1;
           cond_test_pc = last_pc - 1;
@@ -2063,7 +2063,7 @@ int luaO_generateNestedDispatcher (CFFContext *ctx) {
       
       /* 获取分支目标 */
       Instruction orig_jmp = f->code[last_pc];
-      int orig_jmp_target = luaO_getJumpTarget(ctx->L, orig_jmp, last_pc);
+      int orig_jmp_target = luaO_getJumpTarget(orig_jmp, last_pc);
       int else_block = findBlockStartingAt(ctx, orig_jmp_target);
       int then_block = findBlockStartingAt(ctx, last_pc + 1);
       if (then_block < 0) then_block = block->fall_through;
@@ -3083,7 +3083,7 @@ static int floatforloop (lua_State *L, StkId ra) {
 ** 将单条Lua指令转换为VM指令
 */
 static int convertLuaInstToVM (VMProtectContext *ctx, Instruction inst, int pc) {
-  OpCode lua_op = G(ctx->L)->op_map[GET_OPCODE(inst)];
+  OpCode lua_op = GET_OPCODE(inst);
   int vm_op = ctx->opcode_map[lua_op];
   int a = GETARG_A(inst);
   uint64_t vm_inst;

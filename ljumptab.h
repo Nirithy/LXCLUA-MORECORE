@@ -9,7 +9,7 @@
 #undef vmcase
 #undef vmbreak
 
-#define vmdispatch(x)     goto *disptab[G(L)->op_map[x]];
+#define vmdispatch(x)     goto *disptab[x];
 
 #define vmcase(l)     L_##l:
 

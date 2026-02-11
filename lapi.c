@@ -2338,20 +2338,3 @@ LUA_API void lua_upvaluejoin (lua_State *L, int fidx1, int n1,
   *up1 = *up2;
   luaC_objbarrier(L, f1, *up1);
 }
-
-/**
- * @brief Sets the global opcode permutation map.
- *
- * @param L The Lua state.
- * @param map An array of NUM_OPCODES bytes representing the External -> Internal mapping.
- */
-LUA_API void lua_setopcodemap (lua_State *L, const lu_byte *map) {
-  int i;
-  global_State *g = G(L);
-  lua_lock(L);
-  for (i = 0; i < NUM_OPCODES; i++) {
-    g->op_map[i] = map[i];
-    g->op_map_reverse[map[i]] = (lu_byte)i;
-  }
-  lua_unlock(L);
-}

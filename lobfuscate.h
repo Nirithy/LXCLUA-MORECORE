@@ -236,7 +236,7 @@ LUAI_FUNC int luaO_isJumpInstruction (OpCode op);
  * @param pc Current PC.
  * @return Target PC.
  */
-LUAI_FUNC int luaO_getJumpTarget (lua_State *L, Instruction inst, int pc);
+LUAI_FUNC int luaO_getJumpTarget (Instruction inst, int pc);
 
 
 /**

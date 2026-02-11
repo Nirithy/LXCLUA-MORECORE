@@ -1622,14 +1622,6 @@ LUA_API int (lua_gethookcount) (lua_State *L);
 LUA_API int (lua_setcstacklimit) (lua_State *L, unsigned int limit);
 
 /**
- * @brief Sets the global opcode permutation map.
- *
- * @param L The Lua state.
- * @param map An array of NUM_OPCODES bytes representing the External -> Internal mapping.
- */
-LUA_API void (lua_setopcodemap) (lua_State *L, const unsigned char *map);
-
-/**
  * @brief Debug information structure.
  */
 struct lua_Debug {

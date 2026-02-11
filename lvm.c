@@ -1406,7 +1406,7 @@ static void inopr (lua_State *L, StkId ra, TValue *a, TValue *b) {
   i = *(pc++); \
 }
 
-#define vmdispatch(o)	switch(G(L)->op_map[o])
+#define vmdispatch(o)	switch(o)
 #define vmcase(l)	case l:
 #define vmbreak		break
 
