@@ -414,9 +414,6 @@ static void loadCode (LoadState *S, Proto *f) {
     /* 然后使用原始映射表恢复 */
     op = GET_OPCODE(inst);
     SET_OPCODE(inst, S->opcode_map[op]);
-    /* Map to Global External opcode */
-    op = GET_OPCODE(inst);
-    SET_OPCODE(inst, G(S->L)->op_map_reverse[op]);
     f->code[i] = inst;
   }
 }
@@ -933,9 +930,6 @@ static void loadCode_Standard (LoadState *S, Proto *f) {
 
   for (int i = 0; i < n; i++) {
     f->code[i] = transcodeInstruction(code32[i], f->code, i, code32);
-    /* Map to Global External opcode */
-    OpCode op = GET_OPCODE(f->code[i]);
-    SET_OPCODE(f->code[i], G(S->L)->op_map_reverse[op]);
   }
 
   luaM_freearray(S->L, code32, n);

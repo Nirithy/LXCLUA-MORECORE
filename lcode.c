@@ -403,7 +403,6 @@ int luaK_codeABCk (FuncState *fs, OpCode o, int a, int b, int c, int k) {
   lua_assert(getOpMode(o) == iABC);
   lua_assert(a <= MAXARG_A && b <= MAXARG_B &&
              c <= MAXARG_C && (k & ~1) == 0);
-  o = G(fs->ls->L)->op_map_reverse[o];
   return luaK_code(fs, CREATE_ABCk(o, a, b, c, k));
 }
 
@@ -414,7 +413,6 @@ int luaK_codeABCk (FuncState *fs, OpCode o, int a, int b, int c, int k) {
 int luaK_codeABx (FuncState *fs, OpCode o, int a, unsigned int bc) {
   lua_assert(getOpMode(o) == iABx);
   lua_assert(a <= MAXARG_A && bc <= MAXARG_Bx);
-  o = G(fs->ls->L)->op_map_reverse[o];
   return luaK_code(fs, CREATE_ABx(o, a, bc));
 }
 
@@ -426,7 +424,6 @@ static int codeAsBx (FuncState *fs, OpCode o, int a, int bc) {
   unsigned int b = bc + OFFSET_sBx;
   lua_assert(getOpMode(o) == iAsBx);
   lua_assert(a <= MAXARG_A && b <= MAXARG_Bx);
-  o = G(fs->ls->L)->op_map_reverse[o];
   return luaK_code(fs, CREATE_ABx(o, a, b));
 }
 
@@ -438,7 +435,6 @@ static int codesJ (FuncState *fs, OpCode o, int sj, int k) {
   unsigned int j = sj + OFFSET_sJ;
   lua_assert(getOpMode(o) == isJ);
   lua_assert(j <= MAXARG_sJ && (k & ~1) == 0);
-  o = G(fs->ls->L)->op_map_reverse[o];
   return luaK_code(fs, CREATE_sJ(o, j, k));
 }
 
@@ -447,10 +443,8 @@ static int codesJ (FuncState *fs, OpCode o, int sj, int k) {
 ** Emit an "extra argument" instruction (format 'iAx')
 */
 static int codeextraarg (FuncState *fs, int a) {
-  OpCode op = OP_EXTRAARG;
   lua_assert(a <= MAXARG_Ax);
-  op = G(fs->ls->L)->op_map_reverse[op];
-  return luaK_code(fs, CREATE_Ax(op, a));
+  return luaK_code(fs, CREATE_Ax(OP_EXTRAARG, a));
 }
 
 

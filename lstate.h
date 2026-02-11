@@ -17,7 +17,6 @@ typedef struct CallInfo CallInfo;
 #include "lobject.h"
 #include "ltm.h"
 #include "lzio.h"
-#include "lopcodes.h"
 
 
 /**
@@ -330,8 +329,6 @@ typedef struct global_State {
   MemPoolArena mempool;  /**< memory pool manager */
   /* VM保护代码表链表 */
   struct VMCodeTable *vm_code_list;  /**< VM protection code table list head */
-  lu_byte op_map[NUM_OPCODES];       /**< Global opcode permutation (External -> Internal) */
-  lu_byte op_map_reverse[NUM_OPCODES]; /**< Reverse opcode permutation (Internal -> External) */
 } global_State;
 
 
