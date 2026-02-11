@@ -350,13 +350,23 @@ static int Lutf8_sub(lua_State *L) {
 
 static int Lutf8_reverse(lua_State *L) {
     luaL_Buffer b;
-    /* XXX should handle compose unicode? */
     const char *e, *s = check_utf8(L, 1, &e);
     luaL_buffinit(L, &b);
-    while (s < e) {
-        const char *prev = utf8_prev(s, e);
-        luaL_addlstring(&b, prev, e-prev);
-        e = prev;
+    while (e > s) {
+        const char *cur = e;
+        while (cur > s) {
+            const char *prev = utf8_prev(s, cur);
+            unsigned ch;
+            utf8_decode(prev, e, &ch);
+            if (!utf8_is_extended(ch)) {
+                cur = prev;
+                break;
+            }
+            cur = prev;
+        }
+        /* cur is the start of the grapheme cluster */
+        luaL_addlstring(&b, cur, e - cur);
+        e = cur;
     }
     luaL_pushresult(&b);
     return 1;
