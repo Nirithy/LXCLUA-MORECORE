@@ -400,10 +400,12 @@ void luaV_finishget (lua_State *L, const TValue *t, TValue *key, StkId val,
         if (ttisinteger(key)) {
           unsigned char *p = (unsigned char *)ptrvalue(t);
           setivalue(s2v(val), p[ivalue(key)]);
-        } else {
-          setnilvalue(s2v(val));
+          return;
         }
-        return;
+        /* Fall through to generic metatable lookup */
+        tm = luaT_gettmbyobj(L, t, TM_INDEX);
+        if (l_unlikely(notm(tm)))
+          luaG_typeerror(L, t, "index");
       } else {
         if (ttisstring(t) && ttisinteger(key)) {
           size_t l = tsslen(tsvalue(t));
@@ -517,13 +519,18 @@ void luaV_finishset (lua_State *L, const TValue *t, TValue *key,
         return;
       }
       else if (ttispointer(t)) {
-        if (ttisinteger(key) && ttisinteger(val)) {
-          unsigned char *p = (unsigned char *)ptrvalue(t);
-          p[ivalue(key)] = (unsigned char)ivalue(val);
-        } else {
-          luaG_runerror(L, "pointer index/value must be integer");
+        if (ttisinteger(key)) {
+          if (ttisinteger(val)) {
+            unsigned char *p = (unsigned char *)ptrvalue(t);
+            p[ivalue(key)] = (unsigned char)ivalue(val);
+            return;
+          }
+          luaG_runerror(L, "pointer value must be integer");
         }
-        return;
+        /* Fall through to generic metatable lookup */
+        tm = luaT_gettmbyobj(L, t, TM_NEWINDEX);
+        if (l_unlikely(notm(tm)))
+          luaG_typeerror(L, t, "index");
       }
       else if (ttistable(t)) {
          Table *h = hvalue(t);
