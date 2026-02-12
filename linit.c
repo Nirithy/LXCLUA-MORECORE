@@ -53,6 +53,9 @@ int luaopen_http(lua_State *L);
 /* 声明fs库的初始化函数 */
 int luaopen_fs(lua_State *L);
 
+/* 声明process库的初始化函数 */
+int luaopen_process(lua_State *L);
+
 // clang and ffi libraries
 
 /*
@@ -90,6 +93,10 @@ static const luaL_Reg stdlibs[] = {
   {LUA_SMGRNAME, luaopen_smgr},
   {"translator", luaopen_translator},
   {"logtable", luaopen_logtable},
+
+#ifdef __linux__
+  {"process", luaopen_process},
+#endif
 
   // 仅安卓额外加 libc
 #ifdef __ANDROID__
@@ -152,6 +159,10 @@ static const luaL_Reg loadedlibs[] = {
   {LUA_SMGRNAME, luaopen_smgr},
   {"translator", luaopen_translator},
   {"logtable", luaopen_logtable},
+
+#ifdef __linux__
+  {"process", luaopen_process},
+#endif
 
   // 仅安卓额外加载 libc
 #ifdef __ANDROID__
