@@ -29,18 +29,174 @@
 #define rmdir _rmdir
 #define access _access
 #define F_OK 0
+#define PATH_MAX _MAX_PATH
 #else
 #include <unistd.h>
 #include <dirent.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <limits.h> /* for PATH_MAX */
 #endif
+
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
+
+#define FS_PERM_KEY "LUA_FS_PERMISSIONS"
+
+/*
+** Internal: Resolve path to absolute.
+** Returns 1 on success, 0 on failure.
+*/
+static int get_absolute_path(const char *path, char *resolved) {
+#if defined(_WIN32)
+  if (_fullpath(resolved, path, PATH_MAX) != NULL) {
+    return 1;
+  }
+#else
+  if (realpath(path, resolved) != NULL) {
+    return 1;
+  }
+#endif
+  return 0;
+}
+
+/*
+** Internal: Check permission
+** op: "read" or "write"
+*/
+static void check_permission(lua_State *L, const char *path, const char *op) {
+  lua_getfield(L, LUA_REGISTRYINDEX, FS_PERM_KEY);
+  if (lua_isnil(L, -1)) {
+    lua_pop(L, 1);
+    return;
+  }
+
+  /* Check read_only */
+  if (strcmp(op, "write") == 0) {
+    lua_getfield(L, -1, "read_only");
+    if (lua_toboolean(L, -1)) {
+      lua_pop(L, 2); /* pop boolean and table */
+      luaL_error(L, "fs: permission denied (read-only filesystem)");
+    }
+    lua_pop(L, 1);
+  }
+
+  /* Check root */
+  lua_getfield(L, -1, "root");
+  if (!lua_isnil(L, -1)) {
+    const char *root = lua_tostring(L, -1);
+    char abs_path[PATH_MAX];
+    int ok = get_absolute_path(path, abs_path);
+
+    /* If direct resolution fails, try to resolve parent (e.g. for mkdir) */
+    if (!ok) {
+      char parent[PATH_MAX];
+      const char *sep = strrchr(path, '/');
+#if defined(_WIN32)
+      const char *sep2 = strrchr(path, '\\');
+      if (sep2 > sep) sep = sep2;
+#endif
+      if (sep) {
+        size_t len = sep - path;
+        if (len >= PATH_MAX) len = PATH_MAX - 1;
+        if (len == 0) { /* Root dir */
+           strncpy(parent, "/", 2);
+        } else {
+           strncpy(parent, path, len);
+           parent[len] = '\0';
+        }
+
+        if (get_absolute_path(parent, abs_path)) {
+           /* We resolved parent. Now ensure the child component is valid (no '..') */
+           /* The part after sep is the new component */
+           const char *child = sep + 1;
+           if (strstr(child, "..") != NULL) {
+              lua_pop(L, 2);
+              luaL_error(L, "fs: invalid path component '..'");
+           }
+           ok = 1;
+        }
+      } else {
+         /* No separator. Parent is CWD. */
+         if (getcwd(parent, PATH_MAX) != NULL) {
+            if (get_absolute_path(parent, abs_path)) {
+               /* Check if path is ".." */
+               if (strcmp(path, "..") == 0) {
+                  lua_pop(L, 2);
+                  luaL_error(L, "fs: invalid path component '..'");
+               }
+               ok = 1;
+            }
+         }
+      }
+    }
+
+    if (!ok) {
+       lua_pop(L, 2);
+       luaL_error(L, "fs: cannot resolve path '%s' for permission check", path);
+    }
+
+    size_t root_len = strlen(root);
+    size_t path_len = strlen(abs_path);
+    int allowed = 0;
+
+    if (path_len >= root_len && strncmp(abs_path, root, root_len) == 0) {
+       if (abs_path[root_len] == '\0' || abs_path[root_len] == '/' || abs_path[root_len] == '\\') {
+          allowed = 1;
+       }
+    }
+
+    if (!allowed) {
+      lua_pop(L, 2);
+      luaL_error(L, "fs: permission denied (path '%s' is outside root '%s')", abs_path, root);
+    }
+  }
+  lua_pop(L, 2); /* pop root and perm table */
+}
+
+/*
+** fs.set_permissions(table)
+** table: { root = "/path", read_only = bool }
+*/
+static int fs_set_permissions (lua_State *L) {
+  luaL_checktype(L, 1, LUA_TTABLE);
+
+  /* Check if already set */
+  lua_getfield(L, LUA_REGISTRYINDEX, FS_PERM_KEY);
+  if (!lua_isnil(L, -1)) {
+    return luaL_error(L, "fs: permissions already set");
+  }
+  lua_pop(L, 1);
+
+  /* Validate and Normalize Root */
+  lua_getfield(L, 1, "root");
+  if (!lua_isnil(L, -1)) {
+    const char *root = lua_tostring(L, -1);
+    char abs_root[PATH_MAX];
+    if (!get_absolute_path(root, abs_root)) {
+       return luaL_error(L, "fs: invalid root path '%s'", root);
+    }
+    /* Replace root in the config table with resolved absolute path */
+    lua_pushstring(L, abs_root);
+    lua_setfield(L, 1, "root");
+  }
+  lua_pop(L, 1);
+
+  /* Store in registry */
+  lua_pushvalue(L, 1);
+  lua_setfield(L, LUA_REGISTRYINDEX, FS_PERM_KEY);
+
+  return 0;
+}
+
 
 /*
 ** Utility: Check if a path exists
 */
 static int fs_exists (lua_State *L) {
   const char *path = luaL_checkstring(L, 1);
+  check_permission(L, path, "read");
 #if defined(_WIN32)
   lua_pushboolean(L, access(path, F_OK) == 0);
 #else
@@ -55,6 +211,7 @@ static int fs_exists (lua_State *L) {
 */
 static int fs_isdir (lua_State *L) {
   const char *path = luaL_checkstring(L, 1);
+  check_permission(L, path, "read");
   struct stat sb;
   if (stat(path, &sb) == 0) {
     lua_pushboolean(L, S_ISDIR(sb.st_mode));
@@ -69,6 +226,7 @@ static int fs_isdir (lua_State *L) {
 */
 static int fs_isfile (lua_State *L) {
   const char *path = luaL_checkstring(L, 1);
+  check_permission(L, path, "read");
   struct stat sb;
   if (stat(path, &sb) == 0) {
     lua_pushboolean(L, S_ISREG(sb.st_mode));
@@ -83,6 +241,7 @@ static int fs_isfile (lua_State *L) {
 */
 static int fs_ls (lua_State *L) {
   const char *path = luaL_checkstring(L, 1);
+  check_permission(L, path, "read");
 #if defined(_WIN32)
   WIN32_FIND_DATA ffd;
   char search_path[MAX_PATH];
@@ -130,6 +289,7 @@ static int fs_ls (lua_State *L) {
 */
 static int fs_mkdir (lua_State *L) {
   const char *path = luaL_checkstring(L, 1);
+  check_permission(L, path, "write");
   int res;
 #if defined(_WIN32)
   res = mkdir(path, 0755);
@@ -151,6 +311,7 @@ static int fs_mkdir (lua_State *L) {
 */
 static int fs_rm (lua_State *L) {
   const char *path = luaL_checkstring(L, 1);
+  check_permission(L, path, "write");
   if (remove(path) == 0) {
     lua_pushboolean(L, 1);
   } else {
@@ -181,6 +342,7 @@ static int fs_currentdir (lua_State *L) {
 */
 static int fs_chdir (lua_State *L) {
   const char *path = luaL_checkstring(L, 1);
+  check_permission(L, path, "read");
   if (chdir(path) == 0) {
     lua_pushboolean(L, 1);
   } else {
@@ -196,6 +358,7 @@ static int fs_chdir (lua_State *L) {
 */
 static int fs_stat (lua_State *L) {
   const char *path = luaL_checkstring(L, 1);
+  check_permission(L, path, "read");
   struct stat sb;
   if (stat(path, &sb) == 0) {
     lua_newtable(L);
@@ -236,26 +399,15 @@ static int fs_stat (lua_State *L) {
 */
 static int fs_abs (lua_State *L) {
   const char *path = luaL_checkstring(L, 1);
-#if defined(_WIN32)
-  char full[_MAX_PATH];
-  if (_fullpath(full, path, _MAX_PATH) != NULL) {
-    lua_pushstring(L, full);
-  } else {
-    lua_pushnil(L);
-  }
-#else
+  check_permission(L, path, "read");
   char full[PATH_MAX];
-  if (realpath(path, full) != NULL) {
+  if (get_absolute_path(path, full)) {
     lua_pushstring(L, full);
   } else {
-    /* If file doesn't exist, realpath might fail.
-       Fallback: concat cwd + path if path is relative?
-       For now, just return nil + error */
     lua_pushnil(L);
     lua_pushstring(L, strerror(errno));
     return 2;
   }
-#endif
   return 1;
 }
 
@@ -312,6 +464,7 @@ static const luaL_Reg fslib[] = {
   {"abs", fs_abs},
   {"basename", fs_basename},
   {"dirname", fs_dirname},
+  {"set_permissions", fs_set_permissions},
   {NULL, NULL}
 };
 
