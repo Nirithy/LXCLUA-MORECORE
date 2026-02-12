@@ -312,11 +312,116 @@ static int writer (lua_State *L, const void *b, size_t size, void *ud) {
 ** @param L Lua状态
 ** @return 1（返回字节码字符串）
 */
+/* Nirithy== Shell Generator */
+static const char* nirithy_b64 = "9876543210zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA-_";
+
+static char* nirithy_encode(const unsigned char* input, size_t len) {
+  size_t out_len = 4 * ((len + 2) / 3);
+  char* out = (char*)malloc(out_len + 1);
+  size_t i = 0, j = 0;
+  if (!out) return NULL;
+  while (i < len) {
+    uint32_t octet_a = i < len ? input[i++] : 0;
+    uint32_t octet_b = i < len ? input[i++] : 0;
+    uint32_t octet_c = i < len ? input[i++] : 0;
+    uint32_t triple = (octet_a << 16) + (octet_b << 8) + octet_c;
+    out[j++] = nirithy_b64[(triple >> 18) & 0x3F];
+    out[j++] = nirithy_b64[(triple >> 12) & 0x3F];
+    out[j++] = nirithy_b64[(triple >> 6) & 0x3F];
+    out[j++] = nirithy_b64[triple & 0x3F];
+  }
+  if (len % 3 == 1) {
+    out[out_len - 1] = '=';
+    out[out_len - 2] = '=';
+  } else if (len % 3 == 2) {
+    out[out_len - 1] = '=';
+  }
+  out[out_len] = '\0';
+  return out;
+}
+
+static void nirithy_derive_key(uint64_t timestamp, uint8_t *key) {
+  uint8_t input[32];
+  uint8_t digest[SHA256_DIGEST_SIZE];
+
+  /* Input: timestamp (8 bytes) + "NirithySalt" (11 bytes) */
+  memcpy(input, &timestamp, 8);
+  memcpy(input + 8, "NirithySalt", 11);
+
+  SHA256(input, 19, digest);
+  memcpy(key, digest, 16); /* Use first 16 bytes as AES-128 key */
+}
+
+static void aux_envelop(lua_State *L, const char *s, size_t l) {
+  uint64_t timestamp = (uint64_t)time(NULL);
+
+  /* Structure: Timestamp (8) + IV (16) + EncryptedData (l) */
+  size_t payload_len = 8 + 16 + l;
+  unsigned char *payload = (unsigned char *)malloc(payload_len);
+  if (!payload) {
+    luaL_error(L, "memory allocation failed");
+    return;
+  }
+
+  /* 1. Timestamp */
+  memcpy(payload, &timestamp, 8);
+
+  /* 2. IV (Random) */
+  {
+    /* Generate random IV using local LCG seeded by luaL_makeseed to avoid
+       time collision and global state modification */
+    unsigned int seed = luaL_makeseed(L);
+    int i;
+    for (i = 0; i < 16; i++) {
+      seed = seed * 1103515245 + 12345;
+      payload[8 + i] = (unsigned char)((seed >> 16) & 0xFF);
+    }
+  }
+
+  /* 3. Encrypt Payload */
+  {
+    uint8_t key[16];
+    struct AES_ctx ctx;
+    nirithy_derive_key(timestamp, key);
+
+    /* Copy data to payload buffer */
+    memcpy(payload + 8 + 16, s, l);
+
+    /* Encrypt the data part using AES-128-CTR */
+    AES_init_ctx_iv(&ctx, key, payload + 8);
+    AES_CTR_xcrypt_buffer(&ctx, payload + 8 + 16, (uint32_t)l);
+  }
+
+  char *encoded = nirithy_encode(payload, payload_len);
+  free(payload);
+
+  if (!encoded) {
+    luaL_error(L, "encoding failed");
+    return;
+  }
+
+  luaL_Buffer b;
+  luaL_buffinit(L, &b);
+  luaL_addstring(&b, "Nirithy==");
+  luaL_addstring(&b, encoded);
+  free(encoded);
+
+  luaL_pushresult(&b);
+}
+
+static int str_envelop(lua_State *L) {
+  size_t l;
+  const char *s = luaL_checklstring(L, 1, &l);
+  aux_envelop(L, s, l);
+  return 1;
+}
+
 static int str_dump (lua_State *L) {
   struct str_Writer state;
   int strip = 0;
   int obfuscate_flags = 0;
   unsigned int seed = 0;
+  int envelop = 1;  /* 默认带壳 */
   const char *log_path = NULL;  /* 日志输出路径 */
   
   luaL_checktype(L, 1, LUA_TFUNCTION);
@@ -343,6 +448,13 @@ static int str_dump (lua_State *L) {
     lua_getfield(L, 2, "seed");
     if (!lua_isnil(L, -1)) {
       seed = (unsigned int)lua_tointeger(L, -1);
+    }
+    lua_pop(L, 1);
+
+    /* 读取 envelop 字段 */
+    lua_getfield(L, 2, "envelop");
+    if (!lua_isnil(L, -1)) {
+      envelop = lua_toboolean(L, -1);
     }
     lua_pop(L, 1);
     
@@ -384,6 +496,14 @@ static int str_dump (lua_State *L) {
   if (l_unlikely(result != 0))
     return luaL_error(L, "unable to dump given function1");
   luaL_pushresult(&state.B);
+
+  if (envelop) {
+    size_t l;
+    const char *s = lua_tolstring(L, -1, &l);
+    aux_envelop(L, s, l);
+    /* Remove original dump string */
+    lua_remove(L, -2);
+  }
   return 1;
 }
 
@@ -2955,99 +3075,6 @@ static int str_data (lua_State *L) {
   return lua_pcall(L, 0, LUA_MULTRET, 0);
 }
 
-/* Nirithy== Shell Generator */
-static const char* nirithy_b64 = "9876543210zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA-_";
-
-static char* nirithy_encode(const unsigned char* input, size_t len) {
-  size_t out_len = 4 * ((len + 2) / 3);
-  char* out = (char*)malloc(out_len + 1);
-  size_t i = 0, j = 0;
-  if (!out) return NULL;
-  while (i < len) {
-    uint32_t octet_a = i < len ? input[i++] : 0;
-    uint32_t octet_b = i < len ? input[i++] : 0;
-    uint32_t octet_c = i < len ? input[i++] : 0;
-    uint32_t triple = (octet_a << 16) + (octet_b << 8) + octet_c;
-    out[j++] = nirithy_b64[(triple >> 18) & 0x3F];
-    out[j++] = nirithy_b64[(triple >> 12) & 0x3F];
-    out[j++] = nirithy_b64[(triple >> 6) & 0x3F];
-    out[j++] = nirithy_b64[triple & 0x3F];
-  }
-  if (len % 3 == 1) {
-    out[out_len - 1] = '=';
-    out[out_len - 2] = '=';
-  } else if (len % 3 == 2) {
-    out[out_len - 1] = '=';
-  }
-  out[out_len] = '\0';
-  return out;
-}
-
-static void nirithy_derive_key(uint64_t timestamp, uint8_t *key) {
-  uint8_t input[32];
-  uint8_t digest[SHA256_DIGEST_SIZE];
-
-  /* Input: timestamp (8 bytes) + "NirithySalt" (11 bytes) */
-  memcpy(input, &timestamp, 8);
-  memcpy(input + 8, "NirithySalt", 11);
-
-  SHA256(input, 19, digest);
-  memcpy(key, digest, 16); /* Use first 16 bytes as AES-128 key */
-}
-
-static int str_envelop(lua_State *L) {
-  size_t l;
-  const char *s = luaL_checklstring(L, 1, &l);
-  uint64_t timestamp = (uint64_t)time(NULL);
-
-  /* Structure: Timestamp (8) + IV (16) + EncryptedData (l) */
-  size_t payload_len = 8 + 16 + l;
-  unsigned char *payload = (unsigned char *)malloc(payload_len);
-  if (!payload) return luaL_error(L, "memory allocation failed");
-
-  /* 1. Timestamp */
-  memcpy(payload, &timestamp, 8);
-
-  /* 2. IV (Random) */
-  {
-    /* Generate random IV using local LCG seeded by luaL_makeseed to avoid
-       time collision and global state modification */
-    unsigned int seed = luaL_makeseed(L);
-    int i;
-    for (i = 0; i < 16; i++) {
-      seed = seed * 1103515245 + 12345;
-      payload[8 + i] = (unsigned char)((seed >> 16) & 0xFF);
-    }
-  }
-
-  /* 3. Encrypt Payload */
-  {
-    uint8_t key[16];
-    struct AES_ctx ctx;
-    nirithy_derive_key(timestamp, key);
-
-    /* Copy data to payload buffer */
-    memcpy(payload + 8 + 16, s, l);
-
-    /* Encrypt the data part using AES-128-CTR */
-    AES_init_ctx_iv(&ctx, key, payload + 8);
-    AES_CTR_xcrypt_buffer(&ctx, payload + 8 + 16, (uint32_t)l);
-  }
-
-  char *encoded = nirithy_encode(payload, payload_len);
-  free(payload);
-
-  if (!encoded) return luaL_error(L, "encoding failed");
-
-  luaL_Buffer b;
-  luaL_buffinit(L, &b);
-  luaL_addstring(&b, "Nirithy==");
-  luaL_addstring(&b, encoded);
-  free(encoded);
-
-  luaL_pushresult(&b);
-  return 1;
-}
 
 static const luaL_Reg strlib[] = {
   {"aes_decrypt", str_aes_decrypt},
