@@ -261,6 +261,10 @@ static int luaB_tonumber (lua_State *L) {
       lua_settop(L, 1);  /* yes; return it */
       return 1;
     }
+    else if (lua_type(L, 1) == LUA_TPOINTER) {
+      lua_pushinteger(L, (lua_Integer)(L_P2I)lua_topointer(L, 1));
+      return 1;
+    }
     else {
       size_t l;
       const char *s = lua_tolstring(L, 1, &l);
@@ -302,6 +306,10 @@ static int luaB_tointeger (lua_State *L) {
     }
     else if (lua_type(L, 1) == LUA_TBOOLEAN) {
         lua_pushinteger(L, lua_toboolean(L, 1) ? 1 : 0);
+        return 1;
+    }
+    else if (lua_type(L, 1) == LUA_TPOINTER) {
+        lua_pushinteger(L, (lua_Integer)(L_P2I)lua_topointer(L, 1));
         return 1;
     }
     else {
