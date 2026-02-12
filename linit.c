@@ -50,6 +50,9 @@ int luaopen_struct(lua_State *L);
 /* 声明http库的初始化函数 */
 int luaopen_http(lua_State *L);
 
+/* 声明fs库的初始化函数 */
+int luaopen_fs(lua_State *L);
+
 // clang and ffi libraries
 
 /*
@@ -81,6 +84,7 @@ static const luaL_Reg stdlibs[] = {
   {"bit32", luaopen_bit},
   {"thread", luaopen_thread},
   {"http", luaopen_http},
+  {LUA_FSLIBNAME, luaopen_fs},
 
 #ifndef _WIN32
   {LUA_SMGRNAME, luaopen_smgr},
@@ -142,6 +146,7 @@ static const luaL_Reg loadedlibs[] = {
   {"bit32", luaopen_bit},
   {"thread", luaopen_thread},
   {"http", luaopen_http},
+  {LUA_FSLIBNAME, luaopen_fs},
 
 #ifndef _WIN32
   {LUA_SMGRNAME, luaopen_smgr},
