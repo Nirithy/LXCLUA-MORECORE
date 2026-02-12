@@ -232,7 +232,7 @@ static int http_request(lua_State *L, const char *method) {
     return 2;
 }
 
-#elif defined(__ANDROID__) || defined(__linux__) || defined(__APPLE__)
+#elif defined(__ANDROID__) || defined(__linux__) || defined(__APPLE__) || defined(__EMSCRIPTEN__)
 
 static int http_request(lua_State *L, const char *method) {
     const char *url = luaL_checkstring(L, 1);
