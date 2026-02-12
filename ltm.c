@@ -74,6 +74,8 @@ const TValue *luaT_gettmbyobj (lua_State *L, const TValue *o, TMS event) {
   switch (ttype(o)) {
     case LUA_TTABLE:
       mt = hvalue(o)->metatable;
+      if (mt == NULL)
+        mt = G(L)->mt[LUA_TTABLE];
       break;
     case LUA_TUSERDATA:
       mt = uvalue(o)->metatable;

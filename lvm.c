@@ -376,6 +376,9 @@ void luaV_finishget (lua_State *L, const TValue *t, TValue *key, StkId val,
          }
          tm = fasttm(L, h->metatable, TM_INDEX);
          if (tm == NULL) tm = fasttm(L, h->metatable, TM_MINDEX);
+         if (tm == NULL && h->metatable == NULL) {
+            tm = fasttm(L, G(L)->mt[LUA_TTABLE], TM_INDEX);
+         }
          if (tm == NULL) {
             l_rwlock_unlock(&h->lock);
             setnilvalue(s2v(val));
@@ -411,6 +414,9 @@ void luaV_finishget (lua_State *L, const TValue *t, TValue *key, StkId val,
       tm = fasttm(L, h->metatable, TM_INDEX);  /* table's metamethod */
       if (tm == LUA_NULLPTR) /* no __index? try __mindex */
         tm = fasttm(L, h->metatable, TM_MINDEX);
+      if (tm == LUA_NULLPTR && h->metatable == LUA_NULLPTR) {
+        tm = fasttm(L, G(L)->mt[LUA_TTABLE], TM_INDEX);
+      }
       if (tm == LUA_NULLPTR) {  /* no metamethod? */
         l_rwlock_unlock(&h->lock);
         setnilvalue(s2v(val));  /* result is nil */
