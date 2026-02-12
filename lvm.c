@@ -144,6 +144,10 @@ int luaV_tonumber_ (const TValue *obj, lua_Number *n) {
     *n = cast_num(ivalue(obj));
     return 1;
   }
+  else if (ttispointer(obj)) {
+    *n = cast_num((L_P2I)ptrvalue(obj));
+    return 1;
+  }
   else if (l_strton(obj, &v)) {  /* string coercible to number? */
     *n = nvalue(&v);  /* convert result of 'luaO_str2num' to a float */
     return 1;
@@ -185,6 +189,10 @@ int luaV_tointegerns (const TValue *obj, lua_Integer *p, F2Imod mode) {
     return luaV_flttointeger(fltvalue(obj), p, mode);
   else if (ttisinteger(obj)) {
     *p = ivalue(obj);
+    return 1;
+  }
+  else if (ttispointer(obj)) {
+    *p = cast(lua_Integer, (L_P2I)ptrvalue(obj));
     return 1;
   }
   else
@@ -780,6 +788,8 @@ static int lessthanothers (lua_State *L, const TValue *l, const TValue *r) {
   lua_assert(!ttisnumber(l) || !ttisnumber(r));
   if (ttisstring(l) && ttisstring(r))  /* both are strings? */
     return l_strcmp(tsvalue(l), tsvalue(r)) < 0;
+  else if (ttispointer(l) && ttispointer(r))
+    return (L_P2I)ptrvalue(l) < (L_P2I)ptrvalue(r);
   else
     return luaT_callorderTM(L, l, r, TM_LT);
 }
@@ -812,6 +822,8 @@ static int lessequalothers (lua_State *L, const TValue *l, const TValue *r) {
   lua_assert(!ttisnumber(l) || !ttisnumber(r));
   if (ttisstring(l) && ttisstring(r))  /* both are strings? */
     return l_strcmp(tsvalue(l), tsvalue(r)) <= 0;
+  else if (ttispointer(l) && ttispointer(r))
+    return (L_P2I)ptrvalue(l) <= (L_P2I)ptrvalue(r);
   else
     return luaT_callorderTM(L, l, r, TM_LE);
 }
