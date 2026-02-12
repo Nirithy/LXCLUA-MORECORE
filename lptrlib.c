@@ -272,10 +272,31 @@ static int l_ptr_tohex (lua_State *L) {
   return 1;
 }
 
+static int l_ptr_new (lua_State *L) {
+  lua_Integer addr = luaL_checkinteger(L, 1);
+  lua_pushpointer(L, (void *)(size_t)addr);
+  return 1;
+}
+
+static int l_ptr_tostring (lua_State *L) {
+  const void *p = lua_topointer(L, 1);
+  char buff[64];
+  sprintf(buff, "pointer: %p", p);
+  lua_pushstring(L, buff);
+  return 1;
+}
+
+static int l_ptr_lib_call (lua_State *L) {
+  lua_Integer addr = luaL_checkinteger(L, 2);
+  lua_pushpointer(L, (void *)(size_t)addr);
+  return 1;
+}
+
 /*
 ** Register the ptr module functions
 */
 static const luaL_Reg ptrlib[] = {
+  {"new", l_ptr_new},
   {"addr", l_ptr_addr},
   {"add", l_ptr_add},
   {"inc", l_ptr_inc},
@@ -315,9 +336,19 @@ LUAMOD_API int luaopen_ptr (lua_State *L) {
   lua_pushvalue(L, -3); /* ptr library */
   lua_setfield(L, -2, "__index");
 
+  /* Set __tostring */
+  lua_pushcfunction(L, l_ptr_tostring);
+  lua_setfield(L, -2, "__tostring");
+
   /* Set metatable for pointer type */
   lua_setmetatable(L, -2);
   lua_pop(L, 1); /* pop dummy pointer */
+
+  /* Set __call for the library table */
+  lua_createtable(L, 0, 1);
+  lua_pushcfunction(L, l_ptr_lib_call);
+  lua_setfield(L, -2, "__call");
+  lua_setmetatable(L, -2);
 
   return 1;
 }
