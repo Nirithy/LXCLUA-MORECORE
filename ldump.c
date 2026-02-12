@@ -190,6 +190,31 @@ static void dumpByte (DumpState *D, int y) {
 }
 
 
+static void dumpInt64 (DumpState *D, int64_t x) {
+  uint64_t ux = (uint64_t)x;
+  for (int i = 0; i < 8; i++) {
+    dumpByte(D, (int)(ux & 0xFF));
+    ux >>= 8;
+  }
+}
+
+
+static void dumpInt32 (DumpState *D, int32_t x) {
+  uint32_t ux = (uint32_t)x;
+  for (int i = 0; i < 4; i++) {
+    dumpByte(D, (int)(ux & 0xFF));
+    ux >>= 8;
+  }
+}
+
+
+static void dumpDouble (DumpState *D, double x) {
+  uint64_t u;
+  memcpy(&u, &x, 8);
+  dumpInt64(D, (int64_t)u);
+}
+
+
 /*
 ** 'dumpSize' buffer size: each byte can store up to 7 bits. (The "+6"
 ** rounds up the division.)
@@ -214,12 +239,12 @@ static void dumpInt (DumpState *D, int x) {
 
 
 static void dumpNumber (DumpState *D, lua_Number x) {
-  dumpVar(D, x);
+  dumpDouble(D, (double)x);
 }
 
 
 static void dumpInteger (DumpState *D, lua_Integer x) {
-  dumpVar(D, x);
+  dumpInt64(D, (int64_t)x);
 }
 
 
@@ -359,9 +384,17 @@ static void dumpCode (DumpState *D, const Proto *f) {
     return;
   }
 
+  /* 序列化为Little Endian字节流 (Instruction is 64-bit) */
+  for (i = 0; i < orig_size; i++) {
+    Instruction inst = mapped_code[i];
+    for (int j = 0; j < 8; j++) {
+      encrypted_data[i*8 + j] = (char)((inst >> (j * 8)) & 0xFF);
+    }
+  }
+
   /* 使用时间戳加密映射后的数据（无压缩） */
   for (i = 0; i < (int)data_size; i++) {
-    encrypted_data[i] = ((char *)mapped_code)[i] ^ ((char *)&D->timestamp)[i % sizeof(D->timestamp)];
+    encrypted_data[i] ^= ((char *)&D->timestamp)[i % sizeof(D->timestamp)];
   }
 
   /* 写入原始大小 */
@@ -626,11 +659,11 @@ static void dumpHeader (DumpState *D) {
   // 直接写入 LUAC_DATA（无加密）
   dumpBlock(D, LUAC_DATA, sizeof(LUAC_DATA) - 1);
   
-  dumpByte(D, sizeof(Instruction));
-  dumpByte(D, sizeof(lua_Integer));
-  dumpByte(D, sizeof(lua_Number));
-  dumpInteger(D, LUAC_INT);
-  dumpNumber(D, LUAC_NUM);
+  dumpByte(D, 8);
+  dumpByte(D, 8);
+  dumpByte(D, 8);
+  dumpInt64(D, 0x5678);
+  dumpDouble(D, 370.5);
 }
 
 

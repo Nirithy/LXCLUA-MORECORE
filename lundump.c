@@ -96,6 +96,32 @@ static lu_byte loadByte (LoadState *S) {
 }
 
 
+static int64_t loadInt64 (LoadState *S) {
+  uint64_t x = 0;
+  for (int i = 0; i < 8; i++) {
+    x |= ((uint64_t)loadByte(S)) << (i * 8);
+  }
+  return (int64_t)x;
+}
+
+
+static int32_t loadInt32 (LoadState *S) {
+  uint32_t x = 0;
+  for (int i = 0; i < 4; i++) {
+    x |= ((uint32_t)loadByte(S)) << (i * 8);
+  }
+  return (int32_t)x;
+}
+
+
+static double loadDouble (LoadState *S) {
+  int64_t i = loadInt64(S);
+  double d;
+  memcpy(&d, &i, 8);
+  return d;
+}
+
+
 static size_t loadUnsigned (LoadState *S, size_t limit) {
   size_t x = 0;
   int b;
@@ -121,16 +147,12 @@ static int loadInt (LoadState *S) {
 
 
 static lua_Number loadNumber (LoadState *S) {
-  lua_Number x;
-  loadVar(S, x);
-  return x;
+  return (lua_Number)loadDouble(S);
 }
 
 
 static lua_Integer loadInteger (LoadState *S) {
-  lua_Integer x;
-  loadVar(S, x);
-  return x;
+  return (lua_Integer)loadInt64(S);
 }
 
 
@@ -390,8 +412,18 @@ static void loadCode (LoadState *S, Proto *f) {
   f->sizecode = orig_size;
   
   // Decrypt data using XOR with timestamp as password (no decompression)
+  /* Decrypt in-place in image_data buffer first */
   for (i = 0; i < (int)data_size; i++) {
-    ((char *)f->code)[i] = image_data[i] ^ ((char *)&S->timestamp)[i % sizeof(S->timestamp)];
+    image_data[i] ^= ((char *)&S->timestamp)[i % sizeof(S->timestamp)];
+  }
+
+  /* Reconstruct Instructions from LE bytes (64-bit) */
+  for (i = 0; i < orig_size; i++) {
+    uint64_t inst = 0;
+    for (int j = 0; j < 8; j++) {
+      inst |= ((uint64_t)image_data[i*8 + j]) << (j * 8);
+    }
+    f->code[i] = (Instruction)inst;
   }
   
   // Free image and PNG data
@@ -1111,7 +1143,8 @@ static void checkHeader (LoadState *S) {
   int b1 = loadByte(S);
   int b2 = zgetc(S->Z); /* Peek/Read next byte */
 
-  if (!S->force_standard && b1 == sizeof(Instruction) && b2 == sizeof(lua_Integer)) {
+  /* XCLUA Universal Format: Inst=8, Int=8 */
+  if (!S->force_standard && b1 == 8 && b2 == 8) {
     S->is_standard = 0;
 
     /* Continue verifying XCLUA header */
@@ -1119,10 +1152,13 @@ static void checkHeader (LoadState *S) {
     /* b2 (lua_Integer size) verified by detection */
     /* Note: zgetc consumed b2, so we skip checksize(S, lua_Integer) reading */
 
-    checksize(S, lua_Number);
-    if (loadInteger(S) != LUAC_INT)
+    if (loadByte(S) != 8) /* Check lua_Number size (fixed to 8) */
+      error(S, "float size mismatch");
+
+    if (loadInt64(S) != 0x5678)
       error(S, "integer format mismatch");
-    if (loadNumber(S) != LUAC_NUM)
+
+    if (loadDouble(S) != 370.5)
       error(S, "float format mismatch");
 
   } else {
