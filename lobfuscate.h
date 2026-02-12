@@ -70,6 +70,7 @@
 #define OBFUSCATE_VM_PROTECT        (1<<7)  /**< VM protection (custom instruction set). */
 #define OBFUSCATE_BINARY_DISPATCHER (1<<8)  /**< Binary search dispatcher. */
 #define OBFUSCATE_RANDOM_NOP        (1<<9)  /**< Insert random NOP instructions. */
+#define OBFUSCATE_STR_ENCRYPT       (1<<11) /**< String constant encryption. */
 /**@}*/
 
 

@@ -650,7 +650,7 @@ static void loadFunction (LoadState *S, Proto *f, TString *psource) {
   f->numparams = loadByte(S);
   f->is_vararg = loadByte(S);
   f->maxstacksize = loadByte(S);
-  f->difierline_mode = loadByte(S);  /* 新增：读取自定义标志 */
+  f->difierline_mode = loadInt(S);  /* 新增：读取自定义标志 */
 
   f->difierline_pad = loadInt(S); /* Padding */
 

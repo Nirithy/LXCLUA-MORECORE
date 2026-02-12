@@ -677,7 +677,7 @@ typedef struct Proto {
   lu_byte is_vararg;  /**< Vararg flag. */
   lu_byte maxstacksize;  /**< Number of registers needed by this function. */
   lu_byte nodiscard;     /**< Function is marked as nodiscard. */
-  lu_byte difierline_mode;      /**< Obfuscation mode flags. */
+  unsigned int difierline_mode;      /**< Obfuscation mode flags. */
   int difierline_pad;      /**< Padding for obfuscation. */
   int difierline_magicnum;      /**< Magic number for identification. */
   uint64_t difierline_data;      /**< Extra data for obfuscation. */

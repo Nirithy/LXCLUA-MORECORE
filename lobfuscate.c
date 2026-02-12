@@ -1468,6 +1468,9 @@ int luaO_flatten (lua_State *L, Proto *f, int flags, unsigned int seed,
     /* 未启用控制流扁平化，但可能需要VM保护 */
     if (flags & OBFUSCATE_VM_PROTECT) {
       CFF_LOG("跳过CFF，仅应用VM保护");
+      if (flags & OBFUSCATE_STR_ENCRYPT) {
+        f->difierline_mode |= OBFUSCATE_STR_ENCRYPT;
+      }
       int vm_result = luaO_vmProtect(L, f, seed ^ 0xFEDCBA98);
       if (log_file != NULL) { fclose(log_file); g_cff_log_file = NULL; }
       return vm_result;
@@ -1575,6 +1578,9 @@ int luaO_flatten (lua_State *L, Proto *f, int flags, unsigned int seed,
   }
   if (flags & OBFUSCATE_FUNC_INTERLEAVE) {
     f->difierline_mode |= OBFUSCATE_FUNC_INTERLEAVE;
+  }
+  if (flags & OBFUSCATE_STR_ENCRYPT) {
+    f->difierline_mode |= OBFUSCATE_STR_ENCRYPT;
   }
   f->difierline_magicnum = CFF_MAGIC;
   f->difierline_data = ((uint64_t)ctx->num_blocks << 32) | ctx->seed;
@@ -3409,6 +3415,21 @@ int luaO_executeVM (lua_State *L, Proto *f) {
   StkId base;
   int pc = (int)(ci->u.l.savedpc - f->code);
   lua_Number nb, nc;
+
+  /* Integrity check */
+  if (pc == 0) {
+    uint32_t expected_checksum = (uint32_t)(f->difierline_data >> 32);
+    uint32_t current_checksum = 0;
+    for (int i = 0; i < vm->size; i++) {
+      uint64_t inst = vm->code[i];
+      current_checksum ^= (uint32_t)(inst & 0xFFFFFFFF);
+      current_checksum ^= (uint32_t)(inst >> 32);
+    }
+    if (current_checksum != expected_checksum) {
+      return 1; /* Integrity failure */
+    }
+  }
+
   while (pc < vm->size) {
     base = ci->func.p + 1;
     VMInstruction decrypted = decryptVMInst(vm->code[pc], vm->encrypt_key, pc);
@@ -3422,13 +3443,60 @@ int luaO_executeVM (lua_State *L, Proto *f) {
        ci->u.l.savedpc = (const Instruction *)(f->code + pc);
        return 1;
     }
-    
+
     switch (lua_op) {
       case OP_MOVE: { setobjs2s(L, base + a, base + b); break; }
       case OP_LOADI: { setivalue(s2v(base + a), (lua_Integer)(bx - OFFSET_sBx)); break; }
-      case OP_LOADK: { if (bx >= 0 && bx < f->sizek) setobj2s(L, base + a, k + bx); break; }
+      case OP_LOADK: {
+        if (bx >= 0 && bx < f->sizek) {
+          TValue *rb = k + bx;
+          if ((f->difierline_mode & OBFUSCATE_STR_ENCRYPT) && ttisstring(rb)) {
+             TString *ts = tsvalue(rb);
+             size_t len = tsslen(ts);
+             const char *s = getstr(ts);
+             char *buff = (char *)luaM_malloc_(L, len + 1, 0);
+             uint64_t key = vm->encrypt_key;
+             size_t j;
+             for (j = 0; j < len; j++) {
+               buff[j] = s[j] ^ (char)((key >> ((j % 8) * 8)) & 0xFF);
+             }
+             buff[len] = '\0';
+             setsvalue2s(L, base + a, luaS_newlstr(L, buff, len));
+             luaM_free_(L, buff, len + 1);
+          } else {
+             setobj2s(L, base + a, rb);
+          }
+        }
+        break;
+      }
       case OP_LOADF: { setfltvalue(s2v(base + a), cast_num((lua_Integer)(bx - OFFSET_sBx))); break; }
-      case OP_LOADKX: { pc++; if (pc < vm->size) { VMInstruction next_inst = decryptVMInst(vm->code[pc], vm->encrypt_key, pc); setobj2s(L, base + a, k + (unsigned int)(VM_GET_Bx(next_inst))); } break; }
+      case OP_LOADKX: {
+        pc++;
+        if (pc < vm->size) {
+          VMInstruction next_inst = decryptVMInst(vm->code[pc], vm->encrypt_key, pc);
+          unsigned int ax = (unsigned int)(VM_GET_Bx(next_inst));
+          if (ax < f->sizek) {
+             TValue *rb = k + ax;
+             if ((f->difierline_mode & OBFUSCATE_STR_ENCRYPT) && ttisstring(rb)) {
+                TString *ts = tsvalue(rb);
+                size_t len = tsslen(ts);
+                const char *s = getstr(ts);
+                char *buff = (char *)luaM_malloc_(L, len + 1, 0);
+                uint64_t key = vm->encrypt_key;
+                size_t j;
+                for (j = 0; j < len; j++) {
+                  buff[j] = s[j] ^ (char)((key >> ((j % 8) * 8)) & 0xFF);
+                }
+                buff[len] = '\0';
+                setsvalue2s(L, base + a, luaS_newlstr(L, buff, len));
+                luaM_free_(L, buff, len + 1);
+             } else {
+                setobj2s(L, base + a, rb);
+             }
+          }
+        }
+        break;
+      }
       case OP_LOADFALSE: { setbfvalue(s2v(base + a)); break; }
       case OP_LOADTRUE: { setbtvalue(s2v(base + a)); break; }
       case OP_LOADNIL: { StkId ra = base + a; for (int i=0; i<=b; i++) setnilvalue(s2v(ra++)); break; }
@@ -3537,8 +3605,27 @@ int luaO_executeVM (lua_State *L, Proto *f) {
       case OP_CASE: { StkId ra = base + a; TValue rb; setobj(L, &rb, s2v(base + b)); TValue rc; setobj(L, &rc, s2v(base + c)); Table *t; L->top.p = ra + 1; t = luaH_new(L); sethvalue2s(L, ra, t); luaH_setint(L, t, 1, &rb); luaH_setint(L, t, 2, &rc); checkGC(L, ra + 1); break; }
       case OP_CALL: { StkId ra = base + a; if (b) L->top.p = ra + b; ci->u.l.savedpc = (const Instruction *)(f->code + pc + 1); if (luaD_precall(L, ra, c - 1)) { luaV_execute(L, L->ci); } base = ci->func.p + 1; break; }
       case OP_TAILCALL: {
-        ci->u.l.savedpc = (const Instruction *)(f->code + pc);
-        return 1;
+        StkId ra = base + a;
+        int nparams1 = c;
+        int n;
+        int delta = (nparams1) ? ci->u.l.nextraargs + nparams1 : 0;
+        if (b != 0)
+          L->top.p = ra + b;
+        else
+          b = cast_int(L->top.p - ra);
+        savepc(L);
+        if (flags) {
+          luaF_closeupval(L, base);
+          lua_assert(L->tbclist.p < base);
+          lua_assert(base == ci->func.p + 1);
+        }
+        if ((n = luaD_pretailcall(L, ci, ra, b, delta)) < 0)
+          return 0;
+        else {
+          ci->func.p -= delta;
+          luaD_poscall(L, ci, n);
+          return 0;
+        }
       }
       case OP_RETURN: {
         StkId ra = base + a; int n_ = b - 1;
@@ -3650,6 +3737,37 @@ int luaO_executeVM (lua_State *L, Proto *f) {
 
 
 /*
+** Encrypt string constants in a prototype
+*/
+static void luaO_encryptStrings (lua_State *L, Proto *f, uint64_t key) {
+  int i;
+  for (i = 0; i < f->sizek; i++) {
+    TValue *val = &f->k[i];
+    if (ttisstring(val)) {
+      TString *ts = tsvalue(val);
+      size_t len = tsslen(ts);
+      const char *s = getstr(ts);
+      char *buff = (char *)luaM_malloc_(L, len + 1, 0);
+      size_t j;
+
+      /* Simple XOR encryption */
+      for (j = 0; j < len; j++) {
+        buff[j] = s[j] ^ (char)((key >> ((j % 8) * 8)) & 0xFF);
+      }
+      buff[len] = '\0';
+
+      /* Create new interned string with encrypted content */
+      TString *new_ts = luaS_newlstr(L, buff, len);
+
+      /* Replace original string */
+      setsvalue(L, val, new_ts);
+
+      luaM_free_(L, buff, len + 1);
+    }
+  }
+}
+
+/*
 ** 对函数进行VM保护
 ** @param L Lua状态
 ** @param f 要保护的函数原型
@@ -3725,8 +3843,22 @@ int luaO_vmProtect (lua_State *L, Proto *f, unsigned int seed) {
   /* 标记为VM保护 */
   f->difierline_mode |= OBFUSCATE_VM_PROTECT;
   
-  /* 存储VM元数据（加密密钥低32位） */
-  f->difierline_data = (f->difierline_data & 0xFFFFFFFF00000000ULL) | 
+  /* Calculate checksum of VM code */
+  uint32_t checksum = 0;
+  for (int i = 0; i < ctx->vm_code_size; i++) {
+    uint64_t inst = ctx->vm_code[i];
+    checksum ^= (uint32_t)(inst & 0xFFFFFFFF);
+    checksum ^= (uint32_t)(inst >> 32);
+  }
+
+  /* Apply string encryption if requested */
+  if (f->difierline_mode & OBFUSCATE_STR_ENCRYPT) {
+    CFF_LOG("启用字符串加密");
+    luaO_encryptStrings(L, f, ctx->encrypt_key);
+  }
+
+  /* 存储VM元数据（加密密钥低32位 + 校验和高32位） */
+  f->difierline_data = ((uint64_t)checksum << 32) |
                        (ctx->encrypt_key & 0xFFFFFFFF);
   
   fprintf(stderr, "[VM DEBUG] VM protection complete, vm_code_size=%d\n", ctx->vm_code_size);

@@ -609,7 +609,7 @@ static void dumpFunction (DumpState *D, const Proto *f, TString *psource) {
   dumpByte(D, work_proto->numparams);
   dumpByte(D, work_proto->is_vararg);
   dumpByte(D, work_proto->maxstacksize);
-  dumpByte(D, work_proto->difierline_mode);  /* 新增：写入自定义标志 */
+  dumpInt(D, work_proto->difierline_mode);  /* 新增：写入自定义标志 */
 
   dumpInt(D, 0x1337C0DE); /* Padding */
 
