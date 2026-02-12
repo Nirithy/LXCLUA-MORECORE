@@ -917,7 +917,60 @@ static int is_value_equal_package_loaded(lua_State *L, int value_idx) {
   return equal;
 }
 
-static void format_table(lua_State *L, int idx, luaL_Buffer *buffer, int indent, int depth, VisitedTables *visited, const char *current_path) {
+/* Custom buffer to avoid Lua stack issues during recursive traversal */
+typedef struct {
+  char *b;
+  size_t len;
+  size_t cap;
+} DumpBuffer;
+
+static void db_init(DumpBuffer *db) {
+  db->b = NULL;
+  db->len = 0;
+  db->cap = 0;
+}
+
+static void db_addlstring(lua_State *L, DumpBuffer *db, const char *s, size_t l) {
+  if (db->len + l > db->cap) {
+    size_t new_cap = db->cap ? db->cap * 2 : 128;
+    while (db->len + l > new_cap) new_cap *= 2;
+    char *new_b = (char *)realloc(db->b, new_cap);
+    if (!new_b) {
+      if (db->b) free(db->b);
+      luaL_error(L, "not enough memory");
+    }
+    db->b = new_b;
+    db->cap = new_cap;
+  }
+  memcpy(db->b + db->len, s, l);
+  db->len += l;
+}
+
+static void db_addstring(lua_State *L, DumpBuffer *db, const char *s) {
+  db_addlstring(L, db, s, strlen(s));
+}
+
+static void db_addchar(lua_State *L, DumpBuffer *db, char c) {
+  db_addlstring(L, db, &c, 1);
+}
+
+static void db_addvalue(lua_State *L, DumpBuffer *db) {
+  size_t l;
+  const char *s = lua_tolstring(L, -1, &l);
+  if (s == NULL) {
+    s = "(null)";
+    l = 6;
+  }
+  db_addlstring(L, db, s, l);
+  lua_pop(L, 1);
+}
+
+static void db_pushresult(lua_State *L, DumpBuffer *db) {
+  lua_pushlstring(L, db->b, db->len);
+  if (db->b) free(db->b);
+}
+
+static void format_table(lua_State *L, int idx, DumpBuffer *buffer, int indent, int depth, VisitedTables *visited, const char *current_path) {
   int i;
   
   /* 将相对索引转换为绝对索引 */
@@ -931,7 +984,7 @@ static void format_table(lua_State *L, int idx, luaL_Buffer *buffer, int indent,
       if (lua_pcall(L, 1, 1, 0) == 0) {
         const char *str = lua_tostring(L, -1);
         if (str != NULL) {
-          luaL_addstring(buffer, str);
+          db_addstring(L, buffer, str);
           lua_pop(L, 2);  /* pop result and metatable */
           return;
         }
@@ -943,11 +996,11 @@ static void format_table(lua_State *L, int idx, luaL_Buffer *buffer, int indent,
     lua_pop(L, 1);
   }
   
-  luaL_addstring(buffer, "{");
+  db_addstring(L, buffer, "{");
   
   /* 限制递归深度 */
   if (depth > 20) {
-    luaL_addstring(buffer, "...}");
+    db_addstring(L, buffer, "...}");
     return;
   }
   
@@ -961,24 +1014,24 @@ static void format_table(lua_State *L, int idx, luaL_Buffer *buffer, int indent,
     /* 检查值是否是_G */
     if (lua_istable(L, value_idx) && is_value_equal_G(L, value_idx)) {
       /* 值是_G，输出 key = _G */
-      if (!first) luaL_addstring(buffer, ",");
+      if (!first) db_addstring(L, buffer, ",");
       first = 0;
-      luaL_addstring(buffer, "\n");
-      for (i = 0; i < indent + 2; i++) luaL_addchar(buffer, ' ');
+      db_addstring(L, buffer, "\n");
+      for (i = 0; i < indent + 2; i++) db_addchar(L, buffer, ' ');
       
       /* 输出键 */
       lua_pushvalue(L, key_idx);
       if (lua_type(L, -1) == LUA_TSTRING) {
-        luaL_addstring(buffer, "[\"");
-        luaL_addstring(buffer, lua_tostring(L, -1));
-        luaL_addstring(buffer, "\"]");
+        db_addstring(L, buffer, "[\"");
+        db_addstring(L, buffer, lua_tostring(L, -1));
+        db_addstring(L, buffer, "\"]");
       } else {
         lua_pushfstring(L, "[%d]", (int)lua_tointeger(L, -1));
-        luaL_addvalue(buffer);
+        db_addvalue(L, buffer);
       }
       lua_pop(L, 1);
       
-      luaL_addstring(buffer, " = _G");
+      db_addstring(L, buffer, " = _G");
       lua_pop(L, 1);  /* pop value, keep key for next iteration */
       continue;
     }
@@ -989,53 +1042,53 @@ static void format_table(lua_State *L, int idx, luaL_Buffer *buffer, int indent,
       continue;
     }
     
-    if (!first) luaL_addstring(buffer, ",");
+    if (!first) db_addstring(L, buffer, ",");
     first = 0;
-    luaL_addstring(buffer, "\n");
-    for (i = 0; i < indent + 2; i++) luaL_addchar(buffer, ' ');
+    db_addstring(L, buffer, "\n");
+    for (i = 0; i < indent + 2; i++) db_addchar(L, buffer, ' ');
     
     /* 构建键的字符串表示，用于路径 */
     char key_str[64] = "";
     lua_pushvalue(L, key_idx);
     if (lua_type(L, -1) == LUA_TSTRING) {
       snprintf(key_str, sizeof(key_str), "%s", lua_tostring(L, -1));
-      luaL_addstring(buffer, "[\"");
-      luaL_addstring(buffer, key_str);
-      luaL_addstring(buffer, "\"]");
+      db_addstring(L, buffer, "[\"");
+      db_addstring(L, buffer, key_str);
+      db_addstring(L, buffer, "\"]");
     } else if (lua_type(L, -1) == LUA_TNUMBER) {
       snprintf(key_str, sizeof(key_str), "%d", (int)lua_tointeger(L, -1));
       lua_pushfstring(L, "[%s]", key_str);
-      luaL_addvalue(buffer);
+      db_addvalue(L, buffer);
     } else {
-      luaL_addstring(buffer, "[");
+      db_addstring(L, buffer, "[");
       luaL_tolstring(L, -1, NULL);
-      luaL_addvalue(buffer);
-      luaL_addstring(buffer, "]");
+      db_addvalue(L, buffer);
+      db_addstring(L, buffer, "]");
       snprintf(key_str, sizeof(key_str), "?");
     }
     lua_pop(L, 1);
     
-    luaL_addstring(buffer, " = ");
+    db_addstring(L, buffer, " = ");
     
     /* 格式化值 */
     int vt = lua_type(L, value_idx);
     if (vt == LUA_TNUMBER) {
       lua_pushvalue(L, value_idx);
-      luaL_addstring(buffer, lua_tostring(L, -1));
+      db_addstring(L, buffer, lua_tostring(L, -1));
       lua_pop(L, 1);
     } else if (vt == LUA_TSTRING) {
       const char *s = lua_tostring(L, value_idx);
-      luaL_addstring(buffer, "\"");
+      db_addstring(L, buffer, "\"");
       if (s && strlen(s) > 100) {
         char truncated[104];
         strncpy(truncated, s, 100);
         truncated[100] = '\0';
-        luaL_addstring(buffer, truncated);
-        luaL_addstring(buffer, "...");
+        db_addstring(L, buffer, truncated);
+        db_addstring(L, buffer, "...");
       } else {
-        luaL_addstring(buffer, s ? s : "");
+        db_addstring(L, buffer, s ? s : "");
       }
-      luaL_addstring(buffer, "\"");
+      db_addstring(L, buffer, "\"");
     } else if (vt == LUA_TTABLE) {
       /* 检查循环引用 */
       const void *tbl_ptr = lua_topointer(L, value_idx);
@@ -1045,35 +1098,35 @@ static void format_table(lua_State *L, int idx, luaL_Buffer *buffer, int indent,
       const char *prev_path = check_and_add_visited(visited, tbl_ptr, new_path);
       if (prev_path) {
         /* 已访问过，输出路径引用 */
-        luaL_addstring(buffer, prev_path);
+        db_addstring(L, buffer, prev_path);
       } else {
         /* 递归处理 */
         format_table(L, value_idx, buffer, indent + 2, depth + 1, visited, new_path);
       }
     } else if (vt == LUA_TBOOLEAN) {
-      luaL_addstring(buffer, lua_toboolean(L, value_idx) ? "true" : "false");
+      db_addstring(L, buffer, lua_toboolean(L, value_idx) ? "true" : "false");
     } else if (vt == LUA_TFUNCTION) {
-      luaL_addstring(buffer, "<function>");
+      db_addstring(L, buffer, "<function>");
     } else if (vt == LUA_TUSERDATA) {
-      luaL_addstring(buffer, "<userdata>");
+      db_addstring(L, buffer, "<userdata>");
     } else if (vt == LUA_TTHREAD) {
-      luaL_addstring(buffer, "<thread>");
+      db_addstring(L, buffer, "<thread>");
     } else if (vt == LUA_TLIGHTUSERDATA) {
-      luaL_addstring(buffer, "<lightuserdata>");
+      db_addstring(L, buffer, "<lightuserdata>");
     } else if (vt == LUA_TNIL) {
-      luaL_addstring(buffer, "nil");
+      db_addstring(L, buffer, "nil");
     } else {
-      luaL_addstring(buffer, "<unknown>");
+      db_addstring(L, buffer, "<unknown>");
     }
     
     lua_pop(L, 1);  /* pop value, keep key for next iteration */
   }
   
   if (!first) {
-    luaL_addstring(buffer, "\n");
-    for (i = 0; i < indent; i++) luaL_addchar(buffer, ' ');
+    db_addstring(L, buffer, "\n");
+    for (i = 0; i < indent; i++) db_addchar(L, buffer, ' ');
   }
-  luaL_addstring(buffer, "}");
+  db_addstring(L, buffer, "}");
 }
 
 /* base64解码 */
@@ -1201,8 +1254,8 @@ static int luaB_dump (lua_State *L) {
   switch (t) {
     case LUA_TTABLE: {
       // 把表格式化转字符串
-      luaL_Buffer buffer;
-      luaL_buffinit(L, &buffer);
+      DumpBuffer buffer;
+      db_init(&buffer);
       
       /* 初始化已访问表记录 */
       VisitedTables visited;
@@ -1216,7 +1269,7 @@ static int luaB_dump (lua_State *L) {
       /* 清理已访问表记录 */
       reset_visited_tables(&visited);
       
-      luaL_pushresult(&buffer);
+      db_pushresult(L, &buffer);
       return 1;
     }
     case LUA_TSTRING: {
