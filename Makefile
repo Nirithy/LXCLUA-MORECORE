@@ -63,7 +63,7 @@ o:	$(ALL_O)
 a:	$(ALL_A)
 
 $(LUA_A): $(BASE_O)
-	$(AR) $@ $(BASE_O)
+	$(AR) $@ $(BASE_O) $(if $(findstring .dll,$(LUA_A)),$(LDFLAGS) $(LIBS))
 	$(RANLIB) $@
 
 $(LUA_T): $(LUA_O) $(LUA_A)
@@ -147,25 +147,25 @@ Darwin macos macosx:
 
 mingw:
 	TMPDIR=. TMP=. TEMP=. $(MAKE) "LUA_A=lua55.dll" "LUA_T=lxclua.exe" \
-	"AR=$(CC) -shared -lwininet -o" "RANLIB=strip --strip-unneeded" \
-	"SYSCFLAGS=-DLUA_BUILD_AS_DLL -DLUA_USE_DLOPEN -DLUA_COMPAT_MATHLIB -DLUA_COMPAT_MAXN -DLUA_COMPAT_MODULE" "SYSLIBS=-lwininet $(MYLIBS)" "SYSLDFLAGS=-s" \
+	"AR=$(CC) -shared -o" "RANLIB=strip --strip-unneeded" \
+	"SYSCFLAGS=-DLUA_BUILD_AS_DLL -DLUA_USE_DLOPEN -DLUA_COMPAT_MATHLIB -DLUA_COMPAT_MAXN -DLUA_COMPAT_MODULE" "SYSLIBS=$(MYLIBS)" "SYSLDFLAGS=-s -lwininet" \
 	"MYOBJS=$(MYOBJS)" lxclua.exe
 	TMPDIR=. TMP=. TEMP=. $(MAKE) "LUA_A=lua55.dll" "LUAC_T=luac.exe" \
-	"AR=$(CC) -shared -lwininet -o" "RANLIB=strip --strip-unneeded" \
-	"SYSCFLAGS=-DLUA_BUILD_AS_DLL -DLUA_USE_DLOPEN -DLUA_COMPAT_MATHLIB -DLUA_COMPAT_MAXN -DLUA_COMPAT_MODULE" "SYSLIBS=-lwininet $(MYLIBS)" "SYSLDFLAGS=-s" \
+	"AR=$(CC) -shared -o" "RANLIB=strip --strip-unneeded" \
+	"SYSCFLAGS=-DLUA_BUILD_AS_DLL -DLUA_USE_DLOPEN -DLUA_COMPAT_MATHLIB -DLUA_COMPAT_MAXN -DLUA_COMPAT_MODULE" "SYSLIBS=$(MYLIBS)" "SYSLDFLAGS=-s -lwininet" \
 	luac.exe
-	TMPDIR=. TMP=. TEMP=. $(MAKE) "LBCDUMP_T=lbcdump.exe" "SYSLDFLAGS=-s" lbcdump.exe
+	TMPDIR=. TMP=. TEMP=. $(MAKE) "LBCDUMP_T=lbcdump.exe" "SYSLDFLAGS=-s -lwininet" lbcdump.exe
 
 mingw-static:
 	TMPDIR=. TMP=. TEMP=. $(MAKE) "LUA_A=liblua.a" "LUA_T=lxclua.exe" \
 	"AR=$(AR)" "RANLIB=$(RANLIB)" \
-	"SYSCFLAGS=-DLUA_USE_DLOPEN -DLUA_COMPAT_MATHLIB -DLUA_COMPAT_MAXN -DLUA_COMPAT_MODULE" "SYSLIBS=-lwininet $(MYLIBS)" "SYSLDFLAGS=-s" \
+	"SYSCFLAGS=-DLUA_USE_DLOPEN -DLUA_COMPAT_MATHLIB -DLUA_COMPAT_MAXN -DLUA_COMPAT_MODULE" "SYSLIBS=$(MYLIBS)" "SYSLDFLAGS=-s -lwininet" \
 	"MYOBJS=$(MYOBJS)" lxclua.exe
 	TMPDIR=. TMP=. TEMP=. $(MAKE) "LUA_A=liblua.a" "LUAC_T=luac.exe" \
 	"AR=$(AR)" "RANLIB=$(RANLIB)" \
-	"SYSCFLAGS=-DLUA_USE_DLOPEN -DLUA_COMPAT_MATHLIB -DLUA_COMPAT_MAXN -DLUA_COMPAT_MODULE" "SYSLIBS=-lwininet $(MYLIBS)" "SYSLDFLAGS=-s" \
+	"SYSCFLAGS=-DLUA_USE_DLOPEN -DLUA_COMPAT_MATHLIB -DLUA_COMPAT_MAXN -DLUA_COMPAT_MODULE" "SYSLIBS=$(MYLIBS)" "SYSLDFLAGS=-s -lwininet" \
 	luac.exe
-	TMPDIR=. TMP=. TEMP=. $(MAKE) "LBCDUMP_T=lbcdump.exe" "SYSLDFLAGS=-s" lbcdump.exe
+	TMPDIR=. TMP=. TEMP=. $(MAKE) "LBCDUMP_T=lbcdump.exe" "SYSLDFLAGS=-s -lwininet" lbcdump.exe
 
 
 posix:
