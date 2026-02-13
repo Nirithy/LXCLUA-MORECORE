@@ -223,7 +223,7 @@ static int os_getenv (lua_State *L) {
 
 
 static int os_clock (lua_State *L) {
-#if defined(CLOCK_PROCESS_CPUTIME_ID)
+#if !defined(_WIN32) && defined(CLOCK_PROCESS_CPUTIME_ID)
   struct timespec ts;
   if (clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts) == 0) {
     lua_pushnumber(L, (lua_Number)ts.tv_sec + (lua_Number)ts.tv_nsec / 1.0e9);
