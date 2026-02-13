@@ -1243,6 +1243,15 @@ static void codeclosure (LexState *ls, expdesc *v) {
   luaK_exp2nextreg(fs, v);  /* fix it at the last register */
 }
 
+/*
+** codes instruction to create new concept in parent function.
+*/
+static void codeconcept (LexState *ls, expdesc *v) {
+  FuncState *fs = ls->fs->prev;
+  init_exp(v, VRELOC, luaK_codeABx(fs, OP_NEWCONCEPT, 0, fs->np - 1));
+  luaK_exp2nextreg(fs, v);  /* fix it at the last register */
+}
+
 
 static void open_func (LexState *ls, FuncState *fs, BlockCnt *bl) {
   Proto *f = fs->f;
@@ -9209,14 +9218,14 @@ static void conceptstat (LexState *ls, int line) {
       luaK_ret(&new_fs, luaK_exp2anyreg(&new_fs, &e), 1);
 
       new_fs.f->lastlinedefined = ls->linenumber;
-      codeclosure(ls, &b);
+      codeconcept(ls, &b);
       close_func(ls);
   } else {
       statlist(ls);
       check_match(ls, TK_END, TK_CONCEPT, line);
 
       new_fs.f->lastlinedefined = ls->linenumber;
-      codeclosure(ls, &b);
+      codeconcept(ls, &b);
       close_func(ls);
   }
 

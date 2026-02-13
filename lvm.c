@@ -1330,6 +1330,23 @@ static void pushclosure (lua_State *L, Proto *p, UpVal **encup, StkId base,
   }
 }
 
+static void pushconcept (lua_State *L, Proto *p, UpVal **encup, StkId base,
+                         StkId ra) {
+  int nup = p->sizeupvalues;
+  Upvaldesc *uv = p->upvalues;
+  int i;
+  Concept *ncl = luaF_newconcept(L, nup);
+  ncl->p = p;
+  setclConceptValue(L, s2v(ra), ncl);  /* anchor new closure in stack */
+  for (i = 0; i < nup; i++) {  /* fill in its upvalues */
+    if (uv[i].instack)  /* upvalue refers to local variable? */
+      ncl->upvals[i] = luaF_findupval(L, base + uv[i].idx);
+    else  /* get upvalue from enclosing function */
+      ncl->upvals[i] = encup[uv[i].idx];
+    luaC_objbarrier(L, ncl, ncl->upvals[i]);
+  }
+}
+
 
 /**
  * @brief Finish execution of an opcode interrupted by a yield.
@@ -2676,6 +2693,13 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
         StkId ra = RA(i);
         Proto *p = cl->p->p[GETARG_Bx(i)];
         halfProtect(pushclosure(L, p, cl->upvals, base, ra));
+        checkGC(L, ra + 1);
+        vmbreak;
+      }
+      vmcase(OP_NEWCONCEPT) {
+        StkId ra = RA(i);
+        Proto *p = cl->p->p[GETARG_Bx(i)];
+        halfProtect(pushconcept(L, p, cl->upvals, base, ra));
         checkGC(L, ra + 1);
         vmbreak;
       }

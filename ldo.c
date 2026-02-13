@@ -769,6 +769,25 @@ int luaD_pretailcall (lua_State *L, CallInfo *ci, StkId func,
       return precallC(L, func, LUA_MULTRET, clCvalue(s2v(func))->f);
     case LUA_VLCF:  /* light C function */
       return precallC(L, func, LUA_MULTRET, fvalue(s2v(func)));
+    case LUA_VCONCEPT: {  /* Lua concept */
+      Proto *p = gco2concept(val_(s2v(func)).gc)->p;
+      int fsize = p->maxstacksize;  /* frame size */
+      int nfixparams = p->numparams;
+      int i;
+      checkstackGCp(L, fsize - delta, func);
+      ci->func.p -= delta;  /* restore 'func' (if vararg) */
+      for (i = 0; i < narg1; i++)  /* move down function and arguments */
+        setobjs2s(L, ci->func.p + i, func + i);
+      func = ci->func.p;  /* moved-down function */
+      for (; narg1 <= nfixparams; narg1++)
+        setnilvalue(s2v(func + narg1));  /* complete missing arguments */
+      ci->top.p = func + 1 + fsize;  /* top for new function */
+      lua_assert(ci->top.p <= L->stack_last.p);
+      ci->u.l.savedpc = p->code;  /* starting point */
+      ci->callstatus |= CIST_TAIL;
+      L->top.p = func + narg1;  /* set top */
+      return -1;
+    }
     case LUA_VLCL: {  /* Lua function */
       Proto *p = clLvalue(s2v(func))->p;
       int fsize = p->maxstacksize;  /* frame size */
@@ -817,6 +836,40 @@ CallInfo *luaD_precall (lua_State *L, StkId func, int nresults) {
     case LUA_VLCF:  /* light C function */
       precallC(L, func, nresults, fvalue(s2v(func)));
       return NULL;
+    case LUA_VCONCEPT: {  /* Lua concept */
+      CallInfo *ci;
+      Proto *p = gco2concept(val_(s2v(func)).gc)->p;
+
+      /* Enhanced Upvalue check */
+      if (p->sizeupvalues > 0) {
+        for (int i = 0; i < p->sizeupvalues; i++) {
+          const Upvaldesc *uv = &p->upvalues[i];
+          // Check instack value
+          if (uv->instack != 0 && uv->instack != 1) {
+            luaG_runerror(L, "invalid upvalue instack value");
+          }
+          // Check idx value range (lu_byte max 255)
+          if (uv->idx > 255) {
+            luaG_runerror(L, "invalid upvalue idx value");
+          }
+          // Check kind value
+          if (uv->kind < 0 || uv->kind > 2) {
+            luaG_runerror(L, "invalid upvalue kind value");
+          }
+        }
+      }
+
+      int narg = cast_int(L->top.p - func) - 1;  /* number of real arguments */
+      int nfixparams = p->numparams;
+      int fsize = p->maxstacksize;  /* frame size */
+      checkstackGCp(L, fsize, func);
+      L->ci = ci = prepCallInfo(L, func, nresults, 0, func + 1 + fsize);
+      ci->u.l.savedpc = p->code;  /* starting point */
+      for (; narg < nfixparams; narg++)
+        setnilvalue(s2v(L->top.p++));  /* complete missing arguments */
+      lua_assert(ci->top.p <= L->stack_last.p);
+      return ci;
+    }
     case LUA_VLCL: {  /* Lua function */
       CallInfo *ci;
       Proto *p = clLvalue(s2v(func))->p;

@@ -60,6 +60,24 @@ LClosure *luaF_newLclosure (lua_State *L, int nupvals) {
 
 
 /**
+ * @brief Creates a new Concept.
+ *
+ * @param L The Lua state.
+ * @param nupvals Number of upvalues.
+ * @return The new Concept.
+ */
+Concept *luaF_newconcept (lua_State *L, int nupvals) {
+  GCObject *o = luaC_newobj(L, LUA_VCONCEPT, sizeConcept(nupvals));
+  Concept *c = gco2concept(o);
+  c->p = NULL;
+  c->nupvalues = cast_byte(nupvals);
+  c->ishotfixed = 0;
+  while (nupvals--) c->upvals[nupvals] = NULL;
+  return c;
+}
+
+
+/**
  * @brief Fills a closure with new closed upvalues.
  *
  * @param L The Lua state.
