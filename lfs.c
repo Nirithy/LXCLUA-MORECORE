@@ -19,6 +19,9 @@
 #include "lauxlib.h"
 #include "lualib.h"
 
+#include <sys/stat.h>
+#include <sys/types.h>
+
 #if defined(_WIN32)
 #include <windows.h>
 #include <direct.h>
@@ -29,12 +32,12 @@
 #define rmdir _rmdir
 #define access _access
 #define F_OK 0
+#ifndef PATH_MAX
 #define PATH_MAX _MAX_PATH
+#endif
 #else
 #include <unistd.h>
 #include <dirent.h>
-#include <sys/stat.h>
-#include <sys/types.h>
 #include <limits.h> /* for PATH_MAX */
 #endif
 
