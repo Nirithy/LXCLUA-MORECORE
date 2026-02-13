@@ -64,7 +64,42 @@ static int vm_compile(lua_State *L, Proto *p) {
   /* 3. Code Table (Index 4) */
   lua_createtable(L, p->sizecode, 0);
   for (int i = 0; i < p->sizecode; i++) {
-    lua_pushinteger(L, inst2int(p->code[i]));
+    Instruction inst = p->code[i];
+    lua_createtable(L, 0, 9);
+
+    lua_pushinteger(L, GET_OPCODE(inst));
+    lua_setfield(L, -2, "op");
+
+    lua_pushinteger(L, GETARG_A(inst));
+    lua_setfield(L, -2, "a");
+
+    lua_pushinteger(L, GETARG_B(inst));
+    lua_setfield(L, -2, "b");
+
+    lua_pushinteger(L, GETARG_C(inst));
+    lua_setfield(L, -2, "c");
+
+    lua_pushinteger(L, GETARG_k(inst));
+    lua_setfield(L, -2, "k");
+
+    lua_pushinteger(L, GETARG_Bx(inst));
+    lua_setfield(L, -2, "bx");
+
+    lua_pushinteger(L, GETARG_sBx(inst));
+    lua_setfield(L, -2, "sbx");
+
+    lua_pushinteger(L, GETARG_Ax(inst));
+    lua_setfield(L, -2, "ax");
+
+    lua_pushinteger(L, GETARG_sJ(inst));
+    lua_setfield(L, -2, "sj");
+
+    lua_pushinteger(L, GETARG_sC(inst));
+    lua_setfield(L, -2, "sc");
+
+    lua_pushinteger(L, GETARG_sB(inst));
+    lua_setfield(L, -2, "sb");
+
     lua_rawseti(L, -2, i + 1);
   }
 
@@ -75,7 +110,7 @@ static int vm_compile(lua_State *L, Proto *p) {
   luaL_Buffer b;
   luaL_buffinit(L, &b);
 
-  luaL_addstring(&b, "local _k, _p, _code, _nup = ...\n");
+  luaL_addstring(&b, "local _constants, _protos, _instructions, _num_upvalues = ...\n");
   luaL_addstring(&b, "return function(...)\n");
   luaL_addstring(&b, "  local _regs = table.pack(...)\n");
   luaL_addstring(&b, "  local _top = _regs.n\n");
@@ -83,22 +118,23 @@ static int vm_compile(lua_State *L, Proto *p) {
   luaL_addstring(&b, "  local _up = {}\n");
 
   luaL_addstring(&b, "  while true do\n");
-  luaL_addstring(&b, "    local _inst = _code[_pc]\n");
+  luaL_addstring(&b, "    local _inst = _instructions[_pc]\n");
   luaL_addstring(&b, "    if not _inst then return end\n");
 
-  luaL_addstring(&b, "    local _op = _inst & 0x1FF\n");
-  luaL_addstring(&b, "    local _a = (_inst >> 9) & 0xFFFF\n");
-  luaL_addstring(&b, "    local _k = (_inst >> 25) & 1\n");
-  luaL_addstring(&b, "    local _b = (_inst >> 26) & 0xFFFF\n");
-  luaL_addstring(&b, "    local _c = (_inst >> 42) & 0xFFFF\n");
-  luaL_addstring(&b, "    local _bx = (_inst >> 25) & 0x1FFFFFFFF\n");
-  lua_pushfstring(L, "    local _sbx = _bx - %d\n", OFFSET_sBx);
-  luaL_addvalue(&b);
+  luaL_addstring(&b, "    local _op = _inst.op\n");
+  luaL_addstring(&b, "    local _a = _inst.a\n");
+  luaL_addstring(&b, "    local _k = _inst.k\n");
+  luaL_addstring(&b, "    local _b = _inst.b\n");
+  luaL_addstring(&b, "    local _c = _inst.c\n");
+  luaL_addstring(&b, "    local _bx = _inst.bx\n");
+  luaL_addstring(&b, "    local _sbx = _inst.sbx\n");
+    luaL_addstring(&b, "    local _sc = _inst.sc\n");
+    luaL_addstring(&b, "    local _sb = _inst.sb\n");
 
   /* Helpers */
   luaL_addstring(&b, "    local function R(i) return _regs[i+1] end\n");
   luaL_addstring(&b, "    local function SR(i, v) _regs[i+1] = v end\n");
-  luaL_addstring(&b, "    local function K(i) return _k[i] end\n");
+  luaL_addstring(&b, "    local function K(i) return _constants[i] end\n");
 
   luaL_addstring(&b, "    _pc = _pc + 1\n");
 
@@ -109,22 +145,39 @@ static int vm_compile(lua_State *L, Proto *p) {
   gen_opcode(L, &b, OP_LOADK, "OP_LOADK", "      SR(_a, K(_bx))\n");
   gen_opcode(L, &b, OP_LOADNIL, "OP_LOADNIL", "      for i = _a, _a + _b do SR(i, nil) end\n");
 
+  gen_opcode(L, &b, OP_GETTABUP, "OP_GETTABUP",
+    "      local key = K(_c)\n"
+    "      local val\n"
+    "      if _inst.b == 0 then\n"
+    "        val = _ENV[key]\n"
+    "      else\n"
+    "        val = nil -- UpValues not fully supported\n"
+    "      end\n"
+    "      SR(_a, val)\n");
+
+  gen_opcode(L, &b, OP_ADDI, "OP_ADDI", "      SR(_a, R(_b) + _sc)\n");
   gen_opcode(L, &b, OP_ADD, "OP_ADD", "      SR(_a, R(_b) + R(_c))\n");
   gen_opcode(L, &b, OP_SUB, "OP_SUB", "      SR(_a, R(_b) - R(_c))\n");
   gen_opcode(L, &b, OP_MUL, "OP_MUL", "      SR(_a, R(_b) * R(_c))\n");
   gen_opcode(L, &b, OP_DIV, "OP_DIV", "      SR(_a, R(_b) / R(_c))\n");
+
+  gen_opcode(L, &b, OP_SHLI, "OP_SHLI", "      SR(_a, R(_b) << _sc)\n");
+  gen_opcode(L, &b, OP_SHRI, "OP_SHRI", "      SR(_a, R(_b) >> _sc)\n");
 
   gen_opcode(L, &b, OP_ADDK, "OP_ADDK", "      SR(_a, R(_b) + K(_c))\n");
   gen_opcode(L, &b, OP_SUBK, "OP_SUBK", "      SR(_a, R(_b) - K(_c))\n");
   gen_opcode(L, &b, OP_MULK, "OP_MULK", "      SR(_a, R(_b) * K(_c))\n");
   gen_opcode(L, &b, OP_DIVK, "OP_DIVK", "      SR(_a, R(_b) / K(_c))\n");
 
+  /* Metamethod helpers (no-op in this VM) */
+  gen_opcode(L, &b, OP_MMBIN, "OP_MMBIN", "\n");
+  gen_opcode(L, &b, OP_MMBINI, "OP_MMBINI", "\n");
+  gen_opcode(L, &b, OP_MMBINK, "OP_MMBINK", "\n");
+
   lua_pushfstring(L, "    elseif _op == %d then -- OP_JMP\n", OP_JMP);
   luaL_addvalue(&b);
-  luaL_addstring(&b, "      local _sj = (_inst >> 9) & 0x1FFFFFFFFFFFF\n");
-  lua_pushfstring(L, "      local _real_sj = _sj - %d\n", OFFSET_sJ);
-  luaL_addvalue(&b);
-  luaL_addstring(&b, "      _pc = _pc + _real_sj - 1\n");
+  luaL_addstring(&b, "      local _sj = _inst.sj\n");
+  luaL_addstring(&b, "      _pc = _pc + _sj\n");
 
   /* Comparison */
   gen_opcode(L, &b, OP_EQ, "OP_EQ",
@@ -137,6 +190,26 @@ static int vm_compile(lua_State *L, Proto *p) {
 
   gen_opcode(L, &b, OP_LE, "OP_LE",
     "      local val = (R(_a) <= R(_b))\n"
+    "      if (val ~= (_k~=0)) then _pc = _pc + 1 end\n");
+
+  gen_opcode(L, &b, OP_EQI, "OP_EQI",
+    "      local val = (R(_a) == _sb)\n"
+    "      if (val ~= (_k~=0)) then _pc = _pc + 1 end\n");
+
+  gen_opcode(L, &b, OP_LTI, "OP_LTI",
+    "      local val = (R(_a) < _sb)\n"
+    "      if (val ~= (_k~=0)) then _pc = _pc + 1 end\n");
+
+  gen_opcode(L, &b, OP_LEI, "OP_LEI",
+    "      local val = (R(_a) <= _sb)\n"
+    "      if (val ~= (_k~=0)) then _pc = _pc + 1 end\n");
+
+  gen_opcode(L, &b, OP_GTI, "OP_GTI",
+    "      local val = (R(_a) > _sb)\n"
+    "      if (val ~= (_k~=0)) then _pc = _pc + 1 end\n");
+
+  gen_opcode(L, &b, OP_GEI, "OP_GEI",
+    "      local val = (R(_a) >= _sb)\n"
     "      if (val ~= (_k~=0)) then _pc = _pc + 1 end\n");
 
   /* Returns */
@@ -168,7 +241,7 @@ static int vm_compile(lua_State *L, Proto *p) {
     "      for i=1, nres do SR(_a+i-1, results[i]) end\n");
 
   /* Closure */
-  gen_opcode(L, &b, OP_CLOSURE, "OP_CLOSURE", "       SR(_a, _p[_bx])\n");
+  gen_opcode(L, &b, OP_CLOSURE, "OP_CLOSURE", "       SR(_a, _protos[_bx])\n");
 
   luaL_addstring(&b, "    else\n");
   luaL_addstring(&b, "      error('Unimplemented VMP opcode: ' .. _op)\n");
@@ -184,13 +257,9 @@ static int vm_compile(lua_State *L, Proto *p) {
   }
 
   lua_remove(L, -2); /* source */
+  lua_remove(L, -2); /* placeholder from luaL_pushresult */
 
   /* Call Factory */
-  int top = lua_gettop(L);
-  printf("DEBUG Top: %d\n", top);
-  if (top > 0) printf("Type at top: %s\n", lua_typename(L, lua_type(L, top)));
-  if (top > 1) printf("Type at top-1: %s\n", lua_typename(L, lua_type(L, top-1)));
-
   /* Stack: f(1), k(2), p(3), code(4), nup(5), factory(6) */
 
   lua_pushvalue(L, 2); // k
