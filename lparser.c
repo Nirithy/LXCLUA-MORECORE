@@ -10042,7 +10042,52 @@ static void structstat (LexState *ls, int line, int isexport) {
               TString *type_name = str_checkname(ls);
               fname = str_checkname(ls);
 
-              if (ls->t.token == '=') {
+              if (ls->t.token == '[') {
+                  luaX_next(ls); /* skip '[' */
+
+                  expdesc array_func;
+                  singlevaraux(fs, luaS_newliteral(ls->L, "array"), &array_func, 1);
+                  if (array_func.k == VVOID) {
+                      expdesc k;
+                      singlevaraux(fs, ls->envn, &array_func, 1);
+                      codestring(&k, luaS_newliteral(ls->L, "array"));
+                      luaK_indexed(fs, &array_func, &k);
+                  }
+                  luaK_exp2nextreg(fs, &array_func);
+                  int base = array_func.u.info;
+
+                  expdesc type_arg;
+                  const char *tname = getstr(type_name);
+                  if (strcmp(tname, "int") == 0 || strcmp(tname, "integer") == 0 ||
+                      strcmp(tname, "float") == 0 || strcmp(tname, "number") == 0 ||
+                      strcmp(tname, "bool") == 0 || strcmp(tname, "boolean") == 0 ||
+                      strcmp(tname, "string") == 0) {
+                      codestring(&type_arg, type_name);
+                  } else {
+                      singlevaraux(fs, type_name, &type_arg, 1);
+                      if (type_arg.k == VVOID) {
+                          expdesc k;
+                          singlevaraux(fs, ls->envn, &type_arg, 1);
+                          codestring(&k, type_name);
+                          luaK_indexed(fs, &type_arg, &k);
+                      }
+                  }
+                  luaK_exp2nextreg(fs, &type_arg);
+
+                  luaK_codeABC(fs, OP_CALL, base, 2, 2);
+                  /* Result (factory) is in 'base' */
+
+                  expdesc size_exp;
+                  expr(ls, &size_exp);
+                  checknext(ls, ']');
+
+                  expdesc factory_exp;
+                  init_exp(&factory_exp, VNONRELOC, base);
+                  luaK_indexed(fs, &factory_exp, &size_exp);
+
+                  luaK_exp2nextreg(fs, &factory_exp);
+                  val_exp = factory_exp;
+              } else if (ls->t.token == '=') {
                   luaX_next(ls);
                   expr(ls, &val_exp);
               } else {
