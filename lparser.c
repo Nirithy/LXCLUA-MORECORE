@@ -576,6 +576,19 @@ static TString *str_checkname (LexState *ls) {
   return ts;
 }
 
+static int is_type_token(int token);
+
+static TString *str_checkname_allow_types (LexState *ls) {
+  TString *ts;
+  if (ls->t.token == TK_NAME || is_type_token(ls->t.token)) {
+     ts = ls->t.seminfo.ts;
+     luaX_next(ls);
+     return ts;
+  }
+  check(ls, TK_NAME);
+  return NULL;
+}
+
 
 static void init_exp (expdesc *e, expkind k, int i) {
   e->f = e->t = NO_JUMP;
@@ -929,7 +942,7 @@ static void singlevaraux (FuncState *fs, TString *n, expdesc *var, int base) {
 ** too.
 */
 static void singlevar (LexState *ls, expdesc *var) {
-  TString *varname = str_checkname(ls);
+  TString *varname = str_checkname_allow_types(ls);
   FuncState *fs = ls->fs;
   singlevaraux(fs, varname, var, 1);
   if (var->k == VVOID) {  /* global name? */
@@ -1442,6 +1455,13 @@ static void fieldsel (LexState *ls, expdesc *v) {
       case TK_WHILE: ts = luaS_newliteral(ls->L, "while"); break;
       case TK_KEYWORD: ts = luaS_newliteral(ls->L, "keyword"); break;
       case TK_OPERATOR: ts = luaS_newliteral(ls->L, "operator"); break;
+      case TK_TYPE_INT: ts = luaS_newliteral(ls->L, "int"); break;
+      case TK_TYPE_FLOAT: ts = luaS_newliteral(ls->L, "float"); break;
+      case TK_DOUBLE: ts = luaS_newliteral(ls->L, "double"); break;
+      case TK_BOOL: ts = luaS_newliteral(ls->L, "bool"); break;
+      case TK_VOID: ts = luaS_newliteral(ls->L, "void"); break;
+      case TK_CHAR: ts = luaS_newliteral(ls->L, "char"); break;
+      case TK_LONG: ts = luaS_newliteral(ls->L, "long"); break;
       default: error_expected(ls, TK_NAME);
     }
     codestring(&key, ts);
@@ -1725,9 +1745,10 @@ static void recfield (LexState *ls, ConsControl *cc) {
   FuncState *fs = ls->fs;
   int reg = ls->fs->freereg;
   expdesc tab, key, val;
-  if (ls->t.token == TK_NAME) {
+  if (ls->t.token == TK_NAME || is_type_token(ls->t.token)) {
     checklimit(fs, cc->nh, MAX_INT, "items in a constructor");
-    codename(ls, &key);
+    TString *ts = str_checkname_allow_types(ls);
+    codestring(&key, ts);
   }
   else  /* ls->t.token == '[' */
     yindex(ls, &key);
@@ -1781,7 +1802,14 @@ static void listfield (LexState *ls, ConsControl *cc) {
 static void field (LexState *ls, ConsControl *cc) {
   /* field -> listfield | recfield */
   switch(ls->t.token) {
-    case TK_NAME: {  /* may be 'listfield' or 'recfield' */
+    case TK_NAME:
+    case TK_TYPE_INT:
+    case TK_TYPE_FLOAT:
+    case TK_DOUBLE:
+    case TK_BOOL:
+    case TK_VOID:
+    case TK_CHAR:
+    case TK_LONG: {  /* may be 'listfield' or 'recfield' */
       int lookahead = luaX_lookahead(ls);
       if (lookahead != '=' && lookahead != ':')  /* expression? */
         listfield(ls, cc);
@@ -1868,23 +1896,21 @@ static void parlist (LexState *ls, TString **varargname) {
   int isvararg = 0;
   if (ls->t.token != ')') {  /* is 'parlist' not empty? */
     do {
-      switch (ls->t.token) {
-        case TK_NAME: {
-          int vidx = new_localvar(ls, str_checkname(ls));
+      if (ls->t.token == TK_NAME || is_type_token(ls->t.token)) {
+          int vidx = new_localvar(ls, str_checkname_allow_types(ls));
           getlocalvardesc(fs, vidx)->vd.hint = gettypehint(ls);
           nparams++;
-          break;
-        }
-        case TK_DOTS: {
+      }
+      else if (ls->t.token == TK_DOTS) {
           luaX_next(ls);
           isvararg = 1;
           if (varargname && ls->t.token == TK_NAME) {
              *varargname = ls->t.seminfo.ts;
              luaX_next(ls);
           }
-          break;
-        }
-        default: luaX_syntaxerror(ls, "<name> or '...' expected");
+      }
+      else {
+          luaX_syntaxerror(ls, "<name> or '...' expected");
       }
     } while (!isvararg && testnext(ls, ','));
   }
@@ -2297,24 +2323,22 @@ static void lambda_parlist(LexState *ls, TString **varargname) {
     Proto *f = fs->f;
     int nparams = 0;
     f->is_vararg = 0;
-    if (ls->t.token == TK_NAME || ls->t.token == TK_DOTS) {
+    if (ls->t.token == TK_NAME || ls->t.token == TK_DOTS || is_type_token(ls->t.token)) {
         do {
-            switch (ls->t.token) {
-                case TK_NAME: {  /* param -> NAME */
-                    new_localvar(ls, str_checkname(ls));
-                    nparams++;
-                    break;
+            if (ls->t.token == TK_NAME || is_type_token(ls->t.token)) {  /* param -> NAME */
+                new_localvar(ls, str_checkname_allow_types(ls));
+                nparams++;
+            }
+            else if (ls->t.token == TK_DOTS) {  /* param -> '...' */
+                luaX_next(ls);
+                f->is_vararg = 1;
+                if (varargname && ls->t.token == TK_NAME) {
+                   *varargname = ls->t.seminfo.ts;
+                   luaX_next(ls);
                 }
-                case TK_DOTS: {  /* param -> '...' */
-                    luaX_next(ls);
-                    f->is_vararg = 1;
-                    if (varargname && ls->t.token == TK_NAME) {
-                       *varargname = ls->t.seminfo.ts;
-                       luaX_next(ls);
-                    }
-                    break;
-                }
-                default: luaX_syntaxerror(ls, "<name> or '...' expected");
+            }
+            else {
+                luaX_syntaxerror(ls, "<name> or '...' expected");
             }
         } while (!f->is_vararg && testnext(ls, ','));
     }
@@ -2665,7 +2689,7 @@ static void primaryexp (LexState *ls, expdesc *v) {
          }
       }
       /* Case: (name, ...) => */
-      else if ((la1 == TK_NAME || la1 == TK_DOTS) && luaX_lookahead2(ls) == ',') {
+      else if ((la1 == TK_NAME || la1 == TK_DOTS || is_type_token(la1)) && luaX_lookahead2(ls) == ',') {
          is_arrow = 1;
       }
 
@@ -2683,8 +2707,8 @@ static void primaryexp (LexState *ls, expdesc *v) {
          int nparams = 0;
          if (ls->t.token != ')') {
              do {
-                if (ls->t.token == TK_NAME) {
-                   new_localvar(ls, str_checkname(ls));
+                if (ls->t.token == TK_NAME || is_type_token(ls->t.token)) {
+                   new_localvar(ls, str_checkname_allow_types(ls));
                    nparams++;
                 } else if (ls->t.token == TK_DOTS) {
                    luaX_next(ls);
@@ -2744,7 +2768,7 @@ static void primaryexp (LexState *ls, expdesc *v) {
       luaX_next(ls); /* skip '(' */
 
       /* Check for (name) => or (...) => */
-      if ((ls->t.token == TK_NAME || ls->t.token == TK_DOTS) &&
+      if ((ls->t.token == TK_NAME || ls->t.token == TK_DOTS || is_type_token(ls->t.token)) &&
           luaX_lookahead(ls) == ')' &&
           luaX_lookahead2(ls) == TK_MEAN) {
 
@@ -2752,7 +2776,7 @@ static void primaryexp (LexState *ls, expdesc *v) {
           TString *param_name = NULL;
           int is_vararg = 0;
 
-          if (ls->t.token == TK_NAME) {
+          if (ls->t.token == TK_NAME || is_type_token(ls->t.token)) {
              param_name = ls->t.seminfo.ts;
           } else {
              is_vararg = 1;
@@ -2835,6 +2859,16 @@ static void primaryexp (LexState *ls, expdesc *v) {
         return;
       }
       /* 普通标识符 */
+      singlevar(ls, v);
+      return;
+    }
+    case TK_TYPE_INT:
+    case TK_TYPE_FLOAT:
+    case TK_DOUBLE:
+    case TK_BOOL:
+    case TK_VOID:
+    case TK_CHAR:
+    case TK_LONG: {
       singlevar(ls, v);
       return;
     }
@@ -11352,7 +11386,7 @@ static void cpp_parlist (LexState *ls) {
 
       switch (ls->t.token) {
         case TK_NAME: {
-          new_localvar(ls, str_checkname(ls));
+          new_localvar(ls, str_checkname_allow_types(ls));
           nparams++;
           break;
         }
@@ -11376,7 +11410,7 @@ static void declaration_stat (LexState *ls, int line) {
   /* Current token is a Type keyword. Skip it. */
   luaX_next(ls);
 
-  TString *name = str_checkname(ls);
+  TString *name = str_checkname_allow_types(ls);
 
   if (ls->t.token == '(') {
      /* Function definition: Type Name(...) { ... } */
@@ -11796,7 +11830,11 @@ static void statement (LexState *ls) {
     case TK_VOID:
     case TK_CHAR:
     case TK_LONG: {
-      declaration_stat(ls, line);
+      if (luaX_lookahead(ls) == TK_NAME || is_type_token(luaX_lookahead(ls))) {
+         declaration_stat(ls, line);
+      } else {
+         exprstat(ls);
+      }
       break;
     }
     case TK_NAME: {
