@@ -8,6 +8,8 @@
 ** Directly included by ljit.c
 */
 
+#define JIT_BUFFER_SIZE 4096
+
 typedef struct JitState JitState;
 
 static JitState *jit_new_state(void) { return NULL; }
