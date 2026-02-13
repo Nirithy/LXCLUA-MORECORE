@@ -369,7 +369,7 @@ int luaB_tryconvert(lua_State *L, TValue *obj) {
     return 0;
 }
 
-lua_Number luaB_tonumber(const TValue *obj) {
+lua_Number luaB_bigtonumber(const TValue *obj) {
     if (!ttisbigint(obj)) return 0.0;
     TBigInt *b = bigvalue(obj);
     if (b->len == 0) return 0.0;

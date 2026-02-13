@@ -357,7 +357,7 @@ typedef struct GCObject {
 
 #define nvalue(o)	check_exp(ttisnumber(o), \
 	(ttisinteger(o) ? cast_num(ivalue(o)) : \
-	(ttisbigint(o) ? luaB_tonumber(o) : fltvalue(o))))
+	(ttisbigint(o) ? luaB_bigtonumber(o) : fltvalue(o))))
 #define fltvalue(o)	check_exp(ttisfloat(o), val_(o).n)
 #define ivalue(o)	check_exp(ttisinteger(o), val_(o).i)
 
@@ -401,7 +401,7 @@ typedef struct TBigInt {
 
 #define gco2big(o)	check_exp((o)->tt == LUA_VNUMBIG, (TBigInt*)(o))
 
-LUAI_FUNC lua_Number luaB_tonumber (const TValue *obj);
+LUAI_FUNC lua_Number luaB_bigtonumber (const TValue *obj);
 
 
 /*
