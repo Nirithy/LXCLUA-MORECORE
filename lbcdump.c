@@ -574,7 +574,12 @@ static void dumpBytecodeFile(const char *filename) {
         return;
     }
     
-    fread(data, 1, size, f);
+    if (fread(data, 1, size, f) != (size_t)size) {
+        fprintf(stderr, "错误: 读取文件失败\n");
+        free(data);
+        fclose(f);
+        return;
+    }
     fclose(f);
     
     printf("=== 字节码文件: %s ===\n", filename);
