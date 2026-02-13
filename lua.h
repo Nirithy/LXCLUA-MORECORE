@@ -96,8 +96,9 @@ typedef struct lua_State lua_State;
 #define LUA_TSTRUCT		9
 #define LUA_TPOINTER		10
 #define LUA_TCONCEPT		11
+#define LUA_TNAMESPACE		12
 
-#define LUA_NUMTYPES		12
+#define LUA_NUMTYPES		13
 /** @} */
 
 

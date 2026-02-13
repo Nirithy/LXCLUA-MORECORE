@@ -21,6 +21,7 @@
 #include "ldo.h"
 #include "lfunc.h"
 #include "lgc.h"
+#include "lnamespace.h"
 #include "lmem.h"
 #include "lobject.h"
 #include "lstate.h"
@@ -133,6 +134,7 @@ static GCObject **getgclist (GCObject *o) {
     case LUA_VCCL: return &gco2ccl(o)->gclist;
     case LUA_VTHREAD: return &gco2th(o)->gclist;
     case LUA_VPROTO: return &gco2p(o)->gclist;
+    case LUA_VNAMESPACE: return &gco2ns(o)->gclist;
     case LUA_VUSERDATA: {
       Udata *u = gco2u(o);
       lua_assert(u->nuvalue > 0);
@@ -380,7 +382,7 @@ static void reallymarkobject (global_State *g, GCObject *o) {
       /* else... */
     }  /* FALLTHROUGH */
     case LUA_VLCL: case LUA_VCONCEPT: case LUA_VCCL: case LUA_VTABLE:
-    case LUA_VTHREAD: case LUA_VPROTO: {
+    case LUA_VTHREAD: case LUA_VPROTO: case LUA_VNAMESPACE: {
       linkobjgclist(o, g->gray);  /* to be visited later */
       break;
     }
@@ -650,6 +652,7 @@ static lu_mem traversetable (global_State *g, Table *h) {
   l_rwlock_rdlock(&h->lock); /* Lock table for traversal */
   mode = gfasttm(g, h->metatable, TM_MODE);
   markobjectN(g, h->metatable);
+  markobjectN(g, h->using_next);
   if (mode && ttisshrstring(mode) &&  /* is there a weak mode? */
       (cast_void(smode = tsvalue(mode)),
        cast_void(weakkey = strchr(getshrstr(smode), 'k')),
@@ -775,6 +778,13 @@ static int traverseConcept (global_State *g, Concept *cl) {
  * @param th The thread.
  * @return The work done.
  */
+static int traverseNamespace (global_State *g, Namespace *ns) {
+  markobjectN(g, ns->data);
+  markobjectN(g, ns->name);
+  markobjectN(g, ns->using_next);
+  return 1 + 3;
+}
+
 static int traversethread (global_State *g, lua_State *th) {
   UpVal *uv;
   StkId o = th->stack.p;
@@ -821,6 +831,7 @@ static lu_mem propagatemark (global_State *g) {
     case LUA_VCCL: return traverseCclosure(g, gco2ccl(o));
     case LUA_VPROTO: return traverseproto(g, gco2p(o));
     case LUA_VTHREAD: return traversethread(g, gco2th(o));
+    case LUA_VNAMESPACE: return traverseNamespace(g, gco2ns(o));
     default: lua_assert(0); return 0;
   }
 }
@@ -984,6 +995,9 @@ static void freeobj (lua_State *L, GCObject *o) {
       break;
     case LUA_VTHREAD:
       luaE_freethread(L, gco2th(o));
+      break;
+    case LUA_VNAMESPACE:
+      luaN_free(L, gco2ns(o));
       break;
     case LUA_VUSERDATA: {
       Udata *u = gco2u(o);

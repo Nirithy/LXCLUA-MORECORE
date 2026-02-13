@@ -393,6 +393,7 @@ union GCUnion {
   struct UpVal upv;
   struct Struct struct_;
   struct Concept concept;
+  struct Namespace ns;
 };
 
 
@@ -408,6 +409,7 @@ union GCUnion {
 	check_exp(novariant((o)->tt) == LUA_TSTRING, &((cast_u(o))->ts))
 #define gco2u(o)  check_exp((o)->tt == LUA_VUSERDATA, &((cast_u(o))->u))
 #define gco2concept(o) check_exp((o)->tt == LUA_VCONCEPT, &((cast_u(o))->concept))
+#define gco2ns(o) check_exp((o)->tt == LUA_VNAMESPACE, &((cast_u(o))->ns))
 #define gco2lcl(o)  check_exp((o)->tt == LUA_VLCL, &((cast_u(o))->cl.l))
 #define gco2ccl(o)  check_exp((o)->tt == LUA_VCCL, &((cast_u(o))->cl.c))
 #define gco2cl(o)  \

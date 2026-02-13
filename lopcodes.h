@@ -388,6 +388,10 @@ OP_CASE,/*	A B C	R[A] := { R[B], R[C] } (create case pair)	*/
 
 OP_NEWCONCEPT,/*	A Bx	R[A] := concept(KPROTO[Bx])			*/
 
+OP_NEWNAMESPACE,/*	A Bx	R[A] := newnamespace(K[Bx])			*/
+
+OP_LINKNAMESPACE,/*	A B	R[A]->using_next = R[B]				*/
+
 OP_EXTRAARG/*	Ax	extra (larger) argument for previous opcode	*/
 } OpCode;
 

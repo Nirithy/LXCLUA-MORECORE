@@ -89,6 +89,9 @@ static void switchstat (LexState *ls, int line);  /* switch语句的前向声明
 static void trystat (LexState *ls, int line);     /* try语句的前向声明 */
 static void withstat (LexState *ls, int line);    /* with语句的前向声明 */
 static void classstat (LexState *ls, int line, int class_flags, int isexport);   /* class语句的前向声明 */
+static void namespacestat (LexState *ls, int line);
+static void declaration_stat (LexState *ls, int line);
+static void usingstat (LexState *ls);
 static void interfacestat (LexState *ls, int line); /* interface语句的前向声明 */
 static void structstat (LexState *ls, int line, int isexport);  /* struct语句的前向声明 */
 static void enumstat (LexState *ls, int line, int isexport);    /* enum语句的前向声明 */
@@ -1382,11 +1385,11 @@ static void statlist (LexState *ls) {
 
 
 static void fieldsel (LexState *ls, expdesc *v) {
-  /* fieldsel -> ['.' | ':'] NAME */
+  /* fieldsel -> ['.' | ':' | '::'] NAME */
   FuncState *fs = ls->fs;
   expdesc key;
   luaK_exp2anyregup(fs, v);
-  luaX_next(ls);  /* skip the dot or colon */
+  luaX_next(ls);  /* skip the dot or colon or double colon */
   
   /* Allow keywords as field names */
   if (ls->t.token == TK_NAME) {
@@ -3028,7 +3031,8 @@ static void pipe_funcexp (LexState *ls, expdesc *v) {
   /* 只处理字段访问，不处理管道 */
   for (;;) {
     switch (ls->t.token) {
-      case '.': {  /* fieldsel */
+      case '.':
+      case TK_DBCOLON: {  /* fieldsel */
         fieldsel(ls, v);
         break;
       }
@@ -3152,7 +3156,8 @@ static void suffixedexp (LexState *ls, expdesc *v) {
         v->f = NO_JUMP;
         break;
       }
-      case '.': {  /* fieldsel */
+      case '.':
+      case TK_DBCOLON: {  /* fieldsel */
         fieldsel(ls, v);
         break;
       }
@@ -9726,10 +9731,11 @@ static void classstat(LexState *ls, int line, int class_flags, int isexport) {
     } while (testnext(ls, ','));
   }
   
-  testnext(ls, TK_DO); /* Optional Universal Block Opener */
+  int has_brace = testnext(ls, '{');
+  if (!has_brace) testnext(ls, TK_DO); /* Optional Universal Block Opener */
 
   /* 解析类体 */
-  while (!testnext(ls, TK_END)) {
+  while (!(has_brace ? testnext(ls, '}') : testnext(ls, TK_END))) {
     if (ls->t.token == TK_EOS) {
       luaX_syntaxerror(ls, "期望 'end' 来结束类定义");
       break;
@@ -10738,6 +10744,15 @@ static int try_command_call (LexState *ls) {
       softkw_test(ls, SKW_SUPER, SOFTKW_CTX_EXPR)) {
     return 0;
   }
+
+  /* Check if it is a soft keyword that starts a statement (like class, interface) */
+  if (softkw_test(ls, SKW_CLASS, SOFTKW_CTX_STMT_BEGIN) ||
+      softkw_test(ls, SKW_INTERFACE, SOFTKW_CTX_STMT_BEGIN) ||
+      softkw_test(ls, SKW_ABSTRACT, SOFTKW_CTX_STMT_BEGIN) ||
+      softkw_test(ls, SKW_FINAL, SOFTKW_CTX_STMT_BEGIN) ||
+      softkw_test(ls, SKW_SEALED, SOFTKW_CTX_STMT_BEGIN)) {
+    return 0;
+  }
   
   /* 预读下一个 token，判断是否可能是命令调用 */
   int lookahead = luaX_lookahead(ls);
@@ -11287,6 +11302,243 @@ static void deferstat (LexState *ls) {
   checktoclose(fs, fs->nactvar - 1);
 }
 
+static int is_type_token(int token) {
+  return token == TK_TYPE_INT || token == TK_TYPE_FLOAT || token == TK_DOUBLE ||
+         token == TK_BOOL || token == TK_VOID || token == TK_CHAR ||
+         token == TK_LONG || token == TK_NAME; /* NAME for structs/classes */
+}
+
+static void cpp_parlist (LexState *ls) {
+  FuncState *fs = ls->fs;
+  Proto *f = fs->f;
+  int nparams = 0;
+  int isvararg = 0;
+  if (ls->t.token != ')') {
+    do {
+      /* Consume type if present */
+      if (is_type_token(ls->t.token)) {
+         /* If it is NAME, check if it's followed by another NAME (Type Name) */
+         if (ls->t.token == TK_NAME) {
+            if (luaX_lookahead(ls) == TK_NAME) {
+               luaX_next(ls); /* Skip type */
+            }
+         } else {
+            luaX_next(ls); /* Skip primitive type */
+         }
+      }
+
+      switch (ls->t.token) {
+        case TK_NAME: {
+          new_localvar(ls, str_checkname(ls));
+          nparams++;
+          break;
+        }
+        case TK_DOTS: {
+          luaX_next(ls);
+          isvararg = 1;
+          break;
+        }
+        default: luaX_syntaxerror(ls, "<name> or '...' expected");
+      }
+    } while (!isvararg && testnext(ls, ','));
+  }
+  adjustlocalvars(ls, nparams);
+  f->numparams = cast_byte(fs->nactvar);
+  if (isvararg)
+    setvararg(fs, f->numparams);
+  luaK_reserveregs(fs, fs->nactvar);
+}
+
+static void declaration_stat (LexState *ls, int line) {
+  /* Current token is a Type keyword. Skip it. */
+  luaX_next(ls);
+
+  TString *name = str_checkname(ls);
+
+  if (ls->t.token == '(') {
+     /* Function definition: Type Name(...) { ... } */
+     expdesc v, b;
+
+     /* Resolve variable (global/field) */
+     singlevaraux(ls->fs, name, &v, 1);
+     if (v.k == VVOID) { /* global name? */
+       expdesc key;
+       singlevaraux(ls->fs, ls->envn, &v, 1);  /* get environment variable */
+       codestring(&key, name);  /* key is variable name */
+       luaK_indexed(ls->fs, &v, &key);  /* env[varname] */
+     }
+
+     FuncState new_fs;
+     BlockCnt bl;
+     new_fs.f = addprototype(ls);
+     new_fs.f->linedefined = line;
+     open_func(ls, &new_fs, &bl);
+
+     checknext(ls, '(');
+     cpp_parlist(ls);
+     checknext(ls, ')');
+
+     checknext(ls, '{');
+     while (!testtoken(ls, '}')) {
+       if (ls->t.token == TK_EOS)
+         luaX_syntaxerror(ls, "unfinished function");
+       if (ls->t.token == TK_RETURN) {
+         statement(ls);
+       } else {
+         statement(ls);
+       }
+     }
+     luaX_next(ls); /* skip '}' */
+
+     new_fs.f->lastlinedefined = ls->linenumber;
+     codeclosure(ls, &b);
+     close_func(ls);
+
+     luaK_storevar(ls->fs, &v, &b);
+     luaK_fixline(ls->fs, line);
+
+  } else {
+     /* Variable declaration: Type Name [= Value]; */
+     int is_local = (ls->fs->f->linedefined != 0);
+
+     if (is_local) {
+        int vidx = new_localvar(ls, name);
+        adjustlocalvars(ls, 1);
+        if (testnext(ls, '=')) {
+           expdesc e;
+           expr(ls, &e);
+           expdesc var;
+           init_var(ls->fs, &var, vidx);
+           luaK_storevar(ls->fs, &var, &e);
+        }
+        testnext(ls, ';');
+     } else {
+        expdesc var;
+        singlevaraux(ls->fs, name, &var, 1);
+        if (var.k == VVOID) {
+           expdesc key;
+           singlevaraux(ls->fs, ls->envn, &var, 1);
+           codestring(&key, name);
+           luaK_indexed(ls->fs, &var, &key);
+        }
+
+        if (testnext(ls, '=')) {
+           expdesc e;
+           expr(ls, &e);
+           luaK_storevar(ls->fs, &var, &e);
+        }
+        testnext(ls, ';');
+     }
+  }
+}
+
+static void namespacestat (LexState *ls, int line) {
+  FuncState *fs = ls->fs;
+  expdesc v, ns;
+  TString *name;
+  BlockCnt bl;
+
+  luaX_next(ls);  /* skip NAMESPACE */
+  name = str_checkname(ls);
+
+  /* Emit OP_NEWNAMESPACE */
+  int name_k = luaK_stringK(fs, name);
+  init_exp(&ns, VRELOC, luaK_codeABx(fs, OP_NEWNAMESPACE, 0, name_k));
+  luaK_exp2nextreg(fs, &ns);
+
+  /* Store in global variable */
+  buildglobal(ls, name, &v);
+  luaK_storevar(fs, &v, &ns);
+
+  checknext(ls, '{');
+
+  enterblock(fs, &bl, 0);
+
+  /* Create local _ENV = ns */
+  int vidx = new_localvarliteral(ls, "_ENV");
+  adjustlocalvars(ls, 1);
+  fs->freereg = luaY_nvarstack(fs);
+
+  /* Assign ns to _ENV */
+  expdesc env_var;
+  init_var(fs, &env_var, vidx);
+  luaK_storevar(fs, &env_var, &ns);
+
+  while (!testtoken(ls, '}')) {
+    if (ls->t.token == TK_EOS)
+      luaX_syntaxerror(ls, "unfinished namespace");
+    statement(ls);
+  }
+  luaX_next(ls); /* skip '}' */
+
+  leaveblock(fs);
+}
+
+static void usingstat(LexState *ls) {
+  luaX_next(ls); /* skip using */
+
+  if (ls->t.token == TK_NAMESPACE) {
+     /* using namespace Name; */
+     luaX_next(ls);
+     expdesc ns, env;
+     TString *name = str_checkname(ls);
+
+     /* Resolve namespace */
+     singlevaraux(ls->fs, name, &ns, 1);
+     /* Resolve _ENV */
+     singlevaraux(ls->fs, ls->envn, &env, 1);
+
+     if (ns.k == VVOID || env.k == VVOID) {
+        if (ns.k == VVOID) {
+           expdesc key;
+           singlevaraux(ls->fs, ls->envn, &ns, 1);
+           codestring(&key, name);
+           luaK_indexed(ls->fs, &ns, &key);
+        }
+     }
+
+     luaK_exp2nextreg(ls->fs, &env);
+     luaK_exp2nextreg(ls->fs, &ns);
+
+     /* OP_LINKNAMESPACE A B: R[A]->using_next = R[B] */
+     luaK_codeABC(ls->fs, OP_LINKNAMESPACE, env.u.info, ns.u.info, 0);
+  } else {
+     /* using Name::Member::...; */
+     TString *name = str_checkname(ls);
+     expdesc e;
+
+     /* Resolve first part */
+     singlevaraux(ls->fs, name, &e, 1);
+     if (e.k == VVOID) {
+        expdesc key;
+        singlevaraux(ls->fs, ls->envn, &e, 1);
+        codestring(&key, name);
+        luaK_indexed(ls->fs, &e, &key);
+     }
+
+     /* Loop for ::Member parts */
+     while (testnext(ls, TK_DBCOLON)) {
+        TString *member = str_checkname(ls);
+        name = member; /* Update name for local variable creation */
+
+        luaK_exp2anyregup(ls->fs, &e);
+        expdesc key;
+        codestring(&key, member);
+        luaK_indexed(ls->fs, &e, &key);
+     }
+
+     /* Create local variable with the last name */
+     int vidx = new_localvar(ls, name);
+     adjustlocalvars(ls, 1);
+     ls->fs->freereg = luaY_nvarstack(ls->fs);
+
+     expdesc v;
+     init_var(ls->fs, &v, vidx);
+     luaK_storevar(ls->fs, &v, &e);
+  }
+  checknext(ls, ';');
+}
+
 static void statement (LexState *ls) {
   int line = ls->linenumber;  /* may be needed for error messages */
   enterlevel(ls);
@@ -11506,6 +11758,24 @@ static void statement (LexState *ls) {
       gotostat(ls);
       break;
     }
+    case TK_NAMESPACE: {
+      namespacestat(ls, line);
+      break;
+    }
+    case TK_USING: {
+      usingstat(ls);
+      break;
+    }
+    case TK_TYPE_INT:
+    case TK_TYPE_FLOAT:
+    case TK_DOUBLE:
+    case TK_BOOL:
+    case TK_VOID:
+    case TK_CHAR:
+    case TK_LONG: {
+      declaration_stat(ls, line);
+      break;
+    }
     case TK_NAME: {
       /* 使用软关键字系统检查语句开头的软关键字 */
       SoftKWID skw = softkw_check(ls, SOFTKW_CTX_STMT_BEGIN);
@@ -11552,6 +11822,13 @@ static void statement (LexState *ls) {
         }
         break;
       }
+
+      /* Check for C++ declaration: Type Name */
+      if (luaX_lookahead(ls) == TK_NAME) {
+         declaration_stat(ls, line);
+         break;
+      }
+
   #if defined(LUA_COMPAT_GLOBAL)
       /* compatibility code to parse global keyword when "global"
          is not reserved */

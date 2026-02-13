@@ -55,6 +55,7 @@
 #include "lobfuscate.h"
 #include "lthread.h"
 #include "lstruct.h"
+#include "lnamespace.h"
 
 
 /*
@@ -554,6 +555,25 @@ void luaV_finishget (lua_State *L, const TValue *t, TValue *key, StkId val,
     if (slot == LUA_NULLPTR) {
       if (ttistable(t)) {
          Table *h = hvalue(t);
+
+         if (h->using_next) {
+            Namespace *ns = h->using_next;
+            do {
+               Table *nth = ns->data;
+               if (nth) {
+                  l_rwlock_rdlock(&nth->lock);
+                  const TValue *res = luaH_get(nth, key);
+                  if (!isempty(res)) {
+                     setobj2s(L, val, res);
+                     l_rwlock_unlock(&nth->lock);
+                     return;
+                  }
+                  l_rwlock_unlock(&nth->lock);
+               }
+               ns = ns->using_next;
+            } while (ns);
+         }
+
          l_rwlock_rdlock(&h->lock);
          const TValue *res = luaH_get(h, key);
          if (!isempty(res)) {
@@ -572,6 +592,24 @@ void luaV_finishget (lua_State *L, const TValue *t, TValue *key, StkId val,
             return;
          }
          l_rwlock_unlock(&h->lock);
+      } else if (ttisnamespace(t)) {
+        Namespace *ns = nsvalue(t);
+        do {
+           Table *h = ns->data;
+           if (h) {
+              l_rwlock_rdlock(&h->lock);
+              const TValue *res = luaH_get(h, key);
+              if (!isempty(res)) {
+                 setobj2s(L, val, res);
+                 l_rwlock_unlock(&h->lock);
+                 return;
+              }
+              l_rwlock_unlock(&h->lock);
+           }
+           ns = ns->using_next;
+        } while (ns);
+        setnilvalue(s2v(val));
+        return;
       } else if (ttisstruct(t)) {
         luaS_structindex(L, t, key, val);
         return;
@@ -610,6 +648,25 @@ void luaV_finishget (lua_State *L, const TValue *t, TValue *key, StkId val,
     else {  /* 't' is a table */
       Table *h = hvalue(t);
       lua_assert(isempty(slot));
+
+      if (h->using_next) {
+         Namespace *ns = h->using_next;
+         do {
+            Table *nth = ns->data;
+            if (nth) {
+               l_rwlock_rdlock(&nth->lock);
+               const TValue *res = luaH_get(nth, key);
+               if (!isempty(res)) {
+                  setobj2s(L, val, res);
+                  l_rwlock_unlock(&nth->lock);
+                  return;
+               }
+               l_rwlock_unlock(&nth->lock);
+            }
+            ns = ns->using_next;
+         } while (ns);
+      }
+
       l_rwlock_rdlock(&h->lock);
       tm = fasttm(L, h->metatable, TM_INDEX);  /* table's metamethod */
       if (tm == LUA_NULLPTR) /* no __index? try __mindex */
@@ -669,6 +726,33 @@ void luaV_finishset (lua_State *L, const TValue *t, TValue *key,
     if (slot != LUA_NULLPTR) {  /* is 't' a table? */
       Table *h = hvalue(t);  /* save 't' table */
       lua_assert(isempty(slot));  /* slot must be empty */
+
+      if (h->using_next) {
+         Namespace *ns = h->using_next;
+         while (ns) {
+            Table *nth = ns->data;
+            if (nth) {
+               l_rwlock_rdlock(&nth->lock);
+               const TValue *res = luaH_get(nth, key);
+               if (!isempty(res) && !isabstkey(res)) {
+                  l_rwlock_unlock(&nth->lock);
+                  l_rwlock_wrlock(&nth->lock);
+                  res = luaH_get(nth, key);
+                  if (!isempty(res) && !isabstkey(res)) {
+                     setobj2t(L, cast(TValue *, res), val);
+                     luaC_barrierback(L, obj2gco(nth), val);
+                     l_rwlock_unlock(&nth->lock);
+                     return;
+                  }
+                  l_rwlock_unlock(&nth->lock);
+               } else {
+                  l_rwlock_unlock(&nth->lock);
+               }
+            }
+            ns = ns->using_next;
+         }
+      }
+
       l_rwlock_rdlock(&h->lock);
       tm = fasttm(L, h->metatable, TM_NEWINDEX);  /* get metamethod */
       l_rwlock_unlock(&h->lock);
@@ -696,6 +780,44 @@ void luaV_finishset (lua_State *L, const TValue *t, TValue *key,
       /* else will try the metamethod */
     }
     else {  /* not a table? or slot is NULL */
+      if (ttisnamespace(t)) {
+         Namespace *ns = nsvalue(t);
+         Namespace *first = ns;
+         while (ns) {
+            Table *h = ns->data;
+            if (h) {
+               l_rwlock_rdlock(&h->lock);
+               const TValue *res = luaH_get(h, key);
+               if (!isempty(res) && !isabstkey(res)) {
+                  l_rwlock_unlock(&h->lock);
+                  /* Found existing key, update it */
+                  l_rwlock_wrlock(&h->lock);
+                  res = luaH_get(h, key); /* Re-check under write lock */
+                  if (!isempty(res) && !isabstkey(res)) {
+                     setobj2t(L, cast(TValue *, res), val);
+                     luaC_barrierback(L, obj2gco(h), val);
+                     l_rwlock_unlock(&h->lock);
+                     return;
+                  }
+                  l_rwlock_unlock(&h->lock);
+               } else {
+                  l_rwlock_unlock(&h->lock);
+               }
+            }
+            ns = ns->using_next;
+         }
+         /* Not found, create in first namespace */
+         ns = first;
+         if (ns && ns->data) {
+            Table *h = ns->data;
+            l_rwlock_wrlock(&h->lock);
+            luaH_set(L, h, key, val);
+            luaC_barrierback(L, obj2gco(h), val);
+            l_rwlock_unlock(&h->lock);
+            return;
+         }
+         return;
+      }
       if (ttisstruct(t)) {
         luaS_structnewindex(L, t, key, val);
         return;
@@ -2067,6 +2189,31 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
         sethvalue2s(L, ra, t);
         if (b != 0 || c != 0)
           luaH_resize(L, t, c, b);  /* idem */
+        checkGC(L, ra + 1);
+        vmbreak;
+      }
+      vmcase(OP_LINKNAMESPACE) {
+        StkId ra = RA(i);
+        TValue *rb = vRB(i);
+        if (ttisnamespace(s2v(ra)) && ttisnamespace(rb)) {
+           Namespace *ns = nsvalue(s2v(ra));
+           Namespace *target = nsvalue(rb);
+           ns->using_next = target;
+           luaC_objbarrier(L, ns, target);
+        }
+        else if (ttistable(s2v(ra)) && ttisnamespace(rb)) {
+           Table *t = hvalue(s2v(ra));
+           Namespace *target = nsvalue(rb);
+           t->using_next = target;
+           luaC_objbarrier(L, t, target);
+        }
+        vmbreak;
+      }
+      vmcase(OP_NEWNAMESPACE) {
+        StkId ra = RA(i);
+        TString *name = tsvalue(&k[GETARG_Bx(i)]);
+        Namespace *ns = luaN_new(L, name);
+        setnsvalue(L, s2v(ra), ns);
         checkGC(L, ra + 1);
         vmbreak;
       }
