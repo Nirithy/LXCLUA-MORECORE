@@ -743,7 +743,7 @@ static int struct_define (lua_State *L) {
             lua_rawset(L, -3);
 
             if (arr_elem_type == ST_STRUCT) {
-                TValue *v = s2v(L->top.p - 1);
+                TValue *v = s2v(L->top.p - 2);
                 Array *arr = (Array *)getudatamem(uvalue(v));
                 lua_pushstring(L, F_DEF);
                 sethvalue(L, s2v(L->top.p), arr->def);
