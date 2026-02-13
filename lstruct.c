@@ -183,20 +183,23 @@ void luaS_copystruct (lua_State *L, TValue *dest, const TValue *src) {
     if (s_src->data != s_src->inline_data.d) {
         /* Source is a View -> Create a View */
         s_dest = (Struct *)luaC_newobjdt(L, LUA_TSTRUCT, offsetof(Struct, inline_data), 0);
+        s_dest->def = s_src->def;
         s_dest->parent = s_src->parent;
         s_dest->data = s_src->data;
+        s_dest->data_size = size;
+        s_dest->gc_offsets = s_src->gc_offsets;
+        s_dest->n_gc_offsets = s_src->n_gc_offsets;
     } else {
         /* Source is an Owner -> Create an Owner (Deep Copy) */
         s_dest = (Struct *)luaC_newobjdt(L, LUA_TSTRUCT, offsetof(Struct, inline_data) + size, 0);
+        s_dest->def = s_src->def;
         s_dest->parent = NULL;
         s_dest->data = s_dest->inline_data.d;
+        s_dest->data_size = size;
+        s_dest->gc_offsets = s_src->gc_offsets;
+        s_dest->n_gc_offsets = s_src->n_gc_offsets;
         memcpy(s_dest->data, s_src->data, size);
     }
-
-    s_dest->def = s_src->def;
-    s_dest->data_size = size;
-    s_dest->gc_offsets = s_src->gc_offsets;
-    s_dest->n_gc_offsets = s_src->n_gc_offsets;
 
     TValue *v = dest;
     v->value_.struct_ = s_dest;
@@ -261,16 +264,21 @@ void luaS_structindex (lua_State *L, const TValue *t, TValue *key, StkId val) {
         case ST_STRUCT: {
             /* Create new struct View wrapping the data */
             Struct *new_s = (Struct *)luaC_newobjdt(L, LUA_TSTRUCT, offsetof(Struct, inline_data), 0);
-            new_s->def = nested_def;
-            new_s->data_size = size;
-            get_gc_offsets(L, nested_def, &new_s->gc_offsets, &new_s->n_gc_offsets);
-            new_s->parent = obj2gco(s);
-            new_s->data = p;
 
-            /* We need to set val to new_s */
+            /* Anchor new_s to stack immediately */
             TValue *v = s2v(val);
             v->value_.struct_ = new_s;
             v->tt_ = ctb(LUA_VSTRUCT);
+
+            new_s->def = nested_def;
+            new_s->data_size = size;
+            new_s->parent = obj2gco(s);
+            new_s->data = p;
+            new_s->gc_offsets = NULL; /* Init before call */
+            new_s->n_gc_offsets = 0;
+
+            get_gc_offsets(L, nested_def, &new_s->gc_offsets, &new_s->n_gc_offsets);
+
             checkliveness(L, v);
             break;
         }
@@ -459,12 +467,23 @@ static int struct_call (lua_State *L) {
 
     /* Allocate struct */
     Struct *s = (Struct *)luaC_newobjdt(L, LUA_TSTRUCT, offsetof(Struct, inline_data) + size, 0);
+
+    /* Anchor s to stack immediately to prevent collection during get_gc_offsets */
+    TValue *ret = s2v(L->top.p);
+    ret->value_.struct_ = s;
+    ret->tt_ = ctb(LUA_VSTRUCT);
+    api_incr_top(L);
+
     s->def = def;
     s->data_size = size;
-    get_gc_offsets(L, def, &s->gc_offsets, &s->n_gc_offsets);
     s->parent = NULL;
+    s->gc_offsets = NULL; /* Init to NULL before calling function that might GC */
+    s->n_gc_offsets = 0;
     s->data = s->inline_data.d;
     memset(s->data, 0, size);
+
+    /* Get GC offsets (might trigger GC) */
+    get_gc_offsets(L, def, &s->gc_offsets, &s->n_gc_offsets);
 
     /* Initialize with defaults */
     lua_pushstring(L, KEY_FIELDS);
@@ -558,12 +577,6 @@ static int struct_call (lua_State *L) {
             lua_pop(L, 1);
         }
     }
-
-    /* Push result */
-    TValue *ret = s2v(L->top.p);
-    ret->value_.struct_ = s;
-    ret->tt_ = ctb(LUA_VSTRUCT);
-    api_incr_top(L);
 
     return 1;
 }
@@ -858,21 +871,39 @@ static int array_index(lua_State *L) {
             return 1;
         }
         case ST_STRUCT: {
+            /* Retrieve GC offsets first to avoid GC while struct is uninitialized */
+            int *gc_offsets = NULL;
+            int n_gc_offsets = 0;
+            get_gc_offsets(L, arr->def, &gc_offsets, &n_gc_offsets);
+
+            /* Retrieve parent from array uservalue (anchored there by luaS_structindex) */
+            /* array is at index 1 */
+            lua_getiuservalue(L, 1, 1);
+            TValue *parent_val = s2v(L->top.p - 1);
+            if (!iscollectable(parent_val)) {
+                lua_pop(L, 1);
+                return luaL_error(L, "array parent is not collectable");
+            }
+            GCObject *parent = gcvalue(parent_val);
+
             /* Return a VIEW of the struct at index */
             Struct *s = (Struct *)luaC_newobjdt(L, LUA_TSTRUCT, offsetof(Struct, inline_data), 0);
-            s->def = arr->def;
-            s->data_size = arr->size;
-            get_gc_offsets(L, arr->def, &s->gc_offsets, &s->n_gc_offsets);
-            /* Parent is the array userdata */
-            /* If array is a View, parent is array->parent? Array struct doesn't track parent directly in C view */
-            /* Wait, Array struct is userdata. */
-            s->parent = obj2gco((Udata *)((char *)arr - udatamemoffset(1)));
-            s->data = p;
 
-            TValue *v = s2v(L->top.p);
+            /* Anchor s immediately */
+            TValue *v = s2v(L->top.p - 1); /* Replace parent val with new struct */
             v->value_.struct_ = s;
             v->tt_ = ctb(LUA_VSTRUCT);
-            api_incr_top(L);
+            /* L->top does not change, we replaced the value */
+
+            s->def = arr->def;
+            s->data_size = arr->size;
+            s->gc_offsets = gc_offsets;
+            s->n_gc_offsets = n_gc_offsets;
+
+            /* Set parent */
+            s->parent = parent;
+            s->data = p;
+
             return 1;
         }
         case ST_STRING: {
