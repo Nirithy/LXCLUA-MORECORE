@@ -70,7 +70,8 @@ static const char* getOpName(OpCode op) {
     "SETLIST", "CLOSURE", "VARARG", "GETVARG", "ERRNNIL", "VARARGPREP",
     "IS", "TESTNIL", "NEWCLASS", "INHERIT", "GETSUPER", "SETMETHOD",
     "SETSTATIC", "NEWOBJ", "GETPROP", "SETPROP", "INSTANCEOF", "IMPLEMENT",
-    "SETIFACEFLAG", "ADDMETHOD", "SLICE", "NOP", "EXTRAARG"
+    "SETIFACEFLAG", "ADDMETHOD", "SLICE", "NOP", "CASE", "NEWCONCEPT",
+    "NEWNAMESPACE", "LINKNAMESPACE", "EXTRAARG"
   };
   if (op >= 0 && op < (int)(sizeof(names)/sizeof(names[0]))) {
     return names[op];

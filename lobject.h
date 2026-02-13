@@ -53,6 +53,7 @@ typedef union Value {
   void *p;         /**< light userdata */
   void *ptr;       /**< raw pointer type */
   struct Struct *struct_; /**< struct values */
+  struct Namespace *ns;   /**< namespace objects */
   lua_CFunction f; /**< light C functions */
   lua_Integer i;   /**< integer numbers */
   lua_Number n;    /**< float numbers */
@@ -838,6 +839,32 @@ typedef struct Concept {
 
 /*
 ** {=======================================================
+** Namespaces
+** ========================================================
+*/
+
+#define LUA_VNAMESPACE	makevariant(LUA_TNAMESPACE, 0)
+
+#define ttisnamespace(o)		checktag((o), ctb(LUA_VNAMESPACE))
+
+#define nsvalue(o)	check_exp(ttisnamespace(o), gco2ns(val_(o).gc))
+
+#define setnsvalue(L,obj,x) \
+  { TValue *io = (obj); Namespace *x_ = (x); \
+    val_(io).gc = obj2gco(x_); settt_(io, ctb(LUA_VNAMESPACE)); \
+    checkliveness(L,io); }
+
+typedef struct Namespace {
+  CommonHeader;
+  struct Table *data;
+  TString *name;
+  struct GCObject *gclist;
+  struct Namespace *using_next;
+} Namespace;
+
+
+/*
+** {=======================================================
 ** Tables
 ** ========================================================
 */
@@ -916,6 +943,7 @@ typedef struct Table {
   GCObject *gclist; /**< garbage collector list */
   lu_byte type;    /**< Custom type flag. */
   l_rwlock_t lock; /**< Lock for thread safety. */
+  struct Namespace *using_next; /**< Used namespaces */
 } Table;
 
 
