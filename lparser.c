@@ -9954,6 +9954,12 @@ static void interfacestat(LexState *ls, int line) {
 }
 
 
+static int is_type_token(int token) {
+  return token == TK_TYPE_INT || token == TK_TYPE_FLOAT || token == TK_DOUBLE ||
+         token == TK_BOOL || token == TK_VOID || token == TK_CHAR ||
+         token == TK_LONG || token == TK_NAME; /* NAME for structs/classes */
+}
+
 /*
 ** 解析 struct 定义
 ** 语法: struct Name { field = value, ... }
@@ -10050,98 +10056,121 @@ static void structstat (LexState *ls, int line, int isexport) {
       TString *fname = NULL;
       expdesc val_exp;
 
-      if (ls->t.token == TK_NAME) {
-          int lookahead = luaX_lookahead(ls);
-          if (lookahead == TK_NAME) {
-              /* Type Field syntax: Type Field [= Value] */
-              TString *type_name = str_checkname(ls);
-              fname = str_checkname(ls);
-
-              if (ls->t.token == '[') {
-                  luaX_next(ls); /* skip '[' */
-
-                  expdesc array_func;
-                  singlevaraux(fs, luaS_newliteral(ls->L, "array"), &array_func, 1);
-                  if (array_func.k == VVOID) {
-                      expdesc k;
-                      singlevaraux(fs, ls->envn, &array_func, 1);
-                      codestring(&k, luaS_newliteral(ls->L, "array"));
-                      luaK_indexed(fs, &array_func, &k);
-                  }
-                  luaK_exp2nextreg(fs, &array_func);
-                  int base = array_func.u.info;
-
-                  expdesc type_arg;
-                  const char *tname = getstr(type_name);
-                  if (strcmp(tname, "int") == 0 || strcmp(tname, "integer") == 0 ||
-                      strcmp(tname, "float") == 0 || strcmp(tname, "number") == 0 ||
-                      strcmp(tname, "bool") == 0 || strcmp(tname, "boolean") == 0 ||
-                      strcmp(tname, "string") == 0) {
-                      codestring(&type_arg, type_name);
-                  } else {
-                      singlevaraux(fs, type_name, &type_arg, 1);
-                      if (type_arg.k == VVOID) {
-                          expdesc k;
-                          singlevaraux(fs, ls->envn, &type_arg, 1);
-                          codestring(&k, type_name);
-                          luaK_indexed(fs, &type_arg, &k);
-                      }
-                  }
-                  luaK_exp2nextreg(fs, &type_arg);
-
-                  luaK_codeABC(fs, OP_CALL, base, 2, 2);
-                  /* Result (factory) is in 'base' */
-
-                  expdesc size_exp;
-                  expr(ls, &size_exp);
-                  checknext(ls, ']');
-
-                  expdesc factory_exp;
-                  init_exp(&factory_exp, VNONRELOC, base);
-                  luaK_indexed(fs, &factory_exp, &size_exp);
-
-                  luaK_exp2nextreg(fs, &factory_exp);
-                  val_exp = factory_exp;
-              } else if (ls->t.token == '=') {
-                  luaX_next(ls);
-                  expr(ls, &val_exp);
-              } else {
-                  /* Generate Default Value based on Type */
-                  const char *tname = getstr(type_name);
-                  if (strcmp(tname, "int") == 0 || strcmp(tname, "integer") == 0) {
-                      init_exp(&val_exp, VKINT, 0); val_exp.u.ival = 0;
-                  } else if (strcmp(tname, "float") == 0 || strcmp(tname, "number") == 0) {
-                      init_exp(&val_exp, VKFLT, 0); val_exp.u.nval = 0.0;
-                  } else if (strcmp(tname, "bool") == 0 || strcmp(tname, "boolean") == 0) {
-                      init_exp(&val_exp, VFALSE, 0);
-                  } else if (strcmp(tname, "string") == 0) {
-                      codestring(&val_exp, luaS_newliteral(ls->L, ""));
-                  } else {
-                      /* Custom/Struct Type: emit Type() */
-                      expdesc type_func;
-                      singlevaraux(fs, type_name, &type_func, 1);
-                      if (type_func.k == VVOID) {
-                          expdesc k;
-                          singlevaraux(fs, ls->envn, &type_func, 1);
-                          codestring(&k, type_name);
-                          luaK_indexed(fs, &type_func, &k);
-                      }
-                      luaK_exp2nextreg(fs, &type_func);
-                      int base = type_func.u.info;
-                      init_exp(&val_exp, VCALL, luaK_codeABC(fs, OP_CALL, base, 1, 2));
-                      fs->freereg = base + 1;
-                  }
-              }
-          } else {
-              /* Field = Value syntax */
-              fname = str_checkname(ls);
-              if (testnext(ls, ':')) {
-                  TypeHint *th = typehint_new(ls);
-                  checktypehint(ls, th);
-              }
-              checknext(ls, '=');
-              expr(ls, &val_exp);
+      int is_typed = 0;
+      if (is_type_token(ls->t.token)) {
+          if (ls->t.token != TK_NAME) {
+              is_typed = 1;
+          } else if (luaX_lookahead(ls) == TK_NAME) {
+              is_typed = 1;
           }
+      }
+
+      if (is_typed) {
+          /* Type Field syntax: Type Field [= Value] */
+          TString *type_name = NULL;
+          if (ls->t.token == TK_NAME) {
+              type_name = str_checkname(ls);
+          } else {
+              const char *ts = NULL;
+              switch (ls->t.token) {
+                  case TK_TYPE_INT: ts = "int"; break;
+                  case TK_TYPE_FLOAT: ts = "float"; break;
+                  case TK_DOUBLE: ts = "double"; break;
+                  case TK_BOOL: ts = "bool"; break;
+                  case TK_VOID: ts = "void"; break;
+                  case TK_CHAR: ts = "char"; break;
+                  case TK_LONG: ts = "long"; break;
+                  default: luaX_syntaxerror(ls, "unexpected type token"); break;
+              }
+              type_name = luaS_new(ls->L, ts);
+              luaX_next(ls);
+          }
+          fname = str_checkname(ls);
+
+          if (ls->t.token == '[') {
+              luaX_next(ls); /* skip '[' */
+
+              expdesc array_func;
+              singlevaraux(fs, luaS_newliteral(ls->L, "array"), &array_func, 1);
+              if (array_func.k == VVOID) {
+                  expdesc k;
+                  singlevaraux(fs, ls->envn, &array_func, 1);
+                  codestring(&k, luaS_newliteral(ls->L, "array"));
+                  luaK_indexed(fs, &array_func, &k);
+              }
+              luaK_exp2nextreg(fs, &array_func);
+              int base = array_func.u.info;
+
+              expdesc type_arg;
+              const char *tname = getstr(type_name);
+              if (strcmp(tname, "int") == 0 || strcmp(tname, "integer") == 0 ||
+                  strcmp(tname, "float") == 0 || strcmp(tname, "number") == 0 ||
+                  strcmp(tname, "bool") == 0 || strcmp(tname, "boolean") == 0 ||
+                  strcmp(tname, "string") == 0) {
+                  codestring(&type_arg, type_name);
+              } else {
+                  singlevaraux(fs, type_name, &type_arg, 1);
+                  if (type_arg.k == VVOID) {
+                      expdesc k;
+                      singlevaraux(fs, ls->envn, &type_arg, 1);
+                      codestring(&k, type_name);
+                      luaK_indexed(fs, &type_arg, &k);
+                  }
+              }
+              luaK_exp2nextreg(fs, &type_arg);
+
+              luaK_codeABC(fs, OP_CALL, base, 2, 2);
+              /* Result (factory) is in 'base' */
+
+              expdesc size_exp;
+              expr(ls, &size_exp);
+              checknext(ls, ']');
+
+              expdesc factory_exp;
+              init_exp(&factory_exp, VNONRELOC, base);
+              luaK_indexed(fs, &factory_exp, &size_exp);
+
+              luaK_exp2nextreg(fs, &factory_exp);
+              val_exp = factory_exp;
+          } else if (ls->t.token == '=') {
+              luaX_next(ls);
+              expr(ls, &val_exp);
+          } else {
+              /* Generate Default Value based on Type */
+              const char *tname = getstr(type_name);
+              if (strcmp(tname, "int") == 0 || strcmp(tname, "integer") == 0) {
+                  init_exp(&val_exp, VKINT, 0); val_exp.u.ival = 0;
+              } else if (strcmp(tname, "float") == 0 || strcmp(tname, "number") == 0) {
+                  init_exp(&val_exp, VKFLT, 0); val_exp.u.nval = 0.0;
+              } else if (strcmp(tname, "bool") == 0 || strcmp(tname, "boolean") == 0) {
+                  init_exp(&val_exp, VFALSE, 0);
+              } else if (strcmp(tname, "string") == 0) {
+                  codestring(&val_exp, luaS_newliteral(ls->L, ""));
+              } else {
+                  /* Custom/Struct Type: emit Type() */
+                  expdesc type_func;
+                  singlevaraux(fs, type_name, &type_func, 1);
+                  if (type_func.k == VVOID) {
+                      expdesc k;
+                      singlevaraux(fs, ls->envn, &type_func, 1);
+                      codestring(&k, type_name);
+                      luaK_indexed(fs, &type_func, &k);
+                  }
+                  luaK_exp2nextreg(fs, &type_func);
+                  int base = type_func.u.info;
+                  init_exp(&val_exp, VCALL, luaK_codeABC(fs, OP_CALL, base, 1, 2));
+                  fs->freereg = base + 1;
+              }
+          }
+      } else if (ls->t.token == TK_NAME) {
+          /* Field = Value syntax */
+          fname = str_checkname(ls);
+          if (testnext(ls, ':')) {
+              TypeHint *th = typehint_new(ls);
+              checktypehint(ls, th);
+          }
+          checknext(ls, '=');
+          expr(ls, &val_exp);
       } else {
           error_expected(ls, TK_NAME);
       }
@@ -11300,12 +11329,6 @@ static void deferstat (LexState *ls) {
   luaK_storevar(fs, &v, &b);
 
   checktoclose(fs, fs->nactvar - 1);
-}
-
-static int is_type_token(int token) {
-  return token == TK_TYPE_INT || token == TK_TYPE_FLOAT || token == TK_DOUBLE ||
-         token == TK_BOOL || token == TK_VOID || token == TK_CHAR ||
-         token == TK_LONG || token == TK_NAME; /* NAME for structs/classes */
 }
 
 static void cpp_parlist (LexState *ls) {
