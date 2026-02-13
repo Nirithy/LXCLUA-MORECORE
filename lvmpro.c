@@ -260,21 +260,23 @@ static int vm_compile(lua_State *L, Proto *p) {
   lua_remove(L, -2); /* placeholder from luaL_pushresult */
 
   /* Call Factory */
-  /* Stack: f(1), k(2), p(3), code(4), nup(5), factory(6) */
+  /* Stack: [..., k, p, code, nup, factory] */
+  /* We need to push k, p, code, nup which are at top-4, top-3, top-2, top-1 respectively */
 
-  lua_pushvalue(L, 2); // k
-  lua_pushvalue(L, 3); // p
-  lua_pushvalue(L, 4); // code
-  lua_pushvalue(L, 5); // nup
+  int top = lua_gettop(L);
+  lua_pushvalue(L, top - 4); // k
+  lua_pushvalue(L, top - 3); // p
+  lua_pushvalue(L, top - 2); // code
+  lua_pushvalue(L, top - 1); // nup
 
   if (lua_pcall(L, 4, 1, 0) != LUA_OK) {
     return lua_error(L);
   }
 
-  /* Stack: f, k, p, code, nup, RESULT */
-  lua_replace(L, 2); /* RESULT moves to position of k */
+  /* Stack: ..., k, p, code, nup, RESULT */
+  lua_replace(L, -5); /* RESULT moves to position of k */
   lua_pop(L, 3); /* Remove p, code, nup */
-  /* Stack: f, RESULT */
+  /* Stack: ..., RESULT */
 
   return 1;
 }

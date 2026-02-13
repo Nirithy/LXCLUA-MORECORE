@@ -790,7 +790,7 @@ static void removevars (FuncState *fs, int tolevel) {
       var->endpc = fs->pc;
 
     Vardesc *vd = getlocalvardesc(fs, fs->nactvar);
-    if (!vd->vd.used && vd->vd.kind == VDKREG && getstr(vd->vd.name)[0] != '_') {
+    if (!vd->vd.used && vd->vd.kind == VDKREG && getstr(vd->vd.name)[0] != '_' && getstr(vd->vd.name)[0] != '(') {
        const char *msg = luaO_pushfstring(fs->ls->L, "unused local variable '%s'", getstr(vd->vd.name));
        luaX_warning(fs->ls, msg, WT_UNUSED_VAR);
        lua_pop(fs->ls->L, 1);
