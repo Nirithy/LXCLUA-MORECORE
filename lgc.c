@@ -129,6 +129,7 @@ static GCObject **getgclist (GCObject *o) {
   switch (o->tt) {
     case LUA_VTABLE: return &gco2t(o)->gclist;
     case LUA_VLCL: return &gco2lcl(o)->gclist;
+    case LUA_VCONCEPT: return &gco2concept(o)->gclist;
     case LUA_VCCL: return &gco2ccl(o)->gclist;
     case LUA_VTHREAD: return &gco2th(o)->gclist;
     case LUA_VPROTO: return &gco2p(o)->gclist;
@@ -378,7 +379,7 @@ static void reallymarkobject (global_State *g, GCObject *o) {
       }
       /* else... */
     }  /* FALLTHROUGH */
-    case LUA_VLCL: case LUA_VCCL: case LUA_VTABLE:
+    case LUA_VLCL: case LUA_VCONCEPT: case LUA_VCCL: case LUA_VTABLE:
     case LUA_VTHREAD: case LUA_VPROTO: {
       linkobjgclist(o, g->gray);  /* to be visited later */
       break;
@@ -745,6 +746,16 @@ static int traverseLclosure (global_State *g, LClosure *cl) {
   return 1 + cl->nupvalues;
 }
 
+static int traverseConcept (global_State *g, Concept *cl) {
+  int i;
+  markobjectN(g, cl->p);
+  for (i = 0; i < cl->nupvalues; i++) {
+    UpVal *uv = cl->upvals[i];
+    markobjectN(g, uv);
+  }
+  return 1 + cl->nupvalues;
+}
+
 
 /**
  * @brief Traverse a thread.
@@ -806,6 +817,7 @@ static lu_mem propagatemark (global_State *g) {
     case LUA_VTABLE: return traversetable(g, gco2t(o));
     case LUA_VUSERDATA: return traverseudata(g, gco2u(o));
     case LUA_VLCL: return traverseLclosure(g, gco2lcl(o));
+    case LUA_VCONCEPT: return traverseConcept(g, gco2concept(o));
     case LUA_VCCL: return traverseCclosure(g, gco2ccl(o));
     case LUA_VPROTO: return traverseproto(g, gco2p(o));
     case LUA_VTHREAD: return traversethread(g, gco2th(o));
@@ -955,6 +967,11 @@ static void freeobj (lua_State *L, GCObject *o) {
     case LUA_VLCL: {
       LClosure *cl = gco2lcl(o);
       luaM_freemem(L, cl, sizeLclosure(cl->nupvalues));
+      break;
+    }
+    case LUA_VCONCEPT: {
+      Concept *cl = gco2concept(o);
+      luaM_freemem(L, cl, sizeConcept(cl->nupvalues));
       break;
     }
     case LUA_VCCL: {

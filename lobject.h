@@ -814,6 +814,30 @@ typedef union Closure {
 
 /*
 ** {=======================================================
+** Concepts
+** ========================================================
+*/
+
+#define LUA_VCONCEPT	makevariant(LUA_TCONCEPT, 0)
+
+#define ttisconcept(o)		checktag((o), ctb(LUA_VCONCEPT))
+
+#define clConceptValue(o)	check_exp(ttisconcept(o), gco2concept(val_(o).gc))
+
+#define setclConceptValue(L,obj,x) \
+  { TValue *io = (obj); Concept *x_ = (x); \
+    val_(io).gc = obj2gco(x_); settt_(io, ctb(LUA_VCONCEPT)); \
+    checkliveness(L,io); }
+
+typedef struct Concept {
+  ClosureHeader;
+  struct Proto *p; /**< function prototype */
+  UpVal *upvals[1];  /**< list of upvalues */
+} Concept;
+
+
+/*
+** {=======================================================
 ** Tables
 ** ========================================================
 */

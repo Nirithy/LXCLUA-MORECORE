@@ -125,6 +125,7 @@ LUAI_DDEF const lu_byte luaP_opmodes[NUM_OPCODES] = {
  ,opmode(0, 0, 0, 0, 1, iABC)		/* OP_SLICE */
  ,opmode(0, 0, 0, 0, 0, iABC)		/* OP_NOP - 空操作，不设置任何寄存器 */
  ,opmode(0, 0, 0, 0, 1, iABC)		/* OP_CASE */
+ ,opmode(0, 0, 0, 0, 1, iABx)		/* OP_NEWCONCEPT */
  ,opmode(0, 0, 0, 0, 0, iAx)		/* OP_EXTRAARG */
 };
 

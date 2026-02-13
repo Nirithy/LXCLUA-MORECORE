@@ -17,6 +17,9 @@
 #define sizeLclosure(n)  \
 	(offsetof(LClosure, upvals) + sizeof(UpVal *) * cast_uint(n))
 
+#define sizeConcept(n)  \
+	(offsetof(Concept, upvals) + sizeof(UpVal *) * cast_uint(n))
+
 
 /* test whether thread is in 'twups' list */
 #define isintwups(L)	(L->twups != L)
@@ -72,6 +75,15 @@ LUAI_FUNC CClosure *luaF_newCclosure (lua_State *L, int nupvals);
  * @return The new Lua closure.
  */
 LUAI_FUNC LClosure *luaF_newLclosure (lua_State *L, int nupvals);
+
+/**
+ * @brief Creates a new Concept.
+ *
+ * @param L The Lua state.
+ * @param nupvals Number of upvalues.
+ * @return The new Concept.
+ */
+LUAI_FUNC Concept *luaF_newconcept (lua_State *L, int nupvals);
 
 /**
  * @brief Initializes the upvalues of a Lua closure.
