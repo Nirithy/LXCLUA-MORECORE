@@ -13,6 +13,10 @@
 */
 #if !defined(LUA_USE_C89)	/* { */
 
+#if defined(LUA_USE_MACOSX)
+#define _DARWIN_C_SOURCE
+#endif
+
 #if !defined(_XOPEN_SOURCE)
 #define _XOPEN_SOURCE           600
 #elif _XOPEN_SOURCE == 0

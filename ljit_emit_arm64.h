@@ -11,6 +11,10 @@
 #include "lua.h"
 #include "ldo.h"
 #include "ljit.h"
+
+#ifndef MAP_ANONYMOUS
+#define MAP_ANONYMOUS MAP_ANON
+#endif
 #include "lopcodes.h"
 
 /*

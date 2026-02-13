@@ -6147,7 +6147,7 @@ static void th_emplace_desc(TypeHint *th, TypeDesc td) {
 static void checktypehint (LexState *ls, TypeHint *th);
 
 static TypeHint* get_named_type_opt(LexState* ls, const TString* name) {
-  const TValue *o = luaH_getstr(ls->named_types, name);
+  const TValue *o = luaH_getstr(ls->named_types, (TString *)name);
   if (!ttisnil(o)) {
     return (TypeHint*)pvalue(o);
   }
