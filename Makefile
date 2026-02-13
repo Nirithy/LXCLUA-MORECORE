@@ -7,7 +7,7 @@
 PLAT= guess
 
 CC= gcc -std=c23 -pipe
-CFLAGS= -O3 -funroll-loops -fomit-frame-pointer -ffunction-sections -fdata-sections -fstrict-aliasing -g0 -DNDEBUG -fno-exceptions -fno-unwind-tables -fno-asynchronous-unwind-tables -Wimplicit-function-declaration
+CFLAGS= -O3 -funroll-loops -fomit-frame-pointer -ffunction-sections -fdata-sections -fstrict-aliasing -g0 -DNDEBUG -fno-exceptions -fno-unwind-tables -fno-asynchronous-unwind-tables -Wimplicit-function-declaration $(SYSCFLAGS) $(MYCFLAGS)
 
 AR= ar rcu
 RANLIB= ranlib
