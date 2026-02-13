@@ -9993,16 +9993,25 @@ static void structstat (LexState *ls, int line, int isexport) {
       fs = &factory_fs;
   }
 
-  /* Prepare to call __struct_define(name, {fields}) */
+  /* Prepare to call struct.define(name, {fields}) */
   expdesc func_exp;
-  singlevaraux(fs, luaS_newliteral(ls->L, "__struct_define"), &func_exp, 1);
+  singlevaraux(fs, luaS_newliteral(ls->L, "struct"), &func_exp, 1);
   if (func_exp.k == VVOID) {
       /* Fallback to _ENV */
       expdesc key;
       singlevaraux(fs, ls->envn, &func_exp, 1);
-      codestring(&key, luaS_newliteral(ls->L, "__struct_define"));
+      codestring(&key, luaS_newliteral(ls->L, "struct"));
       luaK_indexed(fs, &func_exp, &key);
   }
+
+  /* Ensure struct table is in register */
+  luaK_exp2anyregup(fs, &func_exp);
+
+  /* Get 'define' field */
+  expdesc key_define;
+  codestring(&key_define, luaS_newliteral(ls->L, "define"));
+  luaK_indexed(fs, &func_exp, &key_define);
+
   luaK_exp2nextreg(fs, &func_exp);
   int func_reg = func_exp.u.info;
 
@@ -10023,18 +10032,60 @@ static void structstat (LexState *ls, int line, int isexport) {
 
   int i = 1; /* Array index, 1-based */
   while (ls->t.token != '}' && ls->t.token != TK_EOS) {
-      /* Field name */
-      TString *fname = str_checkname(ls);
+      TString *fname = NULL;
+      expdesc val_exp;
 
-      if (testnext(ls, ':')) {
-          TypeHint *th = typehint_new(ls);
-          checktypehint(ls, th);
+      if (ls->t.token == TK_NAME) {
+          int lookahead = luaX_lookahead(ls);
+          if (lookahead == TK_NAME) {
+              /* Type Field syntax: Type Field [= Value] */
+              TString *type_name = str_checkname(ls);
+              fname = str_checkname(ls);
+
+              if (ls->t.token == '=') {
+                  luaX_next(ls);
+                  expr(ls, &val_exp);
+              } else {
+                  /* Generate Default Value based on Type */
+                  const char *tname = getstr(type_name);
+                  if (strcmp(tname, "int") == 0 || strcmp(tname, "integer") == 0) {
+                      init_exp(&val_exp, VKINT, 0); val_exp.u.ival = 0;
+                  } else if (strcmp(tname, "float") == 0 || strcmp(tname, "number") == 0) {
+                      init_exp(&val_exp, VKFLT, 0); val_exp.u.nval = 0.0;
+                  } else if (strcmp(tname, "bool") == 0 || strcmp(tname, "boolean") == 0) {
+                      init_exp(&val_exp, VFALSE, 0);
+                  } else if (strcmp(tname, "string") == 0) {
+                      codestring(&val_exp, luaS_newliteral(ls->L, ""));
+                  } else {
+                      /* Custom/Struct Type: emit Type() */
+                      expdesc type_func;
+                      singlevaraux(fs, type_name, &type_func, 1);
+                      if (type_func.k == VVOID) {
+                          expdesc k;
+                          singlevaraux(fs, ls->envn, &type_func, 1);
+                          codestring(&k, type_name);
+                          luaK_indexed(fs, &type_func, &k);
+                      }
+                      luaK_exp2nextreg(fs, &type_func);
+                      int base = type_func.u.info;
+                      init_exp(&val_exp, VCALL, luaK_codeABC(fs, OP_CALL, base, 1, 2));
+                      fs->freereg = base + 1;
+                  }
+              }
+          } else {
+              /* Field = Value syntax */
+              fname = str_checkname(ls);
+              if (testnext(ls, ':')) {
+                  TypeHint *th = typehint_new(ls);
+                  checktypehint(ls, th);
+              }
+              checknext(ls, '=');
+              expr(ls, &val_exp);
+          }
+      } else {
+          error_expected(ls, TK_NAME);
       }
 
-      checknext(ls, '=');
-
-      expdesc val_exp;
-      expr(ls, &val_exp);
       luaK_exp2nextreg(fs, &val_exp);
 
       /* Store name at index i */
