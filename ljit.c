@@ -13,7 +13,12 @@
 #include "lopcodes.h"
 #include "lstate.h"
 #include "ljit.h"
-#include "ljit_arch.h"
+
+#if defined(__x86_64__) && defined(__linux__)
+#include "ljit_emit_x64.h"
+#else
+#include "ljit_emit_stub.h"
+#endif
 
 /*
 ** Simple JIT Compiler for LXCLUA
