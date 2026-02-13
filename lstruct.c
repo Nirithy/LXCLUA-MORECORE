@@ -1063,8 +1063,8 @@ int luaopen_struct (lua_State *L) {
   luaL_newlib(L, struct_funcs);
 
   /* Register __struct_define globally for syntax support */
-  lua_pushcfunction(L, struct_define);
-  lua_setglobal(L, "__struct_define");
+  // lua_pushcfunction(L, struct_define);
+  // lua_setglobal(L, "__struct_define");
 
   /* Register array global */
   lua_newtable(L); /* array table */
