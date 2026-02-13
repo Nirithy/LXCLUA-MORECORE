@@ -30,6 +30,7 @@
 #define ST_BOOL 2
 #define ST_STRUCT 3
 #define ST_STRING 4
+#define ST_ARRAY 5
 
 /* Keys for StructDef table */
 #define KEY_SIZE "__size"
@@ -43,6 +44,9 @@
 #define F_SIZE "size"
 #define F_DEFAULT "default"
 #define F_DEF "def" /* For nested structs */
+#define F_LEN "len" /* For arrays */
+#define F_ELEM_TYPE "elem_type" /* For arrays */
+#define F_ELEM_SIZE "elem_size" /* For arrays */
 
 /**
  * @brief Array structure for contiguous memory storage.
@@ -50,9 +54,16 @@
 typedef struct {
     size_t len;     /**< Number of elements in the array. */
     size_t size;    /**< Size of each element in bytes. */
-    Table *def;     /**< Struct definition table. */
-    lu_byte data[]; /**< Raw data buffer. */
+    int type;       /**< Element type (ST_INT, ST_STRUCT, etc.) */
+    Table *def;     /**< Struct definition table (optional). */
+    lu_byte *data;  /**< Pointer to data. */
+    lu_byte inline_data[1]; /**< Placeholder for owned data. */
 } Array;
+
+/* Forward declaration */
+static int array_index(lua_State *L);
+static int array_newindex(lua_State *L);
+static int array_len(lua_State *L);
 
 /**
  * @brief Retrieves an integer field from a table.
@@ -102,8 +113,11 @@ static void get_gc_offsets(lua_State *L, Table *def, int **offsets, int *count) 
  * @param[out] type Field type.
  * @param[out] size Field size.
  * @param[out] nested_def Nested struct definition (if applicable).
+ * @param[out] arr_len Array length (if applicable).
+ * @param[out] arr_elem_type Array element type (if applicable).
+ * @param[out] arr_elem_size Array element size (if applicable).
  */
-static void get_field_info(lua_State *L, Table *fields, TString *key, int *offset, int *type, int *size, Table **nested_def) {
+static void get_field_info(lua_State *L, Table *fields, TString *key, int *offset, int *type, int *size, Table **nested_def, int *arr_len, int *arr_elem_type, int *arr_elem_size) {
     const TValue *v = luaH_getstr(fields, key);
     if (ttistable(v)) {
         Table *info = hvalue(v);
@@ -124,6 +138,26 @@ static void get_field_info(lua_State *L, Table *fields, TString *key, int *offse
         lua_pop(L, 1);
 
         if (*type == ST_STRUCT) {
+            lua_pushstring(L, F_DEF);
+            TValue *vd = (TValue*)luaH_getstr(info, tsvalue(s2v(L->top.p - 1)));
+            if (!ttisnil(vd) && ttistable(vd)) *nested_def = hvalue(vd);
+            lua_pop(L, 1);
+        } else if (*type == ST_ARRAY) {
+            lua_pushstring(L, F_LEN);
+            TValue *vl = (TValue*)luaH_getstr(info, tsvalue(s2v(L->top.p - 1)));
+            if (!ttisnil(vl)) *arr_len = (int)ivalue(vl);
+            lua_pop(L, 1);
+
+            lua_pushstring(L, F_ELEM_TYPE);
+            TValue *vet = (TValue*)luaH_getstr(info, tsvalue(s2v(L->top.p - 1)));
+            if (!ttisnil(vet)) *arr_elem_type = (int)ivalue(vet);
+            lua_pop(L, 1);
+
+            lua_pushstring(L, F_ELEM_SIZE);
+            TValue *ves = (TValue*)luaH_getstr(info, tsvalue(s2v(L->top.p - 1)));
+            if (!ttisnil(ves)) *arr_elem_size = (int)ivalue(ves);
+            lua_pop(L, 1);
+
             lua_pushstring(L, F_DEF);
             TValue *vd = (TValue*)luaH_getstr(info, tsvalue(s2v(L->top.p - 1)));
             if (!ttisnil(vd) && ttistable(vd)) *nested_def = hvalue(vd);
@@ -198,7 +232,8 @@ void luaS_structindex (lua_State *L, const TValue *t, TValue *key, StkId val) {
 
     int offset, type, size;
     Table *nested_def = NULL;
-    get_field_info(L, fields, tsvalue(key), &offset, &type, &size, &nested_def);
+    int arr_len = 0, arr_elem_type = 0, arr_elem_size = 0;
+    get_field_info(L, fields, tsvalue(key), &offset, &type, &size, &nested_def, &arr_len, &arr_elem_type, &arr_elem_size);
 
     if (type == -1) {
         setnilvalue(s2v(val));
@@ -249,6 +284,42 @@ void luaS_structindex (lua_State *L, const TValue *t, TValue *key, StkId val) {
             }
             break;
         }
+        case ST_ARRAY: {
+            /* Create Array View */
+            /* Save val offset in case stack moves */
+            ptrdiff_t val_off = savestack(L, val);
+
+            /* We allocate just sizeof(Array) because data points to external memory */
+            Array *arr = (Array *)lua_newuserdatauv(L, sizeof(Array), 1);
+
+            /* Restore val */
+            val = restorestack(L, val_off);
+
+            arr->len = arr_len;
+            arr->size = arr_elem_size;
+            arr->type = arr_elem_type;
+            arr->def = nested_def;
+            arr->data = p; /* Point to struct data */
+
+            /* Set metatable */
+            if (luaL_getmetatable(L, "struct.array")) {
+                lua_setmetatable(L, -2);
+            } else {
+                lua_pop(L, 1); /* pop metatable nil */
+            }
+
+            /* Anchor parent struct to array userdata */
+            setgcovalue(L, s2v(L->top.p), obj2gco(s));
+            L->top.p++;
+            lua_setiuservalue(L, -2, 1);
+
+            /* Set result */
+            setobj2s(L, val, s2v(L->top.p - 1));
+
+            /* Remove userdata from stack top */
+            L->top.p--;
+            break;
+        }
         default:
             setnilvalue(s2v(val));
             break;
@@ -282,7 +353,8 @@ void luaS_structnewindex (lua_State *L, const TValue *t, TValue *key, TValue *va
 
     int offset, type, size;
     Table *nested_def = NULL;
-    get_field_info(L, fields, tsvalue(key), &offset, &type, &size, &nested_def);
+    int arr_len = 0, arr_elem_type = 0, arr_elem_size = 0;
+    get_field_info(L, fields, tsvalue(key), &offset, &type, &size, &nested_def, &arr_len, &arr_elem_type, &arr_elem_size);
 
     if (type == -1) {
         luaG_runerror(L, "field '%s' does not exist in struct", getstr(tsvalue(key)));
@@ -334,6 +406,21 @@ void luaS_structnewindex (lua_State *L, const TValue *t, TValue *key, TValue *va
             memcpy(p, &ts, sizeof(TString *));
             break;
         }
+        case ST_ARRAY: {
+            if (!ttisfulluserdata(val)) {
+                luaG_runerror(L, "expected array for field '%s'", getstr(tsvalue(key)));
+            }
+            Array *arr = (Array *)getudatamem(uvalue(val));
+            /* Check compatibility */
+            if (arr->len != arr_len || arr->size != arr_elem_size || arr->type != arr_elem_type) {
+                luaG_runerror(L, "array type/size mismatch for field '%s'", getstr(tsvalue(key)));
+            }
+            if (arr->type == ST_STRUCT && arr->def != nested_def) {
+                luaG_runerror(L, "array struct type mismatch for field '%s'", getstr(tsvalue(key)));
+            }
+            memcpy(p, arr->data, size); /* Copy entire array data */
+            break;
+        }
     }
 }
 
@@ -368,6 +455,7 @@ static int struct_call (lua_State *L) {
     Table *def = hvalue(s2v(L->top.p - lua_gettop(L))); /* 1st arg */
 
     int size = get_int_field(L, 1, KEY_SIZE);
+    /* printf("struct_call: allocating %d bytes\n", size); */
 
     /* Allocate struct */
     Struct *s = (Struct *)luaC_newobjdt(L, LUA_TSTRUCT, offsetof(Struct, inline_data) + size, 0);
@@ -422,7 +510,6 @@ static int struct_call (lua_State *L) {
                         }
                         case ST_BOOL: *p = !l_isfalse(v_def); break;
                         case ST_STRUCT: {
-                            /* Default for struct? Should be a struct instance */
                             if (ttisstruct(v_def)) {
                                 Struct *def_s = structvalue(v_def);
                                 memcpy(p, def_s->data, sz);
@@ -433,6 +520,13 @@ static int struct_call (lua_State *L) {
                             if (ttisstring(v_def)) {
                                 TString *ts = tsvalue(v_def);
                                 memcpy(p, &ts, sizeof(TString *));
+                            }
+                            break;
+                        }
+                        case ST_ARRAY: {
+                            if (ttisfulluserdata(v_def)) {
+                                Array *arr = (Array *)getudatamem(uvalue(v_def));
+                                memcpy(p, arr->data, sz);
                             }
                             break;
                         }
@@ -513,6 +607,9 @@ static int struct_define (lua_State *L) {
         int type = -1;
         int size = 0;
         int align = 1;
+        int arr_len = 0;
+        int arr_elem_type = 0;
+        int arr_elem_size = 0;
 
         if (lua_isinteger(L, -1)) {
             type = ST_INT;
@@ -538,6 +635,31 @@ static int struct_define (lua_State *L) {
                  Struct *s = structvalue(v);
                  size = (int)s->data_size;
                  align = 8; /* Assume max align for structs for safety */
+             } else if (ttisfulluserdata(v)) {
+                 /* Check if it is an Array */
+                 void *u = uvalue(v);
+                 /* Simple heuristic: check metatable name? Or assume it is array if passed here?
+                    For now, assume it's an Array if it has correct size/fields.
+                    Better: check metatable name.
+                 */
+                 lua_getmetatable(L, -1);
+                 luaL_getmetatable(L, "struct.array");
+                 int is_array = lua_rawequal(L, -1, -2);
+                 lua_pop(L, 2);
+
+                 if (is_array) {
+                     Array *arr = (Array *)getudatamem((Udata *)u);
+                     type = ST_ARRAY;
+                     size = (int)(arr->len * arr->size);
+                     align = (int)arr->size; /* Conservative align */
+                     if (align > 8) align = 8;
+
+                     arr_len = (int)arr->len;
+                     arr_elem_type = arr->type;
+                     arr_elem_size = (int)arr->size;
+                 } else {
+                     return luaL_error(L, "unsupported user data type for field '%s'", fname);
+                 }
              } else {
                  return luaL_error(L, "unsupported default value type for field '%s'", fname);
              }
@@ -594,6 +716,52 @@ static int struct_define (lua_State *L) {
                  gc_offsets_arr = realloc(gc_offsets_arr, cap_gc_offsets * sizeof(int));
              }
              gc_offsets_arr[n_gc_offsets++] = (int)current_offset;
+        } else if (type == ST_ARRAY) {
+            lua_pushstring(L, F_LEN);
+            lua_pushinteger(L, arr_len);
+            lua_rawset(L, -3);
+
+            lua_pushstring(L, F_ELEM_TYPE);
+            lua_pushinteger(L, arr_elem_type);
+            lua_rawset(L, -3);
+
+            lua_pushstring(L, F_ELEM_SIZE);
+            lua_pushinteger(L, arr_elem_size);
+            lua_rawset(L, -3);
+
+            if (arr_elem_type == ST_STRUCT) {
+                TValue *v = s2v(L->top.p - 1);
+                Array *arr = (Array *)getudatamem(uvalue(v));
+                lua_pushstring(L, F_DEF);
+                sethvalue(L, s2v(L->top.p), arr->def);
+                api_incr_top(L);
+                lua_rawset(L, -3);
+
+                /* Recursively add GC offsets for each element */
+                int *nested_offsets;
+                int nested_count;
+                get_gc_offsets(L, arr->def, &nested_offsets, &nested_count);
+                if (nested_count > 0) {
+                    while (n_gc_offsets + (nested_count * arr_len) > cap_gc_offsets) {
+                        cap_gc_offsets = cap_gc_offsets ? cap_gc_offsets * 2 : 4 + (nested_count * arr_len);
+                        gc_offsets_arr = realloc(gc_offsets_arr, cap_gc_offsets * sizeof(int));
+                    }
+                    for (int j = 0; j < arr_len; j++) {
+                        for (int k = 0; k < nested_count; k++) {
+                            gc_offsets_arr[n_gc_offsets++] = (int)(current_offset + (j * arr_elem_size) + nested_offsets[k]);
+                        }
+                    }
+                }
+            } else if (arr_elem_type == ST_STRING) {
+                /* Add GC offset for each string element */
+                if (n_gc_offsets + arr_len > cap_gc_offsets) {
+                    cap_gc_offsets = cap_gc_offsets ? cap_gc_offsets * 2 : 4 + arr_len;
+                    gc_offsets_arr = realloc(gc_offsets_arr, cap_gc_offsets * sizeof(int));
+                }
+                for (int j = 0; j < arr_len; j++) {
+                    gc_offsets_arr[n_gc_offsets++] = (int)(current_offset + (j * arr_elem_size));
+                }
+            }
         }
 
         /* fields[fname] = info */
@@ -670,20 +838,58 @@ static int array_index(lua_State *L) {
         return luaL_error(L, "array index out of bounds");
     }
 
-    /* Return a VIEW of the struct at index */
-    Struct *s = (Struct *)luaC_newobjdt(L, LUA_TSTRUCT, offsetof(Struct, inline_data), 0);
-    s->def = arr->def;
-    s->data_size = arr->size;
-    get_gc_offsets(L, arr->def, &s->gc_offsets, &s->n_gc_offsets);
-    s->parent = obj2gco((Udata *)((char *)arr - udatamemoffset(1)));
-    s->data = arr->data + (idx - 1) * arr->size;
+    lu_byte *p = arr->data + (idx - 1) * arr->size;
 
-    TValue *v = s2v(L->top.p);
-    v->value_.struct_ = s;
-    v->tt_ = ctb(LUA_VSTRUCT);
-    api_incr_top(L);
+    switch (arr->type) {
+        case ST_INT: {
+            lua_Integer i;
+            memcpy(&i, p, sizeof(i));
+            lua_pushinteger(L, i);
+            return 1;
+        }
+        case ST_FLOAT: {
+            lua_Number n;
+            memcpy(&n, p, sizeof(n));
+            lua_pushnumber(L, n);
+            return 1;
+        }
+        case ST_BOOL: {
+            lua_pushboolean(L, *p);
+            return 1;
+        }
+        case ST_STRUCT: {
+            /* Return a VIEW of the struct at index */
+            Struct *s = (Struct *)luaC_newobjdt(L, LUA_TSTRUCT, offsetof(Struct, inline_data), 0);
+            s->def = arr->def;
+            s->data_size = arr->size;
+            get_gc_offsets(L, arr->def, &s->gc_offsets, &s->n_gc_offsets);
+            /* Parent is the array userdata */
+            /* If array is a View, parent is array->parent? Array struct doesn't track parent directly in C view */
+            /* Wait, Array struct is userdata. */
+            s->parent = obj2gco((Udata *)((char *)arr - udatamemoffset(1)));
+            s->data = p;
 
-    return 1;
+            TValue *v = s2v(L->top.p);
+            v->value_.struct_ = s;
+            v->tt_ = ctb(LUA_VSTRUCT);
+            api_incr_top(L);
+            return 1;
+        }
+        case ST_STRING: {
+            TString *ts;
+            memcpy(&ts, p, sizeof(TString *));
+            if (ts) {
+                setsvalue(L, s2v(L->top.p), ts);
+                api_incr_top(L);
+            } else {
+                lua_pushnil(L);
+            }
+            return 1;
+        }
+        default:
+            lua_pushnil(L);
+            return 1;
+    }
 }
 
 /**
@@ -697,60 +903,47 @@ static int array_newindex(lua_State *L) {
     int idx = (int)luaL_checkinteger(L, 2);
     if (idx < 1 || idx > (int)arr->len) return luaL_error(L, "array index out of bounds");
 
-    if (!ttisstruct(s2v(L->top.p - 1))) {
-        return luaL_error(L, "expected struct value");
-    }
-    Struct *s = structvalue(s2v(L->top.p - 1));
-
-    if (s->def != arr->def) {
-        return luaL_error(L, "struct type mismatch");
-    }
-
     lu_byte *dst = arr->data + (idx - 1) * arr->size;
-    memcpy(dst, s->data, arr->size);
+
+    switch (arr->type) {
+        case ST_INT: {
+            lua_Integer i = luaL_checkinteger(L, 3);
+            memcpy(dst, &i, sizeof(i));
+            break;
+        }
+        case ST_FLOAT: {
+            lua_Number n = luaL_checknumber(L, 3);
+            memcpy(dst, &n, sizeof(n));
+            break;
+        }
+        case ST_BOOL: {
+            *dst = lua_toboolean(L, 3);
+            break;
+        }
+        case ST_STRUCT: {
+            if (!ttisstruct(s2v(L->top.p - 1))) {
+                return luaL_error(L, "expected struct value");
+            }
+            Struct *s = structvalue(s2v(L->top.p - 1));
+            if (s->def != arr->def) {
+                return luaL_error(L, "struct type mismatch");
+            }
+            memcpy(dst, s->data, arr->size);
+            break;
+        }
+        case ST_STRING: {
+            if (!lua_isstring(L, 3)) {
+                return luaL_error(L, "expected string value");
+            }
+            TString *ts = tsvalue(s2v(L->top.p - 1));
+            memcpy(dst, &ts, sizeof(TString *));
+            break;
+        }
+        default:
+            return luaL_error(L, "unknown array element type");
+    }
 
     return 0;
-}
-
-/**
- * @brief Creates a new struct array.
- *
- * @param L The Lua state.
- * @param def_idx Index of the struct definition.
- * @param count Number of elements.
- * @return 1 (the array).
- */
-static int create_struct_array(lua_State *L, int def_idx, int count) {
-    if (count < 0) return luaL_error(L, "size must be non-negative");
-
-    lua_pushvalue(L, def_idx); /* push def table to top for get_int_field */
-    int def_top = lua_gettop(L);
-    int size = get_int_field(L, def_top, KEY_SIZE);
-    lua_pop(L, 1); /* pop def table */
-
-    size_t total_size = sizeof(Array) + (size_t)count * size;
-    Array *arr = (Array *)lua_newuserdatauv(L, total_size, 1);
-    arr->len = count;
-    arr->size = size;
-    arr->def = (Table*)lua_topointer(L, def_idx);
-
-    /* Anchor def table */
-    lua_pushvalue(L, def_idx);
-    lua_setiuservalue(L, -2, 1);
-
-    memset(arr->data, 0, (size_t)count * size);
-
-    if (luaL_newmetatable(L, "struct.array")) {
-        lua_pushcfunction(L, array_index);
-        lua_setfield(L, -2, "__index");
-        lua_pushcfunction(L, array_newindex);
-        lua_setfield(L, -2, "__newindex");
-        lua_pushcfunction(L, array_len);
-        lua_setfield(L, -2, "__len");
-    }
-    lua_setmetatable(L, -2);
-
-    return 1;
 }
 
 /* Proxy array implementation for basic types */
@@ -967,13 +1160,79 @@ static int create_safe_struct_array(lua_State *L, int def_idx, int count) {
     return 1;
 }
 
+/**
+ * @brief Creates a new array (generic).
+ *
+ * @param L The Lua state.
+ * @param type_idx Index of the type (struct def or string).
+ * @param count Number of elements.
+ * @return 1 (the array).
+ */
+static int create_array(lua_State *L, int type_idx, int count) {
+    if (count < 0) return luaL_error(L, "size must be non-negative");
+
+    int type = -1;
+    size_t size = 0;
+    Table *def = NULL;
+
+    if (lua_istable(L, type_idx)) {
+        /* Struct definition */
+        lua_pushvalue(L, type_idx);
+        int def_top = lua_gettop(L);
+        size = get_int_field(L, def_top, KEY_SIZE);
+        lua_pop(L, 1);
+        type = ST_STRUCT;
+        def = (Table*)lua_topointer(L, type_idx);
+    } else if (lua_isstring(L, type_idx)) {
+        const char *tname = lua_tostring(L, type_idx);
+        if (strcmp(tname, "int") == 0 || strcmp(tname, "integer") == 0) {
+            type = ST_INT;
+            size = sizeof(lua_Integer);
+        } else if (strcmp(tname, "float") == 0 || strcmp(tname, "number") == 0) {
+            type = ST_FLOAT;
+            size = sizeof(lua_Number);
+        } else if (strcmp(tname, "bool") == 0 || strcmp(tname, "boolean") == 0) {
+            type = ST_BOOL;
+            size = sizeof(lu_byte);
+        } else if (strcmp(tname, "string") == 0) {
+            type = ST_STRING;
+            size = sizeof(TString *);
+        } else {
+            return luaL_error(L, "unknown type '%s'", tname);
+        }
+    } else {
+        return luaL_error(L, "invalid type for array");
+    }
+
+    size_t total_size = sizeof(Array) + (size_t)count * size;
+    Array *arr = (Array *)lua_newuserdatauv(L, total_size, 1);
+    arr->len = count;
+    arr->size = size;
+    arr->type = type;
+    arr->def = def;
+    arr->data = arr->inline_data; /* Point to owned memory */
+
+    /* Anchor def table if it's a struct array */
+    if (def) {
+        lua_pushvalue(L, type_idx);
+        lua_setiuservalue(L, -2, 1);
+    }
+
+    memset(arr->data, 0, (size_t)count * size);
+
+    luaL_getmetatable(L, "struct.array");
+    lua_setmetatable(L, -2);
+
+    return 1;
+}
+
 static int array_factory_index(lua_State *L) {
     lua_getfield(L, 1, "__type");
     int type_idx = lua_gettop(L);
     int size = (int)luaL_checkinteger(L, 2);
 
+    /* Check if it is a struct definition (has __size) */
     if (lua_istable(L, type_idx)) {
-        /* Check if it is a struct definition (has __size) */
         lua_pushstring(L, KEY_SIZE);
         lua_rawget(L, type_idx);
         int is_struct = !lua_isnil(L, -1);
@@ -986,31 +1245,41 @@ static int array_factory_index(lua_State *L) {
             if (n_gc_offsets > 0) {
                 return create_safe_struct_array(L, type_idx, size);
             }
-            return create_struct_array(L, type_idx, size);
+            return create_array(L, type_idx, size);
         }
+    }
 
-        /* Check standard libraries as types */
-        const char *type_name = NULL;
-        lua_getglobal(L, "string");
-        if (lua_rawequal(L, -1, type_idx)) type_name = "string";
+    /* Check for basic types */
+    if (lua_isstring(L, type_idx)) {
+        const char *tname = lua_tostring(L, type_idx);
+        if (strcmp(tname, "int") == 0 || strcmp(tname, "integer") == 0 ||
+            strcmp(tname, "float") == 0 || strcmp(tname, "number") == 0 ||
+            strcmp(tname, "bool") == 0 || strcmp(tname, "boolean") == 0 ||
+            strcmp(tname, "string") == 0) {
+            return create_array(L, type_idx, size);
+        }
+    }
+
+    /* Fallback to proxy array for unknown types (e.g. "table") */
+    /* Check standard libraries as types */
+    const char *type_name = NULL;
+    lua_getglobal(L, "string");
+    if (lua_rawequal(L, -1, type_idx)) type_name = "string";
+    lua_pop(L, 1);
+
+    if (!type_name) {
+        lua_getglobal(L, "table");
+        if (lua_rawequal(L, -1, type_idx)) type_name = "table";
         lua_pop(L, 1);
+    }
 
-        if (!type_name) {
-            lua_getglobal(L, "table");
-            if (lua_rawequal(L, -1, type_idx)) type_name = "table";
-            lua_pop(L, 1);
-        }
-
-        if (type_name) {
-            lua_pushstring(L, type_name);
-            lua_replace(L, type_idx);
-            return create_proxy_array(L, type_idx, size);
-        }
-
-        return luaL_error(L, "invalid type for array");
-    } else {
+    if (type_name) {
+        lua_pushstring(L, type_name);
+        lua_replace(L, type_idx);
         return create_proxy_array(L, type_idx, size);
     }
+
+    return create_proxy_array(L, type_idx, size);
 }
 
 /**
@@ -1061,6 +1330,17 @@ static const luaL_Reg struct_funcs[] = {
  */
 int luaopen_struct (lua_State *L) {
   luaL_newlib(L, struct_funcs);
+
+  if (luaL_newmetatable(L, "struct.array")) {
+      /* printf("luaopen_struct: created metatable\n"); */
+      lua_pushcfunction(L, array_index);
+      lua_setfield(L, -2, "__index");
+      lua_pushcfunction(L, array_newindex);
+      lua_setfield(L, -2, "__newindex");
+      lua_pushcfunction(L, array_len);
+      lua_setfield(L, -2, "__len");
+  }
+  lua_pop(L, 1);
 
   /* Register __struct_define globally for syntax support */
   // lua_pushcfunction(L, struct_define);
