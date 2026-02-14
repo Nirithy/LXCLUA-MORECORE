@@ -454,7 +454,28 @@ static void jit_emit_op_gti(JitState *J, int a, int sb, int k) { emit_barrier(J)
 static void jit_emit_op_gei(JitState *J, int a, int sb, int k) { emit_barrier(J); }
 static void jit_emit_op_test(JitState *J, int a, int k) { emit_barrier(J); }
 static void jit_emit_op_testset(JitState *J, int a, int b, int k) { emit_barrier(J); }
-static void jit_emit_op_call(JitState *J, int a, int b, int c) { emit_barrier(J); }
+
+static void jit_emit_op_call(JitState *J, int a, int b, int c) {
+  // Helper args: (L, ci, ra_idx, b, c, next_pc)
+  // Register mapping for x64 call:
+  // 1: RDI = L (from RBX)
+  // 2: RSI = ci (from R12)
+  // 3: RDX = ra_idx
+  // 4: RCX = b
+  // 5: R8 = c
+  // 6: R9 = next_pc (J->next_pc)
+
+  ASM_MOV_RR(J, RA_RDI, RA_RBX); // L
+  ASM_MOV_RR(J, RA_RSI, RA_R12); // ci
+  ASM_MOV_R_IMM32(J, RA_RDX, a);
+  ASM_MOV_R_IMM32(J, RA_RCX, b);
+  ASM_MOV_R_IMM32(J, RA_R8, c);
+  ASM_MOV_R_IMM(J, RA_R9, (unsigned long long)(uintptr_t)J->next_pc);
+
+  ASM_MOV_R_IMM(J, RA_RAX, (unsigned long long)(uintptr_t)&luaJ_call_helper);
+  ASM_CALL_R(J, RA_RAX);
+}
+
 static void jit_emit_op_tailcall(JitState *J, int a, int b, int c, int k) { emit_barrier(J); }
 static void jit_emit_op_return(JitState *J, int a, int b, int c, int k) { emit_barrier(J); }
 static void jit_emit_op_forloop(JitState *J, int a, int bx) { emit_barrier(J); }

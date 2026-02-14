@@ -13,6 +13,28 @@
 #include "lopcodes.h"
 #include "lstate.h"
 #include "ljit.h"
+#include "lvm.h"
+
+/*
+** Helper function for OP_CALL in JIT
+** Validates and prepares the stack, calls luaD_precall, and executes Lua functions recursively.
+*/
+static void luaJ_call_helper(lua_State *L, CallInfo *ci, int ra_idx, int b, int c, const Instruction *next_pc) {
+  StkId ra = ci->func.p + 1 + ra_idx;
+  int nresults = c - 1;
+  CallInfo *newci;
+
+  if (b != 0) {
+    L->top.p = ra + b;
+  }
+
+  ci->u.l.savedpc = next_pc;
+
+  if ((newci = luaD_precall(L, ra, nresults)) != NULL) {
+     /* Lua function: run it recursively */
+     luaV_execute(L, newci);
+  }
+}
 
 #if defined(__x86_64__) || defined(_M_X64)
   #if defined(__linux__) || defined(__APPLE__)
