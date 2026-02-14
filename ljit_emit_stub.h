@@ -10,7 +10,13 @@
 
 #define JIT_BUFFER_SIZE 4096
 
-typedef struct JitState JitState;
+typedef struct JitState {
+  unsigned char *code;
+  size_t size;
+  size_t capacity;
+  Proto *p;
+  const Instruction *next_pc;
+} JitState;
 
 static JitState *jit_new_state(void) { return NULL; }
 static void jit_free_state(JitState *J) { (void)J; }
@@ -60,19 +66,7 @@ static void jit_emit_op_bork(JitState *J, int a, int b, int c, const Instruction
 static void jit_emit_op_bxork(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
 static void jit_emit_op_shli(JitState *J, int a, int b, int sc, const Instruction *next) { (void)J; }
 static void jit_emit_op_shri(JitState *J, int a, int b, int sc, const Instruction *next) { (void)J; }
-static void jit_emit_op_mul(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
-static void jit_emit_op_mod(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
-static void jit_emit_op_pow(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
-static void jit_emit_op_div(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
-static void jit_emit_op_idiv(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
-static void jit_emit_op_band(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
-static void jit_emit_op_bor(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
-static void jit_emit_op_bxor(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
-static void jit_emit_op_shl(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
-static void jit_emit_op_shr(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
 static void jit_emit_op_spaceship(JitState *J, int a, int b, int c) { (void)J; }
-static void jit_emit_op_unm(JitState *J, int a, int b) { (void)J; }
-static void jit_emit_op_bnot(JitState *J, int a, int b) { (void)J; }
 static void jit_emit_op_not(JitState *J, int a, int b) { (void)J; }
 static void jit_emit_op_len(JitState *J, int a, int b) { (void)J; }
 static void jit_emit_op_concat(JitState *J, int a, int b) { (void)J; }
@@ -125,5 +119,18 @@ static void jit_emit_op_case(JitState *J, int a, int b, int c) { (void)J; }
 static void jit_emit_op_newconcept(JitState *J, int a, int bx) { (void)J; }
 static void jit_emit_op_newnamespace(JitState *J, int a, int bx) { (void)J; }
 static void jit_emit_op_linknamespace(JitState *J, int a, int b) { (void)J; }
+static void jit_emit_op_mul(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
+static void jit_emit_op_mod(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
+static void jit_emit_op_pow(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
+static void jit_emit_op_div(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
+static void jit_emit_op_idiv(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
+static void jit_emit_op_band(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
+static void jit_emit_op_bor(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
+static void jit_emit_op_bxor(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
+static void jit_emit_op_shl(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
+static void jit_emit_op_shri(JitState *J, int a, int b, int sc, const Instruction *next) { (void)J; }
+static void jit_emit_op_shr(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
+static void jit_emit_op_unm(JitState *J, int a, int b, const Instruction *next) { (void)J; }
+static void jit_emit_op_bnot(JitState *J, int a, int b, const Instruction *next) { (void)J; }
 
 #endif

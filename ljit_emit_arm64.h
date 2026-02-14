@@ -28,6 +28,8 @@ typedef struct JitState {
   unsigned char *code;
   size_t size;
   size_t capacity;
+  Proto *p;
+  const Instruction *next_pc;
 } JitState;
 
 /* Register aliases (X0-X30) */
@@ -60,6 +62,8 @@ static JitState *jit_new_state(void) {
     J->code = NULL;
     J->size = 0;
     J->capacity = 0;
+    J->p = NULL;
+    J->next_pc = NULL;
   }
   return J;
 }
