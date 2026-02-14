@@ -2023,7 +2023,14 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
     vmdispatch (GET_OPCODE(i)) {
       vmcase(OP_MOVE) {
         StkId ra = RA(i);
-        setobjs2s(L, ra, RB(i));
+        TValue *src = s2v(RB(i));
+        TValue *dst = s2v(ra);
+        if (l_unlikely(ttisstruct(src))) {
+           luaS_copystruct(L, dst, src);
+        } else {
+           dst->value_ = src->value_;
+           dst->tt_ = src->tt_;
+        }
         vmbreak;
       }
       vmcase(OP_LOADI) {
@@ -2228,8 +2235,14 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
               luaC_barrierback(L, obj2gco(h), rc);
               l_rwlock_unlock(&h->lock);
            } else {
-              l_rwlock_unlock(&h->lock);
-              Protect(luaV_finishset(L, s2v(ra), rb, rc, NULL));
+              if (!h->using_next && (h->flags & (1u << TM_NEWINDEX))) {
+                 luaH_finishset(L, h, rb, res, rc);
+                 luaC_barrierback(L, obj2gco(h), rc);
+                 l_rwlock_unlock(&h->lock);
+              } else {
+                 l_rwlock_unlock(&h->lock);
+                 Protect(luaV_finishset(L, s2v(ra), rb, rc, NULL));
+              }
            }
         }
         else
@@ -2249,10 +2262,18 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
               luaC_barrierback(L, obj2gco(h), rc);
               l_rwlock_unlock(&h->lock);
            } else {
-              l_rwlock_unlock(&h->lock);
-              TValue key;
-              setivalue(&key, c);
-              Protect(luaV_finishset(L, s2v(ra), &key, rc, NULL));
+              if (!h->using_next && (h->flags & (1u << TM_NEWINDEX))) {
+                 TValue key;
+                 setivalue(&key, c);
+                 luaH_finishset(L, h, &key, res, rc);
+                 luaC_barrierback(L, obj2gco(h), rc);
+                 l_rwlock_unlock(&h->lock);
+              } else {
+                 l_rwlock_unlock(&h->lock);
+                 TValue key;
+                 setivalue(&key, c);
+                 Protect(luaV_finishset(L, s2v(ra), &key, rc, NULL));
+              }
            }
         } else {
           TValue key;
@@ -2449,6 +2470,15 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
       vmcase(OP_ADD) {
         TValue *v1 = vRB(i);
         TValue *v2 = vRC(i);
+        if (ttisinteger(v1) && ttisinteger(v2)) {
+          lua_Integer i1 = ivalue(v1); lua_Integer i2 = ivalue(v2);
+          lua_Integer r;
+          if (try_add(i1, i2, &r)) {
+            StkId ra = RA(i);
+            pc++; setivalue(s2v(ra), r);
+            vmbreak;
+          }
+        }
         if (ttispointer(v1) && ttisinteger(v2)) {
           StkId ra = RA(i);
           setptrvalue(s2v(ra), (char *)ptrvalue(v1) + ivalue(v2));
@@ -2465,6 +2495,15 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
       vmcase(OP_SUB) {
         TValue *v1 = vRB(i);
         TValue *v2 = vRC(i);
+        if (ttisinteger(v1) && ttisinteger(v2)) {
+          lua_Integer i1 = ivalue(v1); lua_Integer i2 = ivalue(v2);
+          lua_Integer r;
+          if (try_sub(i1, i2, &r)) {
+            StkId ra = RA(i);
+            pc++; setivalue(s2v(ra), r);
+            vmbreak;
+          }
+        }
         if (ttispointer(v1) && ttisinteger(v2)) {
           StkId ra = RA(i);
           setptrvalue(s2v(ra), (char *)ptrvalue(v1) - ivalue(v2));
@@ -2664,7 +2703,15 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
         StkId ra = RA(i);
         int cond;
         TValue *rb = vRB(i);
-        Protect(cond = luaV_equalobj(L, s2v(ra), rb));
+        if (ttisinteger(s2v(ra)) && ttisinteger(rb)) {
+           cond = (ivalue(s2v(ra)) == ivalue(rb));
+        } else if (ttisfloat(s2v(ra)) && ttisfloat(rb)) {
+           cond = luai_numeq(fltvalue(s2v(ra)), fltvalue(rb));
+        } else if (ttisshrstring(s2v(ra)) && ttisshrstring(rb)) {
+           cond = eqshrstr(tsvalue(s2v(ra)), tsvalue(rb));
+        } else {
+           Protect(cond = luaV_equalobj(L, s2v(ra), rb));
+        }
         docondjump();
         vmbreak;
       }
