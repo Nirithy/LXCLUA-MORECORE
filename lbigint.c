@@ -250,10 +250,6 @@ static TBigFloat *bigflt_scale(lua_State *L, TBigFloat *b, lua_Integer scale_dif
 
     /* Compute 10^k */
     /* 10^k has approx k * log2(10) / 32 limbs. log2(10)~3.32. k/9.6 limbs. */
-    unsigned int est_len = (unsigned int)(scale_diff / 9) + 2;
-    l_uint32 *pow_buff = luaM_newvector(L, est_len, l_uint32);
-    unsigned int pow_len = 1;
-    pow_buff[0] = 1;
 
     TBigInt *base = luaB_new(L, 1);
     base->buff[0] = 10; base->len = 1; base->sign = 1;
@@ -961,9 +957,6 @@ void luaB_tostring_prec(lua_State *L, const TValue *obj, int precision, TValue *
         /* No, we can reuse logic. */
         /* Just for simplicity, convert BigInt to string then append */
 
-        TValue temp = *obj;
-        TValue str_val;
-        luaB_tostring(L, &temp); /* changes temp to string */
         /* Note: luaB_tostring might assume obj is on stack/anchored? */
         /* luaB_tostring implementation uses savestack/restorestack on 'obj'. */
         /* So 'temp' MUST be on stack? */
