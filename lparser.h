@@ -142,7 +142,7 @@ typedef struct TypeDesc {
   struct TypeHint* hints[MAX_TYPED_FIELDS];
 
   /* named type */
-  TString* typename;
+  TString* type_name;
 } TypeDesc;
 
 #define MAX_TYPE_DESCS 3

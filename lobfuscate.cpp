@@ -1893,6 +1893,11 @@ int luaO_generateNestedDispatcher (CFFContext *ctx) {
   unsigned int bogus_seed = ctx->seed;
   Proto *f = ctx->f;
   
+  int outer_loop_jmp_pc;
+  Instruction outer_loop;
+  int *block_jmp_pcs = NULL;
+  int *block_starts = NULL;
+
   CFF_LOG("========== 开始生成嵌套分发器代码 ==========");
   CFF_LOG("内层状态寄存器: R[%d]", state_reg);
   CFF_LOG("外层状态寄存器: R[%d]", outer_state_reg);
@@ -1964,14 +1969,14 @@ int luaO_generateNestedDispatcher (CFFContext *ctx) {
   }
   
   /* 外层分发器的默认跳转（循环回自己） */
-  int outer_loop_jmp_pc = ctx->new_code_size;
-  Instruction outer_loop = CREATE_sJ(OP_JMP, ctx->outer_dispatcher_pc - outer_loop_jmp_pc - 1 + OFFSET_sJ, 0);
+  outer_loop_jmp_pc = ctx->new_code_size;
+  outer_loop = CREATE_sJ(OP_JMP, ctx->outer_dispatcher_pc - outer_loop_jmp_pc - 1 + OFFSET_sJ, 0);
   if (emitInstruction(ctx, outer_loop) < 0) goto cleanup_nested;
   
   /* 为每个分组生成内层分发器 */
   CFF_LOG("--- 生成内层分发器 ---");
-  int *block_jmp_pcs = (int *)luaM_malloc_(ctx->L, sizeof(int) * ctx->num_blocks, 0);
-  int *block_starts = (int *)luaM_malloc_(ctx->L, sizeof(int) * ctx->num_blocks, 0);
+  block_jmp_pcs = (int *)luaM_malloc_(ctx->L, sizeof(int) * ctx->num_blocks, 0);
+  block_starts = (int *)luaM_malloc_(ctx->L, sizeof(int) * ctx->num_blocks, 0);
   if (block_jmp_pcs == NULL || block_starts == NULL) {
     if (block_jmp_pcs) luaM_free_(ctx->L, block_jmp_pcs, sizeof(int) * ctx->num_blocks);
     if (block_starts) luaM_free_(ctx->L, block_starts, sizeof(int) * ctx->num_blocks);

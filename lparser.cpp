@@ -1997,7 +1997,7 @@ static void body (LexState *ls, expdesc *e, int ismethod, int line) {
         if (vd->vd.hint) {
            int j;
            for (j = 0; j < MAX_TYPE_DESCS; j++) {
-              if (vd->vd.hint->descs[j].type == LVT_NAME && vd->vd.hint->descs[j].typename) {
+              if (vd->vd.hint->descs[j].type == LVT_NAME && vd->vd.hint->descs[j].type_name) {
                  expdesc f_check;
                  singlevaraux(&new_fs, luaS_newliteral(ls->L, "__check_type"), &f_check, 1);
                  if (f_check.k == VVOID) {
@@ -2015,11 +2015,11 @@ static void body (LexState *ls, expdesc *e, int ismethod, int line) {
                  luaK_exp2nextreg(&new_fs, &e_val);
 
                  expdesc e_type;
-                 singlevaraux(&new_fs, vd->vd.hint->descs[j].typename, &e_type, 1);
+                 singlevaraux(&new_fs, vd->vd.hint->descs[j].type_name, &e_type, 1);
                  if (e_type.k == VVOID) {
                     expdesc key;
                     singlevaraux(&new_fs, ls->envn, &e_type, 1);
-                    codestring(&key, vd->vd.hint->descs[j].typename);
+                    codestring(&key, vd->vd.hint->descs[j].type_name);
                     luaK_indexed(&new_fs, &e_type, &key);
                  }
                  luaK_exp2nextreg(&new_fs, &e_type);
@@ -2077,7 +2077,7 @@ static void body (LexState *ls, expdesc *e, int ismethod, int line) {
       for (int i = 0; i < nmappings && i < MAXVARS; i++) {
           Vardesc *vd = getlocalvardesc(&impl_fs, i);
           if (vd->vd.hint && vd->vd.hint->descs[0].type == LVT_NAME) {
-              mappings[i] = vd->vd.hint->descs[0].typename;
+              mappings[i] = vd->vd.hint->descs[0].type_name;
           }
       }
 
@@ -2088,7 +2088,7 @@ static void body (LexState *ls, expdesc *e, int ismethod, int line) {
             if (vd->vd.hint) {
                int j;
                for (j = 0; j < MAX_TYPE_DESCS; j++) {
-                  if (vd->vd.hint->descs[j].type == LVT_NAME && vd->vd.hint->descs[j].typename) {
+                  if (vd->vd.hint->descs[j].type == LVT_NAME && vd->vd.hint->descs[j].type_name) {
                      expdesc f_check;
                      singlevaraux(&impl_fs, luaS_newliteral(ls->L, "__check_type"), &f_check, 1);
                      if (f_check.k == VVOID) {
@@ -2106,11 +2106,11 @@ static void body (LexState *ls, expdesc *e, int ismethod, int line) {
                      luaK_exp2nextreg(&impl_fs, &e_val);
 
                      expdesc e_type;
-                     singlevaraux(&impl_fs, vd->vd.hint->descs[j].typename, &e_type, 1);
+                     singlevaraux(&impl_fs, vd->vd.hint->descs[j].type_name, &e_type, 1);
                      if (e_type.k == VVOID) {
                         expdesc key;
                         singlevaraux(&impl_fs, ls->envn, &e_type, 1);
-                        codestring(&key, vd->vd.hint->descs[j].typename);
+                        codestring(&key, vd->vd.hint->descs[j].type_name);
                         luaK_indexed(&impl_fs, &e_type, &key);
                      }
                      luaK_exp2nextreg(&impl_fs, &e_type);
@@ -2498,7 +2498,7 @@ static void parse_generic_arrow_body(LexState *ls, FuncState *factory_fs, expdes
     for (int i = 0; i < nmappings && i < MAXVARS; i++) {
         Vardesc *vd = getlocalvardesc(&impl_fs, i);
         if (vd->vd.hint && vd->vd.hint->descs[0].type == LVT_NAME) {
-            mappings[i] = vd->vd.hint->descs[0].typename;
+            mappings[i] = vd->vd.hint->descs[0].type_name;
         }
     }
 
@@ -2510,7 +2510,7 @@ static void parse_generic_arrow_body(LexState *ls, FuncState *factory_fs, expdes
           if (vd->vd.hint) {
              int j;
              for (j = 0; j < MAX_TYPE_DESCS; j++) {
-                if (vd->vd.hint->descs[j].type == LVT_NAME && vd->vd.hint->descs[j].typename) {
+                if (vd->vd.hint->descs[j].type == LVT_NAME && vd->vd.hint->descs[j].type_name) {
                    expdesc f_check;
                    singlevaraux(&impl_fs, luaS_newliteral(ls->L, "__check_type"), &f_check, 1);
                    if (f_check.k == VVOID) {
@@ -2528,11 +2528,11 @@ static void parse_generic_arrow_body(LexState *ls, FuncState *factory_fs, expdes
                    luaK_exp2nextreg(&impl_fs, &e_val);
 
                    expdesc e_type;
-                   singlevaraux(&impl_fs, vd->vd.hint->descs[j].typename, &e_type, 1);
+                   singlevaraux(&impl_fs, vd->vd.hint->descs[j].type_name, &e_type, 1);
                    if (e_type.k == VVOID) {
                       expdesc key;
                       singlevaraux(&impl_fs, ls->envn, &e_type, 1);
-                      codestring(&key, vd->vd.hint->descs[j].typename);
+                      codestring(&key, vd->vd.hint->descs[j].type_name);
                       luaK_indexed(&impl_fs, &e_type, &key);
                    }
                    luaK_exp2nextreg(&impl_fs, &e_type);
@@ -6273,7 +6273,7 @@ static void checktypehint (LexState *ls, TypeHint *th) {
       } else {
         /* Store unknown type name for runtime check */
         td.type = LVT_NAME;
-        td.typename = ts;
+        td.type_name = ts;
       }
     }
     

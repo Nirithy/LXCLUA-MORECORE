@@ -858,7 +858,7 @@ static int thread_pick(lua_State *L) {
                 return 1;
             }
 
-            Listener *l = malloc(sizeof(Listener));
+            Listener *l = (Listener *)malloc(sizeof(Listener));
             if (l) {
                 l->sel = &sel;
                 l->next = ch->listeners;

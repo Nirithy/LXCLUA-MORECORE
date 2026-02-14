@@ -278,7 +278,7 @@ typedef struct global_State {
   lua_Alloc frealloc;  /**< function to reallocate memory */
   void *ud;         /**< auxiliary data to 'frealloc' */
   l_mem GCtotalbytes;  /**< number of bytes currently allocated - GCdebt */
-  _Atomic l_mem GCdebt;  /**< bytes allocated not yet compensated by the collector */
+  l_atomic_t(l_mem) GCdebt;  /**< bytes allocated not yet compensated by the collector */
   lu_mem GCestimate;  /**< an estimate of the non-garbage memory in use */
   l_mutex_t lock;       /**< global lock for shared resources (strings, registry) */
   lu_mem lastatomic;  /**< see function 'genstep' in file 'lgc.c' */
@@ -392,7 +392,7 @@ union GCUnion {
   struct lua_State th;  /* thread */
   struct UpVal upv;
   struct Struct struct_;
-  struct Concept concept;
+  struct Concept concept_;
   struct Namespace ns;
 };
 
@@ -408,7 +408,7 @@ union GCUnion {
 #define gco2ts(o)  \
 	check_exp(novariant((o)->tt) == LUA_TSTRING, &((cast_u(o))->ts))
 #define gco2u(o)  check_exp((o)->tt == LUA_VUSERDATA, &((cast_u(o))->u))
-#define gco2concept(o) check_exp((o)->tt == LUA_VCONCEPT, &((cast_u(o))->concept))
+#define gco2concept(o) check_exp((o)->tt == LUA_VCONCEPT, &((cast_u(o))->concept_))
 #define gco2ns(o) check_exp((o)->tt == LUA_VNAMESPACE, &((cast_u(o))->ns))
 #define gco2lcl(o)  check_exp((o)->tt == LUA_VLCL, &((cast_u(o))->cl.l))
 #define gco2ccl(o)  check_exp((o)->tt == LUA_VCCL, &((cast_u(o))->cl.c))

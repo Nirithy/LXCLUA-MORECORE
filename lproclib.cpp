@@ -26,6 +26,7 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+#include <cstdint>
 
 /*
 ** Process handle userdatum

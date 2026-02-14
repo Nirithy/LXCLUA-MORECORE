@@ -18,8 +18,10 @@ extern "C++"
 {
 #include <atomic>
 }
+#define l_atomic_t(T) std::atomic<T>
 #else
 #include <stdatomic.h>
+#define l_atomic_t(T) _Atomic T
 #endif
 
 
@@ -45,8 +47,8 @@ typedef long l_mem;
 #define l_atomic_load(a) atomic_load(a)
 #define l_atomic_set(a, n) atomic_store(a, n)
 #define l_atomic_store(a, n) atomic_store(a, n)
-typedef _Atomic l_mem l_atomic_mem;
-typedef _Atomic int l_atomic;
+typedef l_atomic_t(l_mem) l_atomic_mem;
+typedef l_atomic_t(int) l_atomic;
 
 
 /* chars used as small naturals (so that 'char' is reserved for characters) */

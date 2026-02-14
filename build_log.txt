@@ -1,0 +1,443 @@
+Guessing Linux
+make[1]: Entering directory '/app'
+make all CC="g++ -std=c++20" CFLAGS="-O2 -fPIC -DNDEBUG -D_DEFAULT_SOURCE" SYSCFLAGS="-DLUA_USE_LINUX" SYSLIBS="-Wl,-E -ldl -lm -lpthread" SYSLDFLAGS="-s"
+make[2]: Entering directory '/app'
+g++ -std=c++20 -O2 -fPIC -DNDEBUG -D_DEFAULT_SOURCE -DLUA_USE_LINUX   -c -o lapi.o lapi.cpp
+In file included from lapi.h:10,
+                 from lapi.cpp:18:
+llimits.h:48:9: error: ‘_Atomic’ does not name a type; did you mean ‘GCSatomic’?
+   48 | typedef _Atomic l_mem l_atomic_mem;
+      |         ^~~~~~~
+      |         GCSatomic
+llimits.h:49:9: error: ‘_Atomic’ does not name a type; did you mean ‘GCSatomic’?
+   49 | typedef _Atomic int l_atomic;
+      |         ^~~~~~~
+      |         GCSatomic
+In file included from lapi.h:11:
+lstate.h:281:3: error: ‘_Atomic’ does not name a type; did you mean ‘GCSatomic’?
+  281 |   _Atomic l_mem GCdebt;  /**< bytes allocated not yet compensated by the collector */
+      |   ^~~~~~~
+      |   GCSatomic
+lstate.h:395:18: error: C++20 concept definition syntax is ‘concept <name> = <expr>’
+  395 |   struct Concept concept;
+      |                  ^~~~~~~
+lapi.cpp: In function ‘const char* lua_tolstring(lua_State*, int, size_t*)’:
+lgc.h:169:36: error: ‘global_State’ {aka ‘struct global_State’} has no member named ‘GCdebt’
+  169 |         { if (l_atomic_load(&G(L)->GCdebt) > 0) { pre; luaC_step(L); pos;}; \
+      |                                    ^~~~~~
+llimits.h:45:38: note: in definition of macro ‘l_atomic_load’
+   45 | #define l_atomic_load(a) atomic_load(a)
+      |                                      ^
+lgc.h:173:33: note: in expansion of macro ‘luaC_condGC’
+  173 | #define luaC_checkGC(L)         luaC_condGC(L,(void)0,(void)0)
+      |                                 ^~~~~~~~~~~
+lapi.cpp:678:5: note: in expansion of macro ‘luaC_checkGC’
+  678 |     luaC_checkGC(L);
+      |     ^~~~~~~~~~~~
+llimits.h:45:26: error: ‘atomic_load’ was not declared in this scope; did you mean ‘std::atomic_load’?
+   45 | #define l_atomic_load(a) atomic_load(a)
+      |                          ^~~~~~~~~~~
+lgc.h:169:15: note: in expansion of macro ‘l_atomic_load’
+  169 |         { if (l_atomic_load(&G(L)->GCdebt) > 0) { pre; luaC_step(L); pos;}; \
+      |               ^~~~~~~~~~~~~
+lgc.h:173:33: note: in expansion of macro ‘luaC_condGC’
+  173 | #define luaC_checkGC(L)         luaC_condGC(L,(void)0,(void)0)
+      |                                 ^~~~~~~~~~~
+lapi.cpp:678:5: note: in expansion of macro ‘luaC_checkGC’
+  678 |     luaC_checkGC(L);
+      |     ^~~~~~~~~~~~
+In file included from llimits.h:19:
+/usr/include/c++/13/atomic:1402:5: note: ‘std::atomic_load’ declared here
+ 1402 |     atomic_load(const volatile atomic<_ITp>* __a) noexcept
+      |     ^~~~~~~~~~~
+lapi.cpp: In function ‘const char* lua_pushlstring(lua_State*, const char*, size_t)’:
+lgc.h:169:36: error: ‘global_State’ {aka ‘struct global_State’} has no member named ‘GCdebt’
+  169 |         { if (l_atomic_load(&G(L)->GCdebt) > 0) { pre; luaC_step(L); pos;}; \
+      |                                    ^~~~~~
+llimits.h:45:38: note: in definition of macro ‘l_atomic_load’
+   45 | #define l_atomic_load(a) atomic_load(a)
+      |                                      ^
+lgc.h:173:33: note: in expansion of macro ‘luaC_condGC’
+  173 | #define luaC_checkGC(L)         luaC_condGC(L,(void)0,(void)0)
+      |                                 ^~~~~~~~~~~
+lapi.cpp:854:3: note: in expansion of macro ‘luaC_checkGC’
+  854 |   luaC_checkGC(L);
+      |   ^~~~~~~~~~~~
+llimits.h:45:26: error: ‘atomic_load’ was not declared in this scope; did you mean ‘std::atomic_load’?
+   45 | #define l_atomic_load(a) atomic_load(a)
+      |                          ^~~~~~~~~~~
+lgc.h:169:15: note: in expansion of macro ‘l_atomic_load’
+  169 |         { if (l_atomic_load(&G(L)->GCdebt) > 0) { pre; luaC_step(L); pos;}; \
+      |               ^~~~~~~~~~~~~
+lgc.h:173:33: note: in expansion of macro ‘luaC_condGC’
+  173 | #define luaC_checkGC(L)         luaC_condGC(L,(void)0,(void)0)
+      |                                 ^~~~~~~~~~~
+lapi.cpp:854:3: note: in expansion of macro ‘luaC_checkGC’
+  854 |   luaC_checkGC(L);
+      |   ^~~~~~~~~~~~
+/usr/include/c++/13/atomic:1402:5: note: ‘std::atomic_load’ declared here
+ 1402 |     atomic_load(const volatile atomic<_ITp>* __a) noexcept
+      |     ^~~~~~~~~~~
+lapi.cpp: In function ‘const char* lua_pushexternalstring(lua_State*, const char*, size_t, lua_Alloc, void*)’:
+lgc.h:169:36: error: ‘global_State’ {aka ‘struct global_State’} has no member named ‘GCdebt’
+  169 |         { if (l_atomic_load(&G(L)->GCdebt) > 0) { pre; luaC_step(L); pos;}; \
+      |                                    ^~~~~~
+llimits.h:45:38: note: in definition of macro ‘l_atomic_load’
+   45 | #define l_atomic_load(a) atomic_load(a)
+      |                                      ^
+lgc.h:173:33: note: in expansion of macro ‘luaC_condGC’
+  173 | #define luaC_checkGC(L)         luaC_condGC(L,(void)0,(void)0)
+      |                                 ^~~~~~~~~~~
+lapi.cpp:879:3: note: in expansion of macro ‘luaC_checkGC’
+  879 |   luaC_checkGC(L);
+      |   ^~~~~~~~~~~~
+llimits.h:45:26: error: ‘atomic_load’ was not declared in this scope; did you mean ‘std::atomic_load’?
+   45 | #define l_atomic_load(a) atomic_load(a)
+      |                          ^~~~~~~~~~~
+lgc.h:169:15: note: in expansion of macro ‘l_atomic_load’
+  169 |         { if (l_atomic_load(&G(L)->GCdebt) > 0) { pre; luaC_step(L); pos;}; \
+      |               ^~~~~~~~~~~~~
+lgc.h:173:33: note: in expansion of macro ‘luaC_condGC’
+  173 | #define luaC_checkGC(L)         luaC_condGC(L,(void)0,(void)0)
+      |                                 ^~~~~~~~~~~
+lapi.cpp:879:3: note: in expansion of macro ‘luaC_checkGC’
+  879 |   luaC_checkGC(L);
+      |   ^~~~~~~~~~~~
+/usr/include/c++/13/atomic:1402:5: note: ‘std::atomic_load’ declared here
+ 1402 |     atomic_load(const volatile atomic<_ITp>* __a) noexcept
+      |     ^~~~~~~~~~~
+lapi.cpp: In function ‘const char* lua_pushstring(lua_State*, const char*)’:
+lgc.h:169:36: error: ‘global_State’ {aka ‘struct global_State’} has no member named ‘GCdebt’
+  169 |         { if (l_atomic_load(&G(L)->GCdebt) > 0) { pre; luaC_step(L); pos;}; \
+      |                                    ^~~~~~
+llimits.h:45:38: note: in definition of macro ‘l_atomic_load’
+   45 | #define l_atomic_load(a) atomic_load(a)
+      |                                      ^
+lgc.h:173:33: note: in expansion of macro ‘luaC_condGC’
+  173 | #define luaC_checkGC(L)         luaC_condGC(L,(void)0,(void)0)
+      |                                 ^~~~~~~~~~~
+lapi.cpp:903:3: note: in expansion of macro ‘luaC_checkGC’
+  903 |   luaC_checkGC(L);
+      |   ^~~~~~~~~~~~
+llimits.h:45:26: error: ‘atomic_load’ was not declared in this scope; did you mean ‘std::atomic_load’?
+   45 | #define l_atomic_load(a) atomic_load(a)
+      |                          ^~~~~~~~~~~
+lgc.h:169:15: note: in expansion of macro ‘l_atomic_load’
+  169 |         { if (l_atomic_load(&G(L)->GCdebt) > 0) { pre; luaC_step(L); pos;}; \
+      |               ^~~~~~~~~~~~~
+lgc.h:173:33: note: in expansion of macro ‘luaC_condGC’
+  173 | #define luaC_checkGC(L)         luaC_condGC(L,(void)0,(void)0)
+      |                                 ^~~~~~~~~~~
+lapi.cpp:903:3: note: in expansion of macro ‘luaC_checkGC’
+  903 |   luaC_checkGC(L);
+      |   ^~~~~~~~~~~~
+/usr/include/c++/13/atomic:1402:5: note: ‘std::atomic_load’ declared here
+ 1402 |     atomic_load(const volatile atomic<_ITp>* __a) noexcept
+      |     ^~~~~~~~~~~
+lapi.cpp: In function ‘const char* lua_pushvfstring(lua_State*, const char*, __va_list_tag*)’:
+lgc.h:169:36: error: ‘global_State’ {aka ‘struct global_State’} has no member named ‘GCdebt’
+  169 |         { if (l_atomic_load(&G(L)->GCdebt) > 0) { pre; luaC_step(L); pos;}; \
+      |                                    ^~~~~~
+llimits.h:45:38: note: in definition of macro ‘l_atomic_load’
+   45 | #define l_atomic_load(a) atomic_load(a)
+      |                                      ^
+lgc.h:173:33: note: in expansion of macro ‘luaC_condGC’
+  173 | #define luaC_checkGC(L)         luaC_condGC(L,(void)0,(void)0)
+      |                                 ^~~~~~~~~~~
+lapi.cpp:923:3: note: in expansion of macro ‘luaC_checkGC’
+  923 |   luaC_checkGC(L);
+      |   ^~~~~~~~~~~~
+llimits.h:45:26: error: ‘atomic_load’ was not declared in this scope; did you mean ‘std::atomic_load’?
+   45 | #define l_atomic_load(a) atomic_load(a)
+      |                          ^~~~~~~~~~~
+lgc.h:169:15: note: in expansion of macro ‘l_atomic_load’
+  169 |         { if (l_atomic_load(&G(L)->GCdebt) > 0) { pre; luaC_step(L); pos;}; \
+      |               ^~~~~~~~~~~~~
+lgc.h:173:33: note: in expansion of macro ‘luaC_condGC’
+  173 | #define luaC_checkGC(L)         luaC_condGC(L,(void)0,(void)0)
+      |                                 ^~~~~~~~~~~
+lapi.cpp:923:3: note: in expansion of macro ‘luaC_checkGC’
+  923 |   luaC_checkGC(L);
+      |   ^~~~~~~~~~~~
+/usr/include/c++/13/atomic:1402:5: note: ‘std::atomic_load’ declared here
+ 1402 |     atomic_load(const volatile atomic<_ITp>* __a) noexcept
+      |     ^~~~~~~~~~~
+lapi.cpp: In function ‘const char* lua_pushfstring(lua_State*, const char*, ...)’:
+lgc.h:169:36: error: ‘global_State’ {aka ‘struct global_State’} has no member named ‘GCdebt’
+  169 |         { if (l_atomic_load(&G(L)->GCdebt) > 0) { pre; luaC_step(L); pos;}; \
+      |                                    ^~~~~~
+llimits.h:45:38: note: in definition of macro ‘l_atomic_load’
+   45 | #define l_atomic_load(a) atomic_load(a)
+      |                                      ^
+lgc.h:173:33: note: in expansion of macro ‘luaC_condGC’
+  173 | #define luaC_checkGC(L)         luaC_condGC(L,(void)0,(void)0)
+      |                                 ^~~~~~~~~~~
+lapi.cpp:945:3: note: in expansion of macro ‘luaC_checkGC’
+  945 |   luaC_checkGC(L);
+      |   ^~~~~~~~~~~~
+llimits.h:45:26: error: ‘atomic_load’ was not declared in this scope; did you mean ‘std::atomic_load’?
+   45 | #define l_atomic_load(a) atomic_load(a)
+      |                          ^~~~~~~~~~~
+lgc.h:169:15: note: in expansion of macro ‘l_atomic_load’
+  169 |         { if (l_atomic_load(&G(L)->GCdebt) > 0) { pre; luaC_step(L); pos;}; \
+      |               ^~~~~~~~~~~~~
+lgc.h:173:33: note: in expansion of macro ‘luaC_condGC’
+  173 | #define luaC_checkGC(L)         luaC_condGC(L,(void)0,(void)0)
+      |                                 ^~~~~~~~~~~
+lapi.cpp:945:3: note: in expansion of macro ‘luaC_checkGC’
+  945 |   luaC_checkGC(L);
+      |   ^~~~~~~~~~~~
+/usr/include/c++/13/atomic:1402:5: note: ‘std::atomic_load’ declared here
+ 1402 |     atomic_load(const volatile atomic<_ITp>* __a) noexcept
+      |     ^~~~~~~~~~~
+lapi.cpp: In function ‘void lua_pushcclosure(lua_State*, lua_CFunction, int)’:
+lgc.h:169:36: error: ‘global_State’ {aka ‘struct global_State’} has no member named ‘GCdebt’
+  169 |         { if (l_atomic_load(&G(L)->GCdebt) > 0) { pre; luaC_step(L); pos;}; \
+      |                                    ^~~~~~
+llimits.h:45:38: note: in definition of macro ‘l_atomic_load’
+   45 | #define l_atomic_load(a) atomic_load(a)
+      |                                      ^
+lgc.h:173:33: note: in expansion of macro ‘luaC_condGC’
+  173 | #define luaC_checkGC(L)         luaC_condGC(L,(void)0,(void)0)
+      |                                 ^~~~~~~~~~~
+lapi.cpp:979:5: note: in expansion of macro ‘luaC_checkGC’
+  979 |     luaC_checkGC(L);
+      |     ^~~~~~~~~~~~
+llimits.h:45:26: error: ‘atomic_load’ was not declared in this scope; did you mean ‘std::atomic_load’?
+   45 | #define l_atomic_load(a) atomic_load(a)
+      |                          ^~~~~~~~~~~
+lgc.h:169:15: note: in expansion of macro ‘l_atomic_load’
+  169 |         { if (l_atomic_load(&G(L)->GCdebt) > 0) { pre; luaC_step(L); pos;}; \
+      |               ^~~~~~~~~~~~~
+lgc.h:173:33: note: in expansion of macro ‘luaC_condGC’
+  173 | #define luaC_checkGC(L)         luaC_condGC(L,(void)0,(void)0)
+      |                                 ^~~~~~~~~~~
+lapi.cpp:979:5: note: in expansion of macro ‘luaC_checkGC’
+  979 |     luaC_checkGC(L);
+      |     ^~~~~~~~~~~~
+/usr/include/c++/13/atomic:1402:5: note: ‘std::atomic_load’ declared here
+ 1402 |     atomic_load(const volatile atomic<_ITp>* __a) noexcept
+      |     ^~~~~~~~~~~
+lapi.cpp: In function ‘void lua_createtable(lua_State*, int, int)’:
+lgc.h:169:36: error: ‘global_State’ {aka ‘struct global_State’} has no member named ‘GCdebt’
+  169 |         { if (l_atomic_load(&G(L)->GCdebt) > 0) { pre; luaC_step(L); pos;}; \
+      |                                    ^~~~~~
+llimits.h:45:38: note: in definition of macro ‘l_atomic_load’
+   45 | #define l_atomic_load(a) atomic_load(a)
+      |                                      ^
+lgc.h:173:33: note: in expansion of macro ‘luaC_condGC’
+  173 | #define luaC_checkGC(L)         luaC_condGC(L,(void)0,(void)0)
+      |                                 ^~~~~~~~~~~
+lapi.cpp:1287:3: note: in expansion of macro ‘luaC_checkGC’
+ 1287 |   luaC_checkGC(L);
+      |   ^~~~~~~~~~~~
+llimits.h:45:26: error: ‘atomic_load’ was not declared in this scope; did you mean ‘std::atomic_load’?
+   45 | #define l_atomic_load(a) atomic_load(a)
+      |                          ^~~~~~~~~~~
+lgc.h:169:15: note: in expansion of macro ‘l_atomic_load’
+  169 |         { if (l_atomic_load(&G(L)->GCdebt) > 0) { pre; luaC_step(L); pos;}; \
+      |               ^~~~~~~~~~~~~
+lgc.h:173:33: note: in expansion of macro ‘luaC_condGC’
+  173 | #define luaC_checkGC(L)         luaC_condGC(L,(void)0,(void)0)
+      |                                 ^~~~~~~~~~~
+lapi.cpp:1287:3: note: in expansion of macro ‘luaC_checkGC’
+ 1287 |   luaC_checkGC(L);
+      |   ^~~~~~~~~~~~
+/usr/include/c++/13/atomic:1402:5: note: ‘std::atomic_load’ declared here
+ 1402 |     atomic_load(const volatile atomic<_ITp>* __a) noexcept
+      |     ^~~~~~~~~~~
+lapi.cpp: In function ‘int lua_gc(lua_State*, int, ...)’:
+lstate.h:431:86: error: ‘global_State’ {aka ‘struct global_State’} has no member named ‘GCdebt’
+  431 | #define gettotalbytes(g)        cast(lu_mem, (g)->GCtotalbytes + l_atomic_load(&(g)->GCdebt))
+      |                                                                                      ^~~~~~
+llimits.h:159:30: note: in definition of macro ‘cast’
+  159 | #define cast(t, exp)    ((t)(exp))
+      |                              ^~~
+lapi.cpp:1927:13: note: in expansion of macro ‘cast_int’
+ 1927 |       res = cast_int(gettotalbytes(g) >> 10);
+      |             ^~~~~~~~
+lstate.h:431:33: note: in expansion of macro ‘cast’
+  431 | #define gettotalbytes(g)        cast(lu_mem, (g)->GCtotalbytes + l_atomic_load(&(g)->GCdebt))
+      |                                 ^~~~
+lstate.h:431:66: note: in expansion of macro ‘l_atomic_load’
+  431 | #define gettotalbytes(g)        cast(lu_mem, (g)->GCtotalbytes + l_atomic_load(&(g)->GCdebt))
+      |                                                                  ^~~~~~~~~~~~~
+lapi.cpp:1927:22: note: in expansion of macro ‘gettotalbytes’
+ 1927 |       res = cast_int(gettotalbytes(g) >> 10);
+      |                      ^~~~~~~~~~~~~
+llimits.h:45:26: error: ‘atomic_load’ was not declared in this scope; did you mean ‘std::atomic_load’?
+   45 | #define l_atomic_load(a) atomic_load(a)
+      |                          ^~~~~~~~~~~
+llimits.h:159:30: note: in definition of macro ‘cast’
+  159 | #define cast(t, exp)    ((t)(exp))
+      |                              ^~~
+lapi.cpp:1927:13: note: in expansion of macro ‘cast_int’
+ 1927 |       res = cast_int(gettotalbytes(g) >> 10);
+      |             ^~~~~~~~
+lstate.h:431:33: note: in expansion of macro ‘cast’
+  431 | #define gettotalbytes(g)        cast(lu_mem, (g)->GCtotalbytes + l_atomic_load(&(g)->GCdebt))
+      |                                 ^~~~
+lstate.h:431:66: note: in expansion of macro ‘l_atomic_load’
+  431 | #define gettotalbytes(g)        cast(lu_mem, (g)->GCtotalbytes + l_atomic_load(&(g)->GCdebt))
+      |                                                                  ^~~~~~~~~~~~~
+lapi.cpp:1927:22: note: in expansion of macro ‘gettotalbytes’
+ 1927 |       res = cast_int(gettotalbytes(g) >> 10);
+      |                      ^~~~~~~~~~~~~
+/usr/include/c++/13/atomic:1402:5: note: ‘std::atomic_load’ declared here
+ 1402 |     atomic_load(const volatile atomic<_ITp>* __a) noexcept
+      |     ^~~~~~~~~~~
+lstate.h:431:86: error: ‘global_State’ {aka ‘struct global_State’} has no member named ‘GCdebt’
+  431 | #define gettotalbytes(g)        cast(lu_mem, (g)->GCtotalbytes + l_atomic_load(&(g)->GCdebt))
+      |                                                                                      ^~~~~~
+llimits.h:159:30: note: in definition of macro ‘cast’
+  159 | #define cast(t, exp)    ((t)(exp))
+      |                              ^~~
+lapi.cpp:1931:13: note: in expansion of macro ‘cast_int’
+ 1931 |       res = cast_int(gettotalbytes(g) & 0x3ff);
+      |             ^~~~~~~~
+lstate.h:431:33: note: in expansion of macro ‘cast’
+  431 | #define gettotalbytes(g)        cast(lu_mem, (g)->GCtotalbytes + l_atomic_load(&(g)->GCdebt))
+      |                                 ^~~~
+lstate.h:431:66: note: in expansion of macro ‘l_atomic_load’
+  431 | #define gettotalbytes(g)        cast(lu_mem, (g)->GCtotalbytes + l_atomic_load(&(g)->GCdebt))
+      |                                                                  ^~~~~~~~~~~~~
+lapi.cpp:1931:22: note: in expansion of macro ‘gettotalbytes’
+ 1931 |       res = cast_int(gettotalbytes(g) & 0x3ff);
+      |                      ^~~~~~~~~~~~~
+llimits.h:45:26: error: ‘atomic_load’ was not declared in this scope; did you mean ‘std::atomic_load’?
+   45 | #define l_atomic_load(a) atomic_load(a)
+      |                          ^~~~~~~~~~~
+llimits.h:159:30: note: in definition of macro ‘cast’
+  159 | #define cast(t, exp)    ((t)(exp))
+      |                              ^~~
+lapi.cpp:1931:13: note: in expansion of macro ‘cast_int’
+ 1931 |       res = cast_int(gettotalbytes(g) & 0x3ff);
+      |             ^~~~~~~~
+lstate.h:431:33: note: in expansion of macro ‘cast’
+  431 | #define gettotalbytes(g)        cast(lu_mem, (g)->GCtotalbytes + l_atomic_load(&(g)->GCdebt))
+      |                                 ^~~~
+lstate.h:431:66: note: in expansion of macro ‘l_atomic_load’
+  431 | #define gettotalbytes(g)        cast(lu_mem, (g)->GCtotalbytes + l_atomic_load(&(g)->GCdebt))
+      |                                                                  ^~~~~~~~~~~~~
+lapi.cpp:1931:22: note: in expansion of macro ‘gettotalbytes’
+ 1931 |       res = cast_int(gettotalbytes(g) & 0x3ff);
+      |                      ^~~~~~~~~~~~~
+/usr/include/c++/13/atomic:1402:5: note: ‘std::atomic_load’ declared here
+ 1402 |     atomic_load(const volatile atomic<_ITp>* __a) noexcept
+      |     ^~~~~~~~~~~
+lapi.cpp:1944:61: error: ‘global_State’ {aka ‘struct global_State’} has no member named ‘GCdebt’
+ 1944 |         debt = cast(l_mem, data) * 1024 + l_atomic_load(&g->GCdebt);
+      |                                                             ^~~~~~
+llimits.h:45:38: note: in definition of macro ‘l_atomic_load’
+   45 | #define l_atomic_load(a) atomic_load(a)
+      |                                      ^
+llimits.h:45:26: error: ‘atomic_load’ was not declared in this scope; did you mean ‘std::atomic_load’?
+   45 | #define l_atomic_load(a) atomic_load(a)
+      |                          ^~~~~~~~~~~
+lapi.cpp:1944:43: note: in expansion of macro ‘l_atomic_load’
+ 1944 |         debt = cast(l_mem, data) * 1024 + l_atomic_load(&g->GCdebt);
+      |                                           ^~~~~~~~~~~~~
+/usr/include/c++/13/atomic:1402:5: note: ‘std::atomic_load’ declared here
+ 1402 |     atomic_load(const volatile atomic<_ITp>* __a) noexcept
+      |     ^~~~~~~~~~~
+lgc.h:169:36: error: ‘global_State’ {aka ‘struct global_State’} has no member named ‘GCdebt’
+  169 |         { if (l_atomic_load(&G(L)->GCdebt) > 0) { pre; luaC_step(L); pos;}; \
+      |                                    ^~~~~~
+llimits.h:45:38: note: in definition of macro ‘l_atomic_load’
+   45 | #define l_atomic_load(a) atomic_load(a)
+      |                                      ^
+lgc.h:173:33: note: in expansion of macro ‘luaC_condGC’
+  173 | #define luaC_checkGC(L)         luaC_condGC(L,(void)0,(void)0)
+      |                                 ^~~~~~~~~~~
+lapi.cpp:1946:9: note: in expansion of macro ‘luaC_checkGC’
+ 1946 |         luaC_checkGC(L);
+      |         ^~~~~~~~~~~~
+lapi.cpp: In function ‘size_t lua_getmemoryusage(lua_State*)’:
+lstate.h:431:86: error: ‘global_State’ {aka ‘struct global_State’} has no member named ‘GCdebt’
+  431 | #define gettotalbytes(g)        cast(lu_mem, (g)->GCtotalbytes + l_atomic_load(&(g)->GCdebt))
+      |                                                                                      ^~~~~~
+llimits.h:159:30: note: in definition of macro ‘cast’
+  159 | #define cast(t, exp)    ((t)(exp))
+      |                              ^~~
+lstate.h:431:66: note: in expansion of macro ‘l_atomic_load’
+  431 | #define gettotalbytes(g)        cast(lu_mem, (g)->GCtotalbytes + l_atomic_load(&(g)->GCdebt))
+      |                                                                  ^~~~~~~~~~~~~
+lapi.cpp:2011:10: note: in expansion of macro ‘gettotalbytes’
+ 2011 |   return gettotalbytes(g);
+      |          ^~~~~~~~~~~~~
+llimits.h:45:26: error: ‘atomic_load’ was not declared in this scope; did you mean ‘std::atomic_load’?
+   45 | #define l_atomic_load(a) atomic_load(a)
+      |                          ^~~~~~~~~~~
+llimits.h:159:30: note: in definition of macro ‘cast’
+  159 | #define cast(t, exp)    ((t)(exp))
+      |                              ^~~
+lstate.h:431:66: note: in expansion of macro ‘l_atomic_load’
+  431 | #define gettotalbytes(g)        cast(lu_mem, (g)->GCtotalbytes + l_atomic_load(&(g)->GCdebt))
+      |                                                                  ^~~~~~~~~~~~~
+lapi.cpp:2011:10: note: in expansion of macro ‘gettotalbytes’
+ 2011 |   return gettotalbytes(g);
+      |          ^~~~~~~~~~~~~
+/usr/include/c++/13/atomic:1402:5: note: ‘std::atomic_load’ declared here
+ 1402 |     atomic_load(const volatile atomic<_ITp>* __a) noexcept
+      |     ^~~~~~~~~~~
+lapi.cpp: In function ‘void lua_concat(lua_State*, int)’:
+lgc.h:169:36: error: ‘global_State’ {aka ‘struct global_State’} has no member named ‘GCdebt’
+  169 |         { if (l_atomic_load(&G(L)->GCdebt) > 0) { pre; luaC_step(L); pos;}; \
+      |                                    ^~~~~~
+llimits.h:45:38: note: in definition of macro ‘l_atomic_load’
+   45 | #define l_atomic_load(a) atomic_load(a)
+      |                                      ^
+lgc.h:173:33: note: in expansion of macro ‘luaC_condGC’
+  173 | #define luaC_checkGC(L)         luaC_condGC(L,(void)0,(void)0)
+      |                                 ^~~~~~~~~~~
+lapi.cpp:2113:3: note: in expansion of macro ‘luaC_checkGC’
+ 2113 |   luaC_checkGC(L);
+      |   ^~~~~~~~~~~~
+llimits.h:45:26: error: ‘atomic_load’ was not declared in this scope; did you mean ‘std::atomic_load’?
+   45 | #define l_atomic_load(a) atomic_load(a)
+      |                          ^~~~~~~~~~~
+lgc.h:169:15: note: in expansion of macro ‘l_atomic_load’
+  169 |         { if (l_atomic_load(&G(L)->GCdebt) > 0) { pre; luaC_step(L); pos;}; \
+      |               ^~~~~~~~~~~~~
+lgc.h:173:33: note: in expansion of macro ‘luaC_condGC’
+  173 | #define luaC_checkGC(L)         luaC_condGC(L,(void)0,(void)0)
+      |                                 ^~~~~~~~~~~
+lapi.cpp:2113:3: note: in expansion of macro ‘luaC_checkGC’
+ 2113 |   luaC_checkGC(L);
+      |   ^~~~~~~~~~~~
+/usr/include/c++/13/atomic:1402:5: note: ‘std::atomic_load’ declared here
+ 1402 |     atomic_load(const volatile atomic<_ITp>* __a) noexcept
+      |     ^~~~~~~~~~~
+lapi.cpp: In function ‘void* lua_newuserdatauv(lua_State*, size_t, int)’:
+lgc.h:169:36: error: ‘global_State’ {aka ‘struct global_State’} has no member named ‘GCdebt’
+  169 |         { if (l_atomic_load(&G(L)->GCdebt) > 0) { pre; luaC_step(L); pos;}; \
+      |                                    ^~~~~~
+llimits.h:45:38: note: in definition of macro ‘l_atomic_load’
+   45 | #define l_atomic_load(a) atomic_load(a)
+      |                                      ^
+lgc.h:173:33: note: in expansion of macro ‘luaC_condGC’
+  173 | #define luaC_checkGC(L)         luaC_condGC(L,(void)0,(void)0)
+      |                                 ^~~~~~~~~~~
+lapi.cpp:2211:3: note: in expansion of macro ‘luaC_checkGC’
+ 2211 |   luaC_checkGC(L);
+      |   ^~~~~~~~~~~~
+llimits.h:45:26: error: ‘atomic_load’ was not declared in this scope; did you mean ‘std::atomic_load’?
+   45 | #define l_atomic_load(a) atomic_load(a)
+      |                          ^~~~~~~~~~~
+lgc.h:169:15: note: in expansion of macro ‘l_atomic_load’
+  169 |         { if (l_atomic_load(&G(L)->GCdebt) > 0) { pre; luaC_step(L); pos;}; \
+      |               ^~~~~~~~~~~~~
+lgc.h:173:33: note: in expansion of macro ‘luaC_condGC’
+  173 | #define luaC_checkGC(L)         luaC_condGC(L,(void)0,(void)0)
+      |                                 ^~~~~~~~~~~
+lapi.cpp:2211:3: note: in expansion of macro ‘luaC_checkGC’
+ 2211 |   luaC_checkGC(L);
+      |   ^~~~~~~~~~~~
+/usr/include/c++/13/atomic:1402:5: note: ‘std::atomic_load’ declared here
+ 1402 |     atomic_load(const volatile atomic<_ITp>* __a) noexcept
+      |     ^~~~~~~~~~~
+make[2]: *** [<builtin>: lapi.o] Error 1
+make[2]: Leaving directory '/app'
+make[1]: *** [Makefile:141: Linux] Error 2
+make[1]: Leaving directory '/app'
+make: *** [Makefile:116: guess] Error 2

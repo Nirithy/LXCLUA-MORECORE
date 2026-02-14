@@ -75,18 +75,12 @@ typedef struct lua_longjmp {
 
 /* C++ exceptions */
 #define LUAI_THROW(L,c)		throw(c)
-static void LUAI_TRY (lua_State *L, lua_longjmp *c, Pfunc f, void *ud) {
-  try {
-    f(L, ud);  /* call function protected */
-  }
-  catch (lua_longjmp *c1) { /* Lua error */
-    if (c1 != c)  /* not the correct level? */
-      throw;  /* rethrow to upper level */
-  }
-  catch (...) {  /* non-Lua exception */
-    c->status = -1;  /* create some error code */
-  }
-}
+#define LUAI_TRY(L,c,a) \
+	try { a } catch(lua_longjmp *c1) { \
+	  if (c1 != c) throw; \
+	} catch(...) { \
+	  if ((c)->status == 0) (c)->status = -1; \
+	}
 
 #define luai_jmpbuf		int  /* dummy variable */
 

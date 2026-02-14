@@ -48,7 +48,7 @@ void intToBin(uint8_t* paddedBinaryMsg, int offset, uint64_t len) {
  */
 int getBlocks(uint8_t** blocks,int noOfBlocks,uint8_t* binMsg,int msgLen) {
   for(int i = 0;i < noOfBlocks; i++) {
-    blocks[i] = malloc(64 * sizeof(uint8_t));
+    blocks[i] = (uint8_t*)malloc(64 * sizeof(uint8_t));
     if(blocks[i] == NULL) {
       fprintf(stderr, "Memory allocation failed\n");
       free(binMsg);
@@ -174,7 +174,7 @@ void hash (uint8_t** blocks,int noOfBlocks,uint8_t* hashedMsg) {
 
 int SHA256(const uint8_t* msg, size_t msgLen, uint8_t* digest) {
 
-  uint8_t* binary = malloc(msgLen * sizeof(uint8_t));
+  uint8_t* binary = (uint8_t*)malloc(msgLen * sizeof(uint8_t));
   if (binary == NULL) {
     fprintf(stderr, "Memory allocation failed\n");
     return 1;
@@ -189,7 +189,7 @@ int SHA256(const uint8_t* msg, size_t msgLen, uint8_t* digest) {
   }
 
   int paddedMsgLen = msgLen + padLen + 8;
-  uint8_t* paddedBinaryMsg = malloc(paddedMsgLen * sizeof(uint8_t));
+  uint8_t* paddedBinaryMsg = (uint8_t*)malloc(paddedMsgLen * sizeof(uint8_t));
   if(paddedBinaryMsg == NULL) {
     fprintf(stderr,"Memory allocation failed");
     free(binary);
@@ -201,7 +201,7 @@ int SHA256(const uint8_t* msg, size_t msgLen, uint8_t* digest) {
   free(binary);
 
   int noOfBlocks = paddedMsgLen/64;
-  uint8_t** blocks = malloc(noOfBlocks * sizeof(uint8_t*));
+  uint8_t** blocks = (uint8_t**)malloc(noOfBlocks * sizeof(uint8_t*));
   if(blocks == NULL) {
     fprintf(stderr, "Memory allocation failed\n");
     free(paddedBinaryMsg);
@@ -215,7 +215,7 @@ int SHA256(const uint8_t* msg, size_t msgLen, uint8_t* digest) {
   }
   free(paddedBinaryMsg);
 
-  uint8_t* hashedMsg = malloc(64 * sizeof(uint8_t));
+  uint8_t* hashedMsg = (uint8_t*)malloc(64 * sizeof(uint8_t));
   hash(blocks,noOfBlocks,hashedMsg);
   memcpy(digest, hashedMsg, 32);
 

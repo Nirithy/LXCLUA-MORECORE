@@ -375,7 +375,7 @@ void luaS_structnewindex (lua_State *L, const TValue *t, TValue *key, TValue *va
         case ST_INT: {
             lua_Integer i;
             if (!ttisinteger(val)) {
-                if (!luaV_tointeger(val, &i, 0)) {
+                if (!luaV_tointeger(val, &i, F2Ieq)) {
                      luaG_runerror(L, "expected integer for field '%s'", getstr(tsvalue(key)));
                 }
             } else {
@@ -717,7 +717,7 @@ static int struct_define (lua_State *L) {
             if (nested_count > 0) {
                  while (n_gc_offsets + nested_count > cap_gc_offsets) {
                      cap_gc_offsets = cap_gc_offsets ? cap_gc_offsets * 2 : 4 + nested_count;
-                     gc_offsets_arr = realloc(gc_offsets_arr, cap_gc_offsets * sizeof(int));
+                     gc_offsets_arr = (int*)realloc(gc_offsets_arr, cap_gc_offsets * sizeof(int));
                  }
                  for (int k = 0; k < nested_count; k++) {
                      gc_offsets_arr[n_gc_offsets++] = (int)(current_offset + nested_offsets[k]);
@@ -726,7 +726,7 @@ static int struct_define (lua_State *L) {
         } else if (type == ST_STRING) {
              if (n_gc_offsets >= cap_gc_offsets) {
                  cap_gc_offsets = cap_gc_offsets ? cap_gc_offsets * 2 : 4;
-                 gc_offsets_arr = realloc(gc_offsets_arr, cap_gc_offsets * sizeof(int));
+                 gc_offsets_arr = (int*)realloc(gc_offsets_arr, cap_gc_offsets * sizeof(int));
              }
              gc_offsets_arr[n_gc_offsets++] = (int)current_offset;
         } else if (type == ST_ARRAY) {
@@ -757,7 +757,7 @@ static int struct_define (lua_State *L) {
                 if (nested_count > 0) {
                     while (n_gc_offsets + (nested_count * arr_len) > cap_gc_offsets) {
                         cap_gc_offsets = cap_gc_offsets ? cap_gc_offsets * 2 : 4 + (nested_count * arr_len);
-                        gc_offsets_arr = realloc(gc_offsets_arr, cap_gc_offsets * sizeof(int));
+                        gc_offsets_arr = (int*)realloc(gc_offsets_arr, cap_gc_offsets * sizeof(int));
                     }
                     for (int j = 0; j < arr_len; j++) {
                         for (int k = 0; k < nested_count; k++) {
@@ -769,7 +769,7 @@ static int struct_define (lua_State *L) {
                 /* Add GC offset for each string element */
                 if (n_gc_offsets + arr_len > cap_gc_offsets) {
                     cap_gc_offsets = cap_gc_offsets ? cap_gc_offsets * 2 : 4 + arr_len;
-                    gc_offsets_arr = realloc(gc_offsets_arr, cap_gc_offsets * sizeof(int));
+                    gc_offsets_arr = (int*)realloc(gc_offsets_arr, cap_gc_offsets * sizeof(int));
                 }
                 for (int j = 0; j < arr_len; j++) {
                     gc_offsets_arr[n_gc_offsets++] = (int)(current_offset + (j * arr_elem_size));
