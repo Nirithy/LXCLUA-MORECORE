@@ -128,6 +128,8 @@ LUAI_DDEF const lu_byte luaP_opmodes[NUM_OPCODES] = {
  ,opmode(0, 0, 0, 0, 1, iABx)		/* OP_NEWCONCEPT */
  ,opmode(0, 0, 0, 0, 1, iABx)		/* OP_NEWNAMESPACE */
  ,opmode(0, 0, 0, 0, 0, iABC)		/* OP_LINKNAMESPACE */
+ ,opmode(0, 0, 0, 0, 1, iABx)		/* OP_NEWSUPER */
+ ,opmode(0, 0, 0, 0, 0, iABC)		/* OP_SETSUPER */
  ,opmode(0, 0, 0, 0, 0, iAx)		/* OP_EXTRAARG */
 };
 

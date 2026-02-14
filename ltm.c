@@ -22,6 +22,7 @@
 #include "lstring.h"
 #include "ltable.h"
 #include "ltm.h"
+#include "lsuper.h"
 #include "lvm.h"
 
 
@@ -31,7 +32,7 @@ LUAI_DDEF const char *const luaT_typenames_[LUA_TOTALTYPES] = {
   "no value",
   "nil", "boolean", udatatypename, "number",
   "string", "table", "function", udatatypename, "thread",
-  "struct", "pointer", "concept",
+  "struct", "pointer", "concept", "superstruct",
   "upvalue", "proto" /* these last cases are used for tests only */
 };
 
@@ -70,20 +71,27 @@ const TValue *luaT_gettm (Table *events, TMS event, TString *ename) {
 
 
 const TValue *luaT_gettmbyobj (lua_State *L, const TValue *o, TMS event) {
-  Table *mt;
+  const GCObject *mt;
   switch (ttype(o)) {
     case LUA_TTABLE:
-      mt = hvalue(o)->metatable;
+      mt = (const GCObject *)hvalue(o)->metatable;
       if (mt == NULL)
-        mt = G(L)->mt[LUA_TTABLE];
+        mt = (const GCObject *)G(L)->mt[LUA_TTABLE];
       break;
     case LUA_TUSERDATA:
-      mt = uvalue(o)->metatable;
+      mt = (const GCObject *)uvalue(o)->metatable;
       break;
     default:
-      mt = G(L)->mt[ttype(o)];
+      mt = (const GCObject *)G(L)->mt[ttype(o)];
   }
-  return (mt ? luaH_getshortstr(mt, G(L)->tmname[event]) : &G(L)->nilvalue);
+  if (!mt) return &G(L)->nilvalue;
+  if (mt->tt == LUA_VTABLE)
+    return luaH_getshortstr((Table*)mt, G(L)->tmname[event]);
+  if (mt->tt == LUA_VSUPERSTRUCT) {
+    const TValue *res = luaS_getsuperstruct_str((SuperStruct*)mt, G(L)->tmname[event]);
+    return res ? res : &G(L)->nilvalue;
+  }
+  return &G(L)->nilvalue;
 }
 
 

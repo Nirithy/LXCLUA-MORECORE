@@ -359,7 +359,7 @@ static int luaB_getmetatable (lua_State *L) {
 static int luaB_setmetatable (lua_State *L) {
   int t = lua_type(L, 2);
   luaL_checktype(L, 1, LUA_TTABLE);
-  luaL_argexpected(L, t == LUA_TNIL || t == LUA_TTABLE, 2, "nil or table");
+  luaL_argexpected(L, t == LUA_TNIL || t == LUA_TTABLE || t == LUA_TSUPERSTRUCT, 2, "nil, table or superstruct");
   
   if (l_unlikely(luaL_getmetafield(L, 1, "__metatable") != LUA_TNIL))
     return luaL_error(L, "无法修改受保护的元表");

@@ -56,6 +56,7 @@
 #include "lthread.h"
 #include "lstruct.h"
 #include "lnamespace.h"
+#include "lsuper.h"
 #include "lbigint.h"
 
 static int try_add(lua_Integer a, lua_Integer b, lua_Integer *r) {
@@ -628,6 +629,15 @@ void luaV_finishget (lua_State *L, const TValue *t, TValue *key, StkId val,
         } while (ns);
         setnilvalue(s2v(val));
         return;
+      } else if (ttissuperstruct(t)) {
+        SuperStruct *ss = superstructvalue(t);
+        const TValue *res = luaS_getsuperstruct(ss, key);
+        if (res) {
+          setobj2s(L, val, res);
+          return;
+        }
+        setnilvalue(s2v(val));
+        return;
       } else if (ttisstruct(t)) {
         luaS_structindex(L, t, key, val);
         return;
@@ -835,6 +845,11 @@ void luaV_finishset (lua_State *L, const TValue *t, TValue *key,
             return;
          }
          return;
+      }
+      if (ttissuperstruct(t)) {
+        SuperStruct *ss = superstructvalue(t);
+        luaS_setsuperstruct(L, ss, key, val);
+        return;
       }
       if (ttisstruct(t)) {
         luaS_structnewindex(L, t, key, val);
@@ -2136,6 +2151,24 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
           TValue key;
           setivalue(&key, c);
           Protect(luaV_finishget(L, rb, &key, ra, NULL));
+        }
+        vmbreak;
+      }
+      vmcase(OP_NEWSUPER) {
+        StkId ra = RA(i);
+        TString *name = tsvalue(&k[GETARG_Bx(i)]);
+        SuperStruct *ss = luaS_newsuperstruct(L, name, 0);
+        setsuperstructvalue(L, s2v(ra), ss);
+        checkGC(L, ra + 1);
+        vmbreak;
+      }
+      vmcase(OP_SETSUPER) {
+        StkId ra = RA(i);
+        TValue *rb = vRB(i);
+        TValue *rc = vRC(i);
+        if (ttissuperstruct(s2v(ra))) {
+           SuperStruct *ss = superstructvalue(s2v(ra));
+           luaS_setsuperstruct(L, ss, rb, rc);
         }
         vmbreak;
       }

@@ -120,6 +120,8 @@ static const char *const opnames[] = {
   "NEWCONCEPT",
   "NEWNAMESPACE",
   "LINKNAMESPACE",
+  "NEWSUPER",
+  "SETSUPER",
   "EXTRAARG",
   NULL
 };

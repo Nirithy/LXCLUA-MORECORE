@@ -132,6 +132,8 @@ static const void *const disptab[NUM_OPCODES] = {
 &&L_OP_NEWCONCEPT,
 &&L_OP_NEWNAMESPACE,
 &&L_OP_LINKNAMESPACE,
+&&L_OP_NEWSUPER,
+&&L_OP_SETSUPER,
 &&L_OP_EXTRAARG
 
 };

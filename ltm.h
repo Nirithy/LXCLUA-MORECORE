@@ -9,6 +9,7 @@
 
 
 #include "lobject.h"
+#include "lsuper.h"
 
 
 /*
@@ -64,7 +65,10 @@ typedef enum {
 
 
 #define gfasttm(g,et,e) ((et) == NULL ? NULL : \
-  ((et)->flags & (1u<<(e))) ? NULL : luaT_gettm(et, e, (g)->tmname[e]))
+  (((GCObject*)(et))->tt == LUA_VTABLE ? \
+    (((Table*)(et))->flags & (1u<<(e))) ? NULL : luaT_gettm((Table*)(et), e, (g)->tmname[e]) : \
+    (((GCObject*)(et))->tt == LUA_VSUPERSTRUCT ? \
+      luaS_getsuperstruct_str((SuperStruct *)(et), (g)->tmname[e]) : NULL)))
 
 #define fasttm(l,et,e)	gfasttm(G(l), et, e)
 

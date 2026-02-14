@@ -537,6 +537,12 @@ unsigned luaO_tostringbuff (const TValue *obj, char *buff) {
  * @param obj The object to convert (must be a number).
  */
 void luaO_tostring (lua_State *L, TValue *obj) {
+  if (ttissuperstruct(obj)) {
+    TString *name = superstructvalue(obj)->name;
+    const char *s = name ? getstr(name) : "?";
+    setsvalue(L, obj, luaS_new(L, s));
+    return;
+  }
   if (ttisbigint(obj)) {
     luaB_tostring(L, obj);
     return;

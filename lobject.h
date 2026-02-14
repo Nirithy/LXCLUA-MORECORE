@@ -53,6 +53,7 @@ typedef union Value {
   void *p;         /**< light userdata */
   void *ptr;       /**< raw pointer type */
   struct Struct *struct_; /**< struct values */
+  struct SuperStruct *superstruct; /**< superstruct objects */
   struct Namespace *ns;   /**< namespace objects */
   lua_CFunction f; /**< light C functions */
   lua_Integer i;   /**< integer numbers */
@@ -904,6 +905,33 @@ typedef struct Namespace {
   struct GCObject *gclist;
   struct Namespace *using_next;
 } Namespace;
+
+
+/*
+** {=======================================================
+** Super Structs
+** ========================================================
+*/
+
+#define LUA_VSUPERSTRUCT	makevariant(LUA_TSUPERSTRUCT, 0)
+
+#define ttissuperstruct(o)		checktag((o), ctb(LUA_VSUPERSTRUCT))
+
+#define superstructvalue(o)	check_exp(ttissuperstruct(o), gco2superstruct(val_(o).gc))
+
+#define setsuperstructvalue(L,obj,x) \
+  { TValue *io = (obj); SuperStruct *x_ = (x); \
+    val_(io).gc = obj2gco(x_); settt_(io, ctb(LUA_VSUPERSTRUCT)); \
+    checkliveness(L,io); }
+
+typedef struct SuperStruct {
+  CommonHeader;
+  TString *name;
+  unsigned int nsize;
+  TValue *data;
+} SuperStruct;
+
+#define gco2superstruct(o)	check_exp((o)->tt == LUA_VSUPERSTRUCT, &((cast_u(o) - offsetof(SuperStruct, next))->superstruct))
 
 
 /*

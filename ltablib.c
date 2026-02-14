@@ -168,7 +168,7 @@ static int clone_aux (lua_State *L,int idx) {
     return 1;
 }
 
-static int clone (lua_State *L) {
+static int t_clone (lua_State *L) {
     luaL_checktype(L, 1, LUA_TTABLE);
     lua_newtable(L);
     lua_insert(L,1);
@@ -759,7 +759,7 @@ static const luaL_Reg tab_funcs[] = {
 	{"clear", clear},
 	{"find", find},
 	{"gfind", gfind},
-	{"clone", clone},
+	{"clone", t_clone},
 	{"const", tconst},
 #endif
 	{"add", tadd},

@@ -292,7 +292,7 @@ static const char *const luaX_tokens [] = {
     "and", "asm", "async", "await", "bool", "break", "case", "catch", "char", "command", "concept", "const", "continue", "default", "defer", "do", "double", "else", "elseif",
     "end", "enum", "export", "false", "finally", "float", "for", "function", "global", "goto", "if", "in", "int", "is", "keyword", "lambda", "local", "long", "namespace", "nil", "not", "operator", "or",
     "repeat", "requires",
-    "return", "struct", "switch", "take", "then", "true", "try", "until", "using", "void", "when", "while", "with",
+    "return", "struct", "superstruct", "switch", "take", "then", "true", "try", "until", "using", "void", "when", "while", "with",
     "//", "..", "...", "==", ">=", "<=", "~",  "<<", ">>", "|>", "<|", "|?>",
     "::", "<eof>",
     "<let>", "=>", ":=", "->",

@@ -22,6 +22,7 @@
 #include "lfunc.h"
 #include "lgc.h"
 #include "lnamespace.h"
+#include "lsuper.h"
 #include "lmem.h"
 #include "lobject.h"
 #include "lstate.h"
@@ -344,6 +345,18 @@ GCObject *luaC_newobj (lua_State *L, int tt, size_t sz) {
  */
 static void reallymarkobject (global_State *g, GCObject *o) {
   switch (o->tt) {
+    case LUA_VSUPERSTRUCT: {
+      SuperStruct *ss = gco2superstruct(o);
+      markobjectN(g, ss->name);
+      if (ss->data) {
+        unsigned int i;
+        for (i = 0; i < ss->nsize * 2; i++) {
+          markvalue(g, &ss->data[i]);
+        }
+      }
+      set2black(o);
+      break;
+    }
     case LUA_VSTRUCT: {
       Struct *s = gco2struct(o);
       markobjectN(g, s->def);
@@ -968,6 +981,11 @@ static void freeobj (lua_State *L, GCObject *o) {
     case LUA_VUPVAL:
       freeupval(L, gco2upv(o));
       break;
+    case LUA_VSUPERSTRUCT: {
+      SuperStruct *ss = gco2superstruct(o);
+      luaS_freesuperstruct(L, ss);
+      break;
+    }
     case LUA_VSTRUCT: {
       Struct *s = gco2struct(o);
       if (s->data == s->inline_data.d)

@@ -392,6 +392,7 @@ union GCUnion {
   struct lua_State th;  /* thread */
   struct UpVal upv;
   struct Struct struct_;
+  struct SuperStruct superstruct;
   struct Concept concept;
   struct Namespace ns;
 };

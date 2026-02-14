@@ -94,6 +94,7 @@ static void declaration_stat (LexState *ls, int line);
 static void usingstat (LexState *ls);
 static void interfacestat (LexState *ls, int line); /* interface语句的前向声明 */
 static void structstat (LexState *ls, int line, int isexport);  /* struct语句的前向声明 */
+static void superstructstat (LexState *ls, int line);           /* superstruct语句的前向声明 */
 static void enumstat (LexState *ls, int line, int isexport);    /* enum语句的前向声明 */
 static void newexpr (LexState *ls, expdesc *v);   /* onew表达式的前向声明 */
 static void superexpr (LexState *ls, expdesc *v); /* osuper表达式的前向声明 */
@@ -9999,6 +10000,58 @@ static int is_type_token(int token) {
 ** 语法: struct Name { field = value, ... }
 ** 编译为: Name = __struct_define("Name", { "field", value, ... })
 */
+static void superstructstat (LexState *ls, int line) {
+  FuncState *fs = ls->fs;
+  expdesc v, key, val;
+  TString *name;
+
+  luaX_next(ls);  /* skip SUPERSTRUCT */
+  name = str_checkname(ls);
+
+  /* Create SuperStruct in a register */
+  int name_k = luaK_stringK(fs, name);
+  init_exp(&v, VRELOC, luaK_codeABx(fs, OP_NEWSUPER, 0, name_k));
+  luaK_exp2nextreg(fs, &v);
+  int ss_reg = v.u.info;
+
+  checknext(ls, '[');
+
+  while (ls->t.token != ']' && ls->t.token != TK_EOS) {
+    if (ls->t.token == TK_NAME) {
+      codestring(&key, ls->t.seminfo.ts);
+      luaX_next(ls);
+    } else if (ls->t.token == TK_STRING) {
+      codestring(&key, ls->t.seminfo.ts);
+      luaX_next(ls);
+    } else if (ls->t.token == '[') {
+      luaX_next(ls);
+      expr(ls, &key);
+      checknext(ls, ']');
+    } else {
+      expr(ls, &key);
+    }
+
+    checknext(ls, ':');
+    expr(ls, &val);
+
+    luaK_exp2nextreg(fs, &val);
+    luaK_exp2nextreg(fs, &key);
+
+    luaK_codeABC(fs, OP_SETSUPER, ss_reg, key.u.info, val.u.info);
+
+    fs->freereg = ss_reg + 1;
+
+    if (ls->t.token == ',') luaX_next(ls);
+  }
+  checknext(ls, ']');
+
+  expdesc var;
+  buildglobal(ls, name, &var);
+  luaK_storevar(fs, &var, &v);
+
+  luaK_fixline(fs, line);
+}
+
 static void structstat (LexState *ls, int line, int isexport) {
   FuncState *fs = ls->fs;
   expdesc struct_name_exp, v;
@@ -11686,6 +11739,10 @@ static void statement (LexState *ls) {
     }
     case TK_STRUCT: {  /* stat -> structstat */
       structstat(ls, line, 0);
+      break;
+    }
+    case TK_SUPERSTRUCT: {  /* stat -> superstructstat */
+      superstructstat(ls, line);
       break;
     }
     case TK_ENUM: {  /* stat -> enumstat */

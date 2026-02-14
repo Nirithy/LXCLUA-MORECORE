@@ -392,6 +392,10 @@ OP_NEWNAMESPACE,/*	A Bx	R[A] := newnamespace(K[Bx])			*/
 
 OP_LINKNAMESPACE,/*	A B	R[A]->using_next = R[B]				*/
 
+OP_NEWSUPER,/*	A Bx	R[A] := newsuperstruct(K[Bx])			*/
+
+OP_SETSUPER,/*	A B C	R[A][B] := R[C]					*/
+
 OP_EXTRAARG/*	Ax	extra (larger) argument for previous opcode	*/
 } OpCode;
 
