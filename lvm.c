@@ -2116,7 +2116,7 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
         if (ttistable(rb)) {
            Table *h = hvalue(rb);
            l_rwlock_rdlock(&h->lock);
-           const TValue *res = luaH_get(h, rc);
+           const TValue *res = luaH_get_optimized(h, rc);
            if (!isempty(res)) {
               setobj2s(L, ra, res);
               l_rwlock_unlock(&h->lock);
@@ -2222,7 +2222,7 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
         if (ttistable(s2v(ra))) {
            Table *h = hvalue(s2v(ra));
            l_rwlock_wrlock(&h->lock);
-           const TValue *res = luaH_get(h, rb);
+           const TValue *res = luaH_get_optimized(h, rb);
            if (!isempty(res) && !isabstkey(res)) {
               setobj2t(L, cast(TValue *, res), rc);
               luaC_barrierback(L, obj2gco(h), rc);
@@ -2338,7 +2338,12 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
         if (ttistable(rb)) {
            Table *h = hvalue(rb);
            l_rwlock_rdlock(&h->lock);
-           const TValue *res = luaH_getstr(h, key);
+           const TValue *res;
+           if (key->tt == LUA_VSHRSTR) {
+             res = luaH_getshortstr(h, key);
+           } else {
+             res = luaH_getstr(h, key);
+           }
            if (!isempty(res)) {
               setobj2s(L, ra, res);
               l_rwlock_unlock(&h->lock);

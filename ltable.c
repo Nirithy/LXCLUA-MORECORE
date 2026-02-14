@@ -1699,3 +1699,20 @@ const char *luaH_get_log_path (lua_State *L) {
   (void)L;
   return table_access_log_path;
 }
+
+const TValue *luaH_get_optimized (Table *t, const TValue *key) {
+  switch (ttypetag(key)) {
+    case LUA_VSHRSTR: return luaH_getshortstr(t, tsvalue(key));
+    case LUA_VNUMINT: return luaH_getint(t, ivalue(key));
+    case LUA_VNIL: return &absentkey;
+    case LUA_VNUMFLT: {
+      lua_Integer k;
+      if (luaV_flttointeger(fltvalue(key), &k, F2Ieq))
+        return luaH_getint(t, k);
+      else
+        return getgeneric(t, key, 0);
+    }
+    default:
+      return getgeneric(t, key, 0);
+  }
+}
