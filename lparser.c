@@ -2671,6 +2671,23 @@ static void parse_generic_arrow_body(LexState *ls, FuncState *factory_fs, expdes
 static void primaryexp (LexState *ls, expdesc *v) {
   /* primaryexp -> NAME | '(' expr ')' | STRING | constructor | NEW | SUPER */
   switch (ls->t.token) {
+    case TK_FLT: {
+      init_exp(v, VKFLT, 0);
+      v->u.nval = ls->t.seminfo.r;
+      luaX_next(ls);
+      break;
+    }
+    case TK_BIGFLOAT: {
+      init_exp(v, VK, luaK_bigfloatK(ls->fs, ls->t.seminfo.gc));
+      luaX_next(ls);
+      break;
+    }
+    case TK_INT: {
+      init_exp(v, VKINT, 0);
+      v->u.ival = ls->t.seminfo.i;
+      luaX_next(ls);
+      break;
+    }
     case '(': {
       int line = ls->linenumber;
 
@@ -3445,23 +3462,6 @@ static void simpleexp (LexState *ls, expdesc *v) {
     case TK_IF: {
       ifexpr(ls, v);
       return;
-    }
-    case TK_FLT: {
-      init_exp(v, VKFLT, 0);
-      v->u.nval = ls->t.seminfo.r;
-      luaX_next(ls);
-      break;
-    }
-    case TK_BIGFLOAT: {
-      init_exp(v, VK, luaK_bigfloatK(ls->fs, ls->t.seminfo.gc));
-      luaX_next(ls);
-      break;
-    }
-    case TK_INT: {
-      init_exp(v, VKINT, 0);
-      v->u.ival = ls->t.seminfo.i;
-      luaX_next(ls);
-      break;
     }
     case TK_NIL: {
       init_exp(v, VNIL, 0);

@@ -1041,6 +1041,13 @@ void luaB_tostring(lua_State *L, TValue *obj) {
       }
       start[len] = '\0'; /* Truncate zeros */
 
+      /* Default max 14 digits */
+      if (len > 14) {
+          exp_adj += (len - 14);
+          len = 14;
+          start[len] = '\0';
+      }
+
       lua_Integer final_exp = b->exp + exp_adj;
 
       char exp_buff[32];
