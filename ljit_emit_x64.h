@@ -189,7 +189,7 @@ static void ASM_XOR_RR(JitState *J, int dst, int src) {
 // or generic [reg], reg
 static void ASM_MOV_MEM_R(JitState *J, int base, int offset, int src) {
   // MOV [base + offset], src
-  unsigned char rex = 0x49; // Assuming base is R12/R13/etc (r12 is used for ci)
+  unsigned char rex = 0x48; // REX.W
   if (src >= 8) rex |= 4; // REX.R
   if (base >= 8) rex |= 1;
 
@@ -208,7 +208,7 @@ static void ASM_MOV_MEM_R(JitState *J, int base, int offset, int src) {
 
 // MOV reg, [base + offset]
 static void ASM_MOV_R_MEM(JitState *J, int dst, int base, int offset) {
-  unsigned char rex = 0x49; // REX.W + REX.B (assuming base >= 8 like R12)
+  unsigned char rex = 0x48; // REX.W
   if (dst >= 8) rex |= 4; // REX.R
   if (base >= 8) rex |= 1; // REX.B
 
