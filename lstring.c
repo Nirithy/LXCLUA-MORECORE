@@ -184,14 +184,11 @@ void luaS_init (lua_State *L) {
 size_t luaS_sizelngstr (size_t len, int kind) {
   switch (kind) {
     case LSTRREG:  /* regular long string */
-      /* don't need 'falloc'/'ud', but need space for content */
-      return offsetof(TString, falloc) + (len + 1) * sizeof(char);
+      return offsetof(TString, contents) + (len + 1) * sizeof(char);
     case LSTRFIX:  /* fixed external long string */
-      /* don't need 'falloc'/'ud' */
-      return offsetof(TString, falloc);
     default:  /* external long string with deallocation */
-      lua_assert(kind == LSTRMEM);
-      return sizeof(TString);
+      lua_assert(kind == LSTRFIX || kind == LSTRMEM);
+      return sizeof(TExternalString);
   }
 }
 
@@ -208,7 +205,7 @@ static TString *createstrobj (lua_State *L, size_t l, int tag, unsigned int h) {
   ts = gco2ts(o);
   ts->hash = h;
   ts->extra = 0;
-  getstr(ts)[l] = '\0';  /* ending 0 */
+  ts->contents[l] = '\0';  /* ending 0 */
   return ts;
 }
 
@@ -314,7 +311,7 @@ TString *luaS_newlstr (lua_State *L, const char *str, size_t l) {
     if (l_unlikely(l * sizeof(char) >= (MAX_SIZE - sizeof(TString))))
       luaM_toobig(L);
     ts = luaS_createlngstrobj(L, l);
-    memcpy(getlngstr(ts), str, l * sizeof(char));
+    memcpy(ts->contents, str, l * sizeof(char));
     return ts;
   }
 }
@@ -380,7 +377,11 @@ struct NewExt {
 static void f_newext (lua_State *L, void *ud) {
   struct NewExt *ne = cast(struct NewExt *, ud);
   size_t size = luaS_sizelngstr(0, ne->kind);
-  ne->ts = createstrobj(L, size, LUA_VLNGSTR, G(L)->seed);
+  GCObject *o = luaC_newobj(L, LUA_VLNGSTR, size);
+  TString *ts = gco2ts(o);
+  ts->hash = G(L)->seed;
+  ts->extra = 0;
+  ne->ts = ts;
 }
 
 
@@ -397,6 +398,7 @@ static void f_newext (lua_State *L, void *ud) {
 TString *luaS_newextlstr (lua_State *L,
 	          const char *s, size_t len, lua_Alloc falloc, void *ud) {
   struct NewExt ne;
+  TExternalString *ts;
   if (!falloc) {
     ne.kind = LSTRFIX;
     f_newext(L, &ne);  /* just create header */
@@ -407,12 +409,13 @@ TString *luaS_newextlstr (lua_State *L,
       (*falloc)(ud, cast_voidp(s), len + 1, 0);  /* free external string */
       luaM_error(L);  /* re-raise memory error */
     }
-    ne.ts->falloc = falloc;
-    ne.ts->ud = ud;
   }
-  ne.ts->shrlen = ne.kind;
-  ne.ts->u.lnglen = len;
-  memcpy(ne.ts->contents, s, len + 1);
+  ts = (TExternalString *)(ne.ts);
+  ts->falloc = falloc;
+  ts->ud = ud;
+  ts->src = s;
+  ts->shrlen = ne.kind;
+  ts->u.lnglen = len;
   return ne.ts;
 }
 

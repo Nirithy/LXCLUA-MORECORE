@@ -277,7 +277,7 @@ static TString *loadStringN (LoadState *S, Proto *p) {
       luaD_inctop(L);
       
       // 复制解密后的数据到字符串对象
-      char *str = getlngstr(ts);
+      char *str = ts->contents;
       memcpy(str, image_data, size);
       
       // 对字符串进行解密，先使用时间戳XOR解密，再使用映射表解密
@@ -305,10 +305,10 @@ static TString *loadStringN (LoadState *S, Proto *p) {
       ts = luaS_createlngstrobj(L, size);  /* create string */
       setsvalue2s(L, L->top.p, ts);  /* anchor it ('loadVector' can GC) */
       luaD_inctop(L);
-      loadVector(S, getlngstr(ts), size);  /* load encrypted string directly into final place */
+      loadVector(S, ts->contents, size);  /* load encrypted string directly into final place */
       
       // 对长字符串进行解密，先使用时间戳XOR解密，再使用映射表解密
-      char *str = getlngstr(ts);
+      char *str = ts->contents;
       for (size_t i = 0; i < size; i++) {
         /* 先使用时间戳进行XOR解密，再使用反向映射表解密 */
         unsigned char decrypted_char = str[i] ^ ((char *)&S->timestamp)[i % sizeof(S->timestamp)];
@@ -812,7 +812,7 @@ static void loadString_Standard (LoadState *S, Proto *p, TString **sl) {
   else {  /* create internal copy */
     *sl = ts = luaS_createlngstrobj(L, size);  /* create string */
     luaC_objbarrier(L, p, ts);
-    loadVector_Standard(S, getlngstr(ts), size + 1);  /* load directly in final place */
+    loadVector_Standard(S, ts->contents, size + 1);  /* load directly in final place */
   }
   /* add string to list of saved strings */
   S->nstr++;

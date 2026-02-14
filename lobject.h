@@ -453,13 +453,28 @@ typedef struct TString {
     struct TString *hnext;  /**< linked list for hash table */
   } u;
   char contents[1]; /**< string data */
-  lua_Alloc falloc;  /**< deallocation function for external strings */
-  void *ud;  /**< user data for external strings */
 } TString;
 
+/**
+ * @brief Header for an external string value.
+ */
+typedef struct TExternalString {
+  CommonHeader;
+  lu_byte extra;  /**< reserved words for short strings; "has hash" for longs */
+  lu_byte shrlen;  /**< length for short strings, 0xFF for long strings */
+  unsigned int hash; /**< hash code */
+  union {
+    size_t lnglen;  /**< length for long strings */
+    struct TString *hnext;  /**< linked list for hash table */
+  } u;
+  const char *src; /**< pointer to string data */
+  lua_Alloc falloc;  /**< deallocation function for external strings */
+  void *ud;  /**< user data for external strings */
+} TExternalString;
 
-#define strisshr(ts)	((ts)->shrlen >= 0)
-#define isextstr(ts)	(ttislngstring(ts) && tsvalue(ts)->shrlen != LSTRREG)
+
+#define strisshr(ts)	((ts)->tt == LUA_VSHRSTR)
+#define isextstr(ts)	((ts)->tt == LUA_VLNGSTR && (ts)->shrlen != (lu_byte)LSTRREG)
 
 /*
 ** Get the actual string (array of bytes) from a 'TString'. (Generic
@@ -467,8 +482,8 @@ typedef struct TString {
 */
 #define rawgetshrstr(ts)  (cast_charp(&(ts)->contents))
 #define getshrstr(ts)	check_exp(strisshr(ts), rawgetshrstr(ts))
-#define getlngstr(ts)	check_exp(!strisshr(ts), (ts)->contents)
-#define getstr(ts) 	(strisshr(ts) ? rawgetshrstr(ts) : (ts)->contents)
+#define getlngstr(ts)	check_exp(!strisshr(ts), (isextstr(ts) ? ((TExternalString*)(ts))->src : (ts)->contents))
+#define getstr(ts) 	(strisshr(ts) ? rawgetshrstr(ts) : getlngstr(ts))
 
 
 /* get string length from 'TString *s' */

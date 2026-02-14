@@ -1013,7 +1013,15 @@ static void freeobj (lua_State *L, GCObject *o) {
     }
     case LUA_VLNGSTR: {
       TString *ts = gco2ts(o);
-      luaM_freemem(L, ts, sizelstring(ts->u.lnglen));
+      if (isextstr(ts)) {
+        TExternalString *ts_ext = (TExternalString *)ts;
+        if (ts_ext->falloc)
+          (*ts_ext->falloc)(ts_ext->ud, (void *)ts_ext->src, ts_ext->u.lnglen + 1, 0);
+        luaM_freemem(L, ts, sizeof(TExternalString));
+      }
+      else {
+        luaM_freemem(L, ts, sizelstring(ts->u.lnglen));
+      }
       break;
     }
     case LUA_VNUMBIG: {

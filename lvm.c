@@ -1313,7 +1313,7 @@ void luaV_concat (lua_State *L, int total) {
       }
       else {  /* long string; copy strings directly to final result */
         ts = luaS_createlngstrobj(L, tl);
-        copy2buff(top, n, getlngstr(ts));
+        copy2buff(top, n, ts->contents);
       }
       setsvalue2s(L, top - n, ts);  /* create result */
     }
