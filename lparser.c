@@ -3103,6 +3103,9 @@ static void suffixedexp (LexState *ls, expdesc *v) {
   FuncState *fs = ls->fs;
   int line = ls->linenumber;
   primaryexp(ls, v);
+  if ((v->k == VKINT || v->k == VKFLT || (v->k == VK && ttisnumber(&fs->f->k[v->u.info]))) && ls->t.token == '[') {
+      return;
+  }
   for (;;) {
     switch (ls->t.token) {
       case TK_OPTCHAIN: {  /* '?.' 可选链字段访问 */
@@ -4364,7 +4367,7 @@ static const struct {
    {1, 1}                    /* => (case operator) */
 };
 
-#define UNARY_PRIORITY	12  /* priority for unary operators */
+#define UNARY_PRIORITY	13  /* priority for unary operators */
 
 
 /*
@@ -4412,16 +4415,25 @@ static BinOpr subexpr (LexState *ls, expdesc *v, int limit) {
   else simpleexp(ls, v);
   /* expand while operators have priorities higher than 'limit' */
   op = getbinopr(ls->t.token);
-  while (op != OPR_NOBINOPR && priority[op].left > limit) {
-    expdesc v2;
-    BinOpr nextop;
-    int line = ls->linenumber;
-    luaX_next(ls);  /* skip operator */
-    luaK_infix(ls->fs, op, v);
-    /* read sub-expression with higher priority */
-    nextop = subexpr(ls, &v2, priority[op].right);
-    luaK_posfix(ls->fs, op, v, &v2, line);
-    op = nextop;
+  while (1) {
+    if (ls->t.token == '[' && 10 > limit) {
+       yindex_or_slice(ls, v);
+       op = getbinopr(ls->t.token);
+       continue;
+    }
+    if (op != OPR_NOBINOPR && priority[op].left > limit) {
+      expdesc v2;
+      BinOpr nextop;
+      int line = ls->linenumber;
+      luaX_next(ls);  /* skip operator */
+      luaK_infix(ls->fs, op, v);
+      /* read sub-expression with higher priority */
+      nextop = subexpr(ls, &v2, priority[op].right);
+      luaK_posfix(ls->fs, op, v, &v2, line);
+      op = nextop;
+      continue;
+    }
+    break;
   }
   leavelevel(ls);
   return op;  /* return first untreated operator */
