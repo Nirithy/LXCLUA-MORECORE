@@ -128,7 +128,6 @@ static void jit_emit_op_band(JitState *J, int a, int b, int c, const Instruction
 static void jit_emit_op_bor(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
 static void jit_emit_op_bxor(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
 static void jit_emit_op_shl(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
-static void jit_emit_op_shri(JitState *J, int a, int b, int sc, const Instruction *next) { (void)J; }
 static void jit_emit_op_shr(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
 static void jit_emit_op_unm(JitState *J, int a, int b, const Instruction *next) { (void)J; }
 static void jit_emit_op_bnot(JitState *J, int a, int b, const Instruction *next) { (void)J; }
