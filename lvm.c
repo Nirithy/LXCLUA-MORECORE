@@ -56,7 +56,6 @@
 #include "lthread.h"
 #include "lstruct.h"
 #include "lnamespace.h"
-#include "ljit.h"
 #include "lbigint.h"
 
 static int try_add(lua_Integer a, lua_Integer b, lua_Integer *r) {
@@ -1967,23 +1966,6 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
  returning:  /* trap already set */
   cl = ci_func(ci);
 
-  /* JIT compilation entry point */
-  if (cl->p->jit_code) {
-    typedef int (*JitFunction)(lua_State *L, CallInfo *ci);
-    JitFunction jit_func = (JitFunction)cl->p->jit_code;
-    if (jit_func(L, ci)) {
-      if (L->ci->next->callstatus & CIST_FRESH)
-        return;
-      else {
-        ci = L->ci;
-        goto returning;
-      }
-    }
-  } else {
-    luaJ_compile(L, cl->p);
-    if (cl->p->jit_code) goto startfunc;
-  }
-  
   /** VM protection detection: If the function enables VM protection, use a custom VM interpreter */
   if (cl->p->difierline_mode & OBFUSCATE_VM_PROTECT) {
     int vm_result = luaO_executeVM(L, cl->p);
