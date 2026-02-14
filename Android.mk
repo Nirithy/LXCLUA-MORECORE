@@ -19,6 +19,7 @@ LOCAL_SRC_FILES := \
     lfs.c\
 	lapi.c \
 	lauxlib.c \
+	lbigint.c\
 	lbaselib.c \
 	lboolib.c \
 	lclass.c \
@@ -57,6 +58,7 @@ LOCAL_SRC_FILES := \
 	lvmlib.c \
 	lvm.c \
 	lzio.c \
+	lnamespace.c\
 	lthread.c \
 	lthreadlib.c \
 	lproclib.c\
@@ -65,6 +67,7 @@ LOCAL_SRC_FILES := \
 	llibc.c \
 	lvmpro.c\
 	logtable.c \
+	ljit.c\
 	json_parser.c \
 	lstruct.c \
 	sha256.c \
