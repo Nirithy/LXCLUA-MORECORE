@@ -239,6 +239,12 @@ void luaS_structindex (lua_State *L, const TValue *t, TValue *key, StkId val) {
     get_field_info(L, fields, tsvalue(key), &offset, &type, &size, &nested_def, &arr_len, &arr_elem_type, &arr_elem_size);
 
     if (type == -1) {
+        /* Check if key exists in definition table (e.g. __size, __name) */
+        const TValue *vdef = luaH_getstr(def, tsvalue(key));
+        if (!isempty(vdef)) {
+            setobj2s(L, val, vdef);
+            return;
+        }
         setnilvalue(s2v(val));
         return;
     }

@@ -23,6 +23,7 @@ else
   print("Compilation succeeded")
   local poly = Polygon()
   print("Polygon size:", poly.__size)
+  if not poly.__size then error("Polygon size is nil") end
 
   poly.points[1].x = 10
   poly.points[1].y = 20
