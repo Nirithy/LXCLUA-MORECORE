@@ -204,7 +204,7 @@ void luaJ_compile(lua_State *L, Proto *p) {
       default:
         // Partially supported or unsupported opcodes (e.g. some OOP ones)
         // For now we try to support most standard ones.
-        return; // Unsupported opcode, abort JIT
+        break; // Continue compilation even if opcode is unsupported
     }
   }
 
@@ -412,7 +412,7 @@ void luaJ_compile(lua_State *L, Proto *p) {
       case OP_NEWNAMESPACE: jit_emit_op_newnamespace(J, GETARG_A(inst), GETARG_Bx(inst)); break;
       case OP_LINKNAMESPACE: jit_emit_op_linknamespace(J, GETARG_A(inst), GETARG_B(inst)); break;
       case OP_EXTRAARG: break;
-      default: break;
+      default: emit_barrier(J); break;
     }
   }
 
