@@ -2,6 +2,7 @@
 #define ljit_emit_stub_h
 
 #include "ljit.h"
+#include <stdlib.h>
 
 /*
 ** Stub JIT Backend for unsupported architectures

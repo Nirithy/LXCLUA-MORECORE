@@ -4,6 +4,7 @@
 #include "lprefix.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "lua.h"
 #include "ldebug.h"
