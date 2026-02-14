@@ -25,12 +25,21 @@
 
 #define JIT_BUFFER_SIZE 4096
 
+typedef struct JitFixup {
+  int offset;
+  int target_pc;
+} JitFixup;
+
 typedef struct JitState {
   unsigned char *code;
   size_t size;
   size_t capacity;
   Proto *p;
   const Instruction *next_pc;
+  unsigned char **pc_map;
+  JitFixup *fixups;
+  size_t fixup_count;
+  size_t fixup_capacity;
 } JitState;
 
 /* Register aliases for readability */
@@ -86,12 +95,20 @@ static JitState *jit_new_state(void) {
     J->capacity = 0;
     J->p = NULL;
     J->next_pc = NULL;
+    J->pc_map = NULL;
+    J->fixups = NULL;
+    J->fixup_count = 0;
+    J->fixup_capacity = 0;
   }
   return J;
 }
 
 static void jit_free_state(JitState *J) {
-  if (J) free(J);
+  if (J) {
+    if (J->pc_map) free(J->pc_map);
+    if (J->fixups) free(J->fixups);
+    free(J);
+  }
 }
 
 static int jit_begin(JitState *J, size_t initial_size) {
@@ -140,6 +157,26 @@ static void ASM_MOV_RR(JitState *J, int dst, int src) {
   if (dst >= 8) rex |= 1; // REX.B
   emit_byte(J, rex);
   emit_byte(J, 0x89);
+  emit_byte(J, 0xC0 | ((src & 7) << 3) | (dst & 7));
+}
+
+// ADD dst, src (64-bit)
+static void ASM_ADD_RR(JitState *J, int dst, int src) {
+  unsigned char rex = 0x48;
+  if (src >= 8) rex |= 4;
+  if (dst >= 8) rex |= 1;
+  emit_byte(J, rex);
+  emit_byte(J, 0x01);
+  emit_byte(J, 0xC0 | ((src & 7) << 3) | (dst & 7));
+}
+
+// SUB dst, src (64-bit)
+static void ASM_SUB_RR(JitState *J, int dst, int src) {
+  unsigned char rex = 0x48;
+  if (src >= 8) rex |= 4;
+  if (dst >= 8) rex |= 1;
+  emit_byte(J, rex);
+  emit_byte(J, 0x29);
   emit_byte(J, 0xC0 | ((src & 7) << 3) | (dst & 7));
 }
 
@@ -256,6 +293,16 @@ static void ASM_CMP_R_IMM32(JitState *J, int reg, int imm) {
   emit_u32(J, imm);
 }
 
+// CMP dst, src (64-bit)
+static void ASM_CMP_RR(JitState *J, int dst, int src) {
+  unsigned char rex = 0x48;
+  if (src >= 8) rex |= 4;
+  if (dst >= 8) rex |= 1;
+  emit_byte(J, rex);
+  emit_byte(J, 0x39);
+  emit_byte(J, 0xC0 | ((src & 7) << 3) | (dst & 7));
+}
+
 // Short Jump if Not Equal (JNE rel8)
 static void ASM_JNE(JitState *J, int offset) {
   emit_byte(J, 0x75);
@@ -272,6 +319,56 @@ static void ASM_JE(JitState *J, int offset) {
 static void ASM_JMP(JitState *J, int offset) {
   emit_byte(J, 0xEB);
   emit_byte(J, (unsigned char)offset);
+}
+
+// Jump near relative (JMP rel32)
+static void ASM_JMP_REL32(JitState *J, int offset) {
+  emit_byte(J, 0xE9);
+  emit_u32(J, offset);
+}
+
+// Jump if Less or Equal (JLE rel32) - 0F 8E cd
+static void ASM_JLE_REL32(JitState *J, int offset) {
+  emit_byte(J, 0x0F);
+  emit_byte(J, 0x8E);
+  emit_u32(J, offset);
+}
+
+// Jump if Greater or Equal (JGE rel32) - 0F 8D cd
+static void ASM_JGE_REL32(JitState *J, int offset) {
+  emit_byte(J, 0x0F);
+  emit_byte(J, 0x8D);
+  emit_u32(J, offset);
+}
+
+static void jit_add_fixup(JitState *J, int offset, int target_pc) {
+  if (J->fixup_count == J->fixup_capacity) {
+    size_t new_cap = J->fixup_capacity == 0 ? 16 : J->fixup_capacity * 2;
+    J->fixups = (JitFixup *)realloc(J->fixups, new_cap * sizeof(JitFixup));
+    J->fixup_capacity = new_cap;
+  }
+  J->fixups[J->fixup_count].offset = offset;
+  J->fixups[J->fixup_count].target_pc = target_pc;
+  J->fixup_count++;
+}
+
+static void jit_patch_fixups(JitState *J) {
+  for (size_t i = 0; i < J->fixup_count; i++) {
+    int offset = J->fixups[i].offset;
+    int target_pc = J->fixups[i].target_pc;
+    unsigned char *target_addr = J->pc_map[target_pc];
+    unsigned char *instr_addr = J->code + offset;
+    // Calculate relative offset: target - (instr + 4)
+    // instr points to the start of the placeholder (offset in emit_op_jmp/forprep)
+    // Actually, JMP rel32 is 5 bytes. The offset passed to add_fixup should be where the 4-byte displacement starts?
+    // Let's convention: offset is the start of the instruction + 1 (where the displacement is).
+    // So instr_addr points to the displacement.
+    // The relative jump is calculated from the *end* of the instruction.
+    // End of instruction is instr_addr + 4.
+    // So rel = target - (instr_addr + 4).
+    int rel = (int)(target_addr - (instr_addr + 4));
+    memcpy(instr_addr, &rel, 4);
+  }
 }
 
 /*
@@ -461,14 +558,21 @@ static void jit_emit_op_settable(JitState *J, int a, int b, int c) {
 
 // Barriers for Control Flow
 static void jit_emit_op_jmp(JitState *J, int sj) {
-  // We need to calculate target pc
-  // J->next_pc points to instruction AFTER OP_JMP
-  // target = next_pc + sj
-  const Instruction *target = J->next_pc + sj;
-  ASM_MOV_R_IMM(J, RA_RAX, (unsigned long long)(uintptr_t)target);
-  ASM_MOV_MEM_R(J, RA_R12, 32, RA_RAX); // savedpc
-  ASM_XOR_RR(J, RA_RAX, RA_RAX);
-  jit_emit_epilogue(J);
+  int current_pc_index = (int)(J->next_pc - J->p->code - 1);
+  int target_pc_index = current_pc_index + 1 + sj;
+
+  if (sj < 0) {
+    // Backward jump
+    unsigned char *target = J->pc_map[target_pc_index];
+    emit_byte(J, 0xE9);
+    int rel = (int)(target - (J->code + J->size + 4));
+    emit_u32(J, rel);
+  } else {
+    // Forward jump (placeholder)
+    emit_byte(J, 0xE9);
+    jit_add_fixup(J, J->size, target_pc_index);
+    emit_u32(J, 0);
+  }
 }
 
 static void emit_branch_on_k(JitState *J, int k, int sj) {
@@ -613,8 +717,122 @@ static void jit_emit_op_call(JitState *J, int a, int b, int c) {
 
 static void jit_emit_op_tailcall(JitState *J, int a, int b, int c, int k) { emit_barrier(J); }
 static void jit_emit_op_return(JitState *J, int a, int b, int c, int k) { emit_barrier(J); }
-static void jit_emit_op_forloop(JitState *J, int a, int bx) { emit_barrier(J); }
-static void jit_emit_op_forprep(JitState *J, int a, int bx) { emit_barrier(J); }
+
+static void jit_emit_op_forprep(JitState *J, int a, int bx) {
+  // Check tags: R[A], R[A+1], R[A+2] must be integers
+  emit_get_reg_addr(J, a, RA_RDX);
+
+  // Check R[A].tt_
+  ASM_MOV_R_MEM_OFF(J, RA_RCX, RA_RDX, 8);
+  ASM_CMP_R_IMM32(J, RA_RCX, LUA_VNUMINT);
+  ASM_JNE(J, 0); int p1 = J->size - 1;
+
+  // Check R[A+1].tt_
+  ASM_MOV_R_MEM_OFF(J, RA_RCX, RA_RDX, 16 + 8);
+  ASM_CMP_R_IMM32(J, RA_RCX, LUA_VNUMINT);
+  ASM_JNE(J, 0); int p2 = J->size - 1;
+
+  // Check R[A+2].tt_
+  ASM_MOV_R_MEM_OFF(J, RA_RCX, RA_RDX, 32 + 8);
+  ASM_CMP_R_IMM32(J, RA_RCX, LUA_VNUMINT);
+  ASM_JNE(J, 0); int p3 = J->size - 1;
+
+  // R[A].i -= R[A+2].i
+  ASM_MOV_R_MEM_OFF(J, RA_RCX, RA_RDX, 0);
+  ASM_MOV_R_MEM_OFF(J, RA_R8, RA_RDX, 32);
+  ASM_SUB_RR(J, RA_RCX, RA_R8);
+  ASM_MOV_MEM_OFF_R(J, RA_RDX, 0, RA_RCX);
+
+  // Jump to Target: pc += Bx + 1
+  int current_pc_index = (int)(J->next_pc - J->p->code - 1);
+  int target_pc_index = current_pc_index + 1 + bx;
+  emit_byte(J, 0xE9);
+  jit_add_fixup(J, J->size, target_pc_index);
+  emit_u32(J, 0);
+
+  // Mismatch label (barrier)
+  int barrier_pos = J->size;
+  J->code[p1] = (unsigned char)(barrier_pos - (p1 + 1));
+  J->code[p2] = (unsigned char)(barrier_pos - (p2 + 1));
+  J->code[p3] = (unsigned char)(barrier_pos - (p3 + 1));
+
+  emit_barrier(J);
+}
+
+static void jit_emit_op_forloop(JitState *J, int a, int bx) {
+  // fprintf(stderr, "Emit FORLOOP A=%d Bx=%d\n", a, bx);
+  emit_get_reg_addr(J, a, RA_RDX);
+
+  // ADD R[A], R[A+2]
+  ASM_MOV_R_MEM_OFF(J, RA_RCX, RA_RDX, 0); // idx
+  ASM_MOV_R_MEM_OFF(J, RA_R8, RA_RDX, 32); // step
+  ASM_ADD_RR(J, RA_RCX, RA_R8);
+  ASM_MOV_MEM_OFF_R(J, RA_RDX, 0, RA_RCX); // Update R[A]
+
+  // Compare R[A] with R[A+1] (limit)
+  ASM_MOV_R_MEM_OFF(J, RA_R9, RA_RDX, 16); // limit
+
+  // Check step sign
+  ASM_CMP_R_IMM32(J, RA_R8, 0);
+
+  // JL Negative
+  emit_byte(J, 0x7C);
+  emit_byte(J, 0); int p_neg = J->size - 1;
+
+  // Positive step: CMP idx, limit. If idx <= limit (JLE), Match.
+  ASM_CMP_RR(J, RA_RCX, RA_R9);
+  emit_byte(J, 0x7E); // JLE rel8
+  emit_byte(J, 0); int p_match_pos = J->size - 1;
+
+  // JMP Exit (if idx > limit)
+  emit_byte(J, 0xEB);
+  emit_byte(J, 0); int p_exit_pos = J->size - 1;
+
+  // Negative step
+  int neg_pos = J->size;
+  J->code[p_neg] = (unsigned char)(neg_pos - (p_neg + 1));
+
+  // CMP idx, limit. If idx >= limit (JGE), Match.
+  ASM_CMP_RR(J, RA_RCX, RA_R9);
+  emit_byte(J, 0x7D); // JGE rel8
+  emit_byte(J, 0); int p_match_neg = J->size - 1;
+
+  // Exit (Fallthrough for negative mismatch)
+  int exit_pos = J->size;
+  J->code[p_exit_pos] = (unsigned char)(exit_pos - (p_exit_pos + 1));
+
+  // Done with loop (fallthrough to next instruction)
+  // We need to skip the "Match" block which follows.
+  // JMP OverMatch
+  emit_byte(J, 0xEB);
+  emit_byte(J, 0); int p_over_match = J->size - 1;
+
+  // Match Block
+  int match_pos = J->size;
+  J->code[p_match_pos] = (unsigned char)(match_pos - (p_match_pos + 1));
+  J->code[p_match_neg] = (unsigned char)(match_pos - (p_match_neg + 1));
+
+  // Update R[A+3] = R[A] (idx is in RCX)
+  ASM_MOV_MEM_OFF_R(J, RA_RDX, 48, RA_RCX);
+  // Copy tag from R[A] (RDX+8) to R[A+3] (RDX+56)
+  ASM_MOV_R_MEM_OFF(J, RA_R8, RA_RDX, 8);
+  ASM_MOV_MEM_OFF_R(J, RA_RDX, 56, RA_R8);
+
+  // Jump to Loop Target: pc -= Bx
+  int current_pc_index = (int)(J->next_pc - J->p->code - 1);
+  int target_pc_index = current_pc_index + 1 - bx;
+  unsigned char *target = J->pc_map[target_pc_index];
+
+  // JMP rel32
+  emit_byte(J, 0xE9);
+  int rel = (int)(target - (J->code + J->size + 4));
+  emit_u32(J, rel);
+
+  // OverMatch
+  int over_match_pos = J->size;
+  J->code[p_over_match] = (unsigned char)(over_match_pos - (p_over_match + 1));
+}
+
 static void jit_emit_op_tforprep(JitState *J, int a, int bx) { emit_barrier(J); }
 static void jit_emit_op_tforcall(JitState *J, int a, int c) { emit_barrier(J); }
 static void jit_emit_op_tforloop(JitState *J, int a, int bx) { emit_barrier(J); }

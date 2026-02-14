@@ -216,6 +216,12 @@ void luaJ_compile(lua_State *L, Proto *p) {
     return;
   }
 
+  J->pc_map = (unsigned char **)calloc(p->sizecode, sizeof(unsigned char *));
+  if (!J->pc_map) {
+    jit_free_state(J);
+    return;
+  }
+
   J->p = p;
 
   // Prologue
@@ -223,6 +229,7 @@ void luaJ_compile(lua_State *L, Proto *p) {
 
   // Second pass: Emit code
   for (int i = 0; i < p->sizecode; i++) {
+    J->pc_map[i] = J->code + J->size;
     Instruction inst = p->code[i];
     J->next_pc = &p->code[i+1];
     OpCode op = GET_OPCODE(inst);
@@ -418,6 +425,9 @@ void luaJ_compile(lua_State *L, Proto *p) {
 
   // Epilogue
   jit_emit_epilogue(J);
+
+  // Patch fixups (resolve forward jumps)
+  jit_patch_fixups(J);
 
   // Finalize
   jit_end(J, p);
