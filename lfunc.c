@@ -23,7 +23,6 @@
 #include "lmem.h"
 #include "lobject.h"
 #include "lstate.h"
-#include "ljit.h"
 
 
 /**
@@ -357,8 +356,6 @@ Proto *luaF_newproto (lua_State *L) {
   f->source = NULL;
   f->is_sleeping = 0;
   f->call_queue = NULL;
-  f->jit_code = NULL;
-  f->jit_size = 0;
   return f;
 }
 
@@ -391,7 +388,6 @@ lu_mem luaF_protosize (Proto *p) {
  * @param f The prototype.
  */
 void luaF_freeproto (lua_State *L, Proto *f) {
-  luaJ_freeproto(f);
   luaM_freearray(L, f->code, f->sizecode);
   luaM_freearray(L, f->p, f->sizep);
   luaM_freearray(L, f->k, f->sizek);

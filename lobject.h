@@ -733,8 +733,6 @@ typedef struct Proto {
   int is_sleeping; /**< sleep status */
   CallQueue *call_queue; /**< call queue for sleep/wake */
   struct VMCodeTable *vm_code_table;  /**< VM protection code table pointer. */
-  void *jit_code; /**< JIT compiled machine code. */
-  size_t jit_size; /**< Size of JIT machine code. */
 } Proto;
 
 /* }======================================================= */
