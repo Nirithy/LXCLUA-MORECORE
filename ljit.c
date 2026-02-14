@@ -31,7 +31,29 @@ static void luaJ_call_helper(lua_State *L, CallInfo *ci, int ra_idx, int b, int 
   ci->u.l.savedpc = next_pc;
 
   /* Use luaD_call to ensure proper stack management and CIST_FRESH */
-  luaD_call(L, ra, nresults);
+  /* luaD_call(L, ra, nresults); */
+
+  /* Optimization: Inline luaD_call logic and support JIT-to-JIT direct calls */
+  CallInfo *newci;
+  if ((newci = luaD_precall(L, ra, nresults)) != NULL) {  /* Lua function? */
+    newci->callstatus |= CIST_FRESH;  /* mark that it is a "fresh" execute */
+
+    LClosure *cl = ci_func(newci);
+    if (!cl->p->jit_code) {
+       luaJ_compile(L, cl->p);
+    }
+
+    if (cl->p->jit_code) {
+       typedef int (*JitFunction)(lua_State *L, CallInfo *ci);
+       JitFunction jit_func = (JitFunction)cl->p->jit_code;
+       if (jit_func(L, newci)) {
+          return; /* JIT finished successfully */
+       }
+       /* JIT returned 0 (barrier), fall through to interpreter */
+    }
+
+    luaV_execute(L, newci);  /* call it (interpreter) */
+  }
 }
 
 /* Comparison Helpers for JIT */

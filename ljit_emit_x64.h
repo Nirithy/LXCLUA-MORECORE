@@ -325,6 +325,12 @@ static void ASM_JE(JitState *J, int offset) {
   emit_byte(J, (unsigned char)offset);
 }
 
+// Short Jump if Overflow (JO rel8)
+static void ASM_JO(JitState *J, int offset) {
+  emit_byte(J, 0x70);
+  emit_byte(J, (unsigned char)offset);
+}
+
 // Short Unconditional Jump (JMP rel8)
 static void ASM_JMP(JitState *J, int offset) {
   emit_byte(J, 0xEB);
@@ -368,14 +374,6 @@ static void jit_patch_fixups(JitState *J) {
     int target_pc = J->fixups[i].target_pc;
     unsigned char *target_addr = J->pc_map[target_pc];
     unsigned char *instr_addr = J->code + offset;
-    // Calculate relative offset: target - (instr + 4)
-    // instr points to the start of the placeholder (offset in emit_op_jmp/forprep)
-    // Actually, JMP rel32 is 5 bytes. The offset passed to add_fixup should be where the 4-byte displacement starts?
-    // Let's convention: offset is the start of the instruction + 1 (where the displacement is).
-    // So instr_addr points to the displacement.
-    // The relative jump is calculated from the *end* of the instruction.
-    // End of instruction is instr_addr + 4.
-    // So rel = target - (instr_addr + 4).
     int rel = (int)(target_addr - (instr_addr + 4));
     memcpy(instr_addr, &rel, 4);
   }
@@ -685,10 +683,6 @@ static void jit_emit_op_gei(JitState *J, int a, int sb, int k, int sj) {
 }
 
 static void jit_emit_op_test(JitState *J, int a, int k, int sj) {
-  // luaJ_istrue is safe (no error), but no harm in saving pc?
-  // It's fast enough. But maybe not needed.
-  // Keep it simple and skip savepc for test if not required.
-  // Actually luaJ_istrue checks tags, never errors.
   emit_get_reg_addr(J, a, RA_RSI);
   ASM_MOV_R_IMM(J, RA_RAX, (unsigned long long)(uintptr_t)&luaJ_istrue);
   ASM_CALL_R(J, RA_RAX);
@@ -700,15 +694,6 @@ static void jit_emit_op_testset(JitState *J, int a, int b, int k, int sj) {
 }
 
 static void jit_emit_op_call(JitState *J, int a, int b, int c) {
-  // Helper args: (L, ci, ra_idx, b, c, next_pc)
-  // Register mapping for x64 call:
-  // 1: RDI = L (from RBX)
-  // 2: RSI = ci (from R12)
-  // 3: RDX = ra_idx
-  // 4: RCX = b
-  // 5: R8 = c
-  // 6: R9 = next_pc (J->next_pc)
-
   ASM_MOV_RR(J, RA_RDI, RA_RBX); // L
   ASM_MOV_RR(J, RA_RSI, RA_R12); // ci
   ASM_MOV_R_IMM32(J, RA_RDX, a);
@@ -765,7 +750,6 @@ static void jit_emit_op_forprep(JitState *J, int a, int bx) {
 }
 
 static void jit_emit_op_forloop(JitState *J, int a, int bx) {
-  // fprintf(stderr, "Emit FORLOOP A=%d Bx=%d\n", a, bx);
   emit_get_reg_addr(J, a, RA_RDX);
 
   // ADD R[A], R[A+2]
@@ -843,14 +827,12 @@ static void jit_emit_op_tforcall(JitState *J, int a, int c) { emit_barrier(J); }
 static void jit_emit_op_tforloop(JitState *J, int a, int bx) { emit_barrier(J); }
 
 static void jit_emit_op_return0(JitState *J) {
-  // Prep stack: luaJ_prep_return0(L, ci)
   ASM_MOV_RR(J, RA_RDI, RA_RBX); // L
   ASM_MOV_RR(J, RA_RSI, RA_R12); // ci
 
   ASM_MOV_R_IMM(J, RA_RAX, (unsigned long long)(uintptr_t)&luaJ_prep_return0);
   ASM_CALL_R(J, RA_RAX);
 
-  // Call luaD_poscall(L, ci, 0)
   ASM_MOV_RR(J, RA_RDI, RA_RBX); // L
   ASM_MOV_RR(J, RA_RSI, RA_R12); // ci
   ASM_XOR_RR(J, RA_RDX, RA_RDX); // 0
@@ -858,7 +840,6 @@ static void jit_emit_op_return0(JitState *J) {
   ASM_MOV_R_IMM(J, RA_RAX, (unsigned long long)(uintptr_t)&luaD_poscall);
   ASM_CALL_R(J, RA_RAX);
 
-  // Set return value to 1 (success)
   ASM_MOV_R_IMM32(J, RA_RAX, 1);
   jit_emit_epilogue(J);
 }
@@ -883,7 +864,6 @@ static void jit_emit_op_return1(JitState *J, int ra) {
 }
 
 static void emit_arith_common(JitState *J, int ra, int rb, int rc, const Instruction *next_pc, int op) {
-  // Update savedpc: mov [r12 + 32], next_pc
   ASM_MOV_R_IMM(J, RA_RAX, (unsigned long long)(uintptr_t)next_pc);
   ASM_MOV_MEM_R(J, RA_R12, 32, RA_RAX);
 
@@ -904,11 +884,97 @@ static void emit_arith_common(JitState *J, int ra, int rb, int rc, const Instruc
 }
 
 static void jit_emit_op_add(JitState *J, int ra, int rb, int rc, const Instruction *next_pc) {
+  // Fast path: Check tags of RB and RC
+  emit_get_reg_addr(J, rb, RA_RDX); // &RB
+  ASM_MOV_R_MEM_OFF(J, RA_R8, RA_RDX, 8); // Tag RB
+
+  emit_get_reg_addr(J, rc, RA_RCX); // &RC
+  ASM_MOV_R_MEM_OFF(J, RA_R9, RA_RCX, 8); // Tag RC
+
+  ASM_CMP_R_IMM32(J, RA_R8, LUA_VNUMINT);
+  ASM_JNE(J, 0); int p1 = J->size - 1;
+
+  ASM_CMP_R_IMM32(J, RA_R9, LUA_VNUMINT);
+  ASM_JNE(J, 0); int p2 = J->size - 1;
+
+  // Fast ADD
+  ASM_MOV_R_MEM_OFF(J, RA_R10, RA_RDX, 0); // Val RB
+  ASM_MOV_R_MEM_OFF(J, RA_R11, RA_RCX, 0); // Val RC
+
+  ASM_ADD_RR(J, RA_R10, RA_R11); // R10 = R10 + R11
+
+  // Check Overflow
+  ASM_JO(J, 0); int p3 = J->size - 1;
+
+  // Store result to RA
+  emit_get_reg_addr(J, ra, RA_RDX);
+  ASM_MOV_MEM_OFF_R(J, RA_RDX, 0, RA_R10);
+  // Store Tag INT
+  ASM_MOV_R_IMM32(J, RA_R11, LUA_VNUMINT);
+  ASM_MOV_MEM_OFF_R(J, RA_RDX, 8, RA_R11);
+
+  // Jump to Done
+  ASM_JMP(J, 0); int p_done = J->size - 1;
+
+  // Slow Path
+  int slow_pos = J->size;
+  J->code[p1] = (unsigned char)(slow_pos - (p1 + 1));
+  J->code[p2] = (unsigned char)(slow_pos - (p2 + 1));
+  J->code[p3] = (unsigned char)(slow_pos - (p3 + 1));
+
   emit_arith_common(J, ra, rb, rc, next_pc, LUA_OPADD);
+
+  // Done
+  int done_pos = J->size;
+  J->code[p_done] = (unsigned char)(done_pos - (p_done + 1));
 }
+
 static void jit_emit_op_sub(JitState *J, int ra, int rb, int rc, const Instruction *next_pc) {
+  // Fast path: Check tags of RB and RC
+  emit_get_reg_addr(J, rb, RA_RDX); // &RB
+  ASM_MOV_R_MEM_OFF(J, RA_R8, RA_RDX, 8); // Tag RB
+
+  emit_get_reg_addr(J, rc, RA_RCX); // &RC
+  ASM_MOV_R_MEM_OFF(J, RA_R9, RA_RCX, 8); // Tag RC
+
+  ASM_CMP_R_IMM32(J, RA_R8, LUA_VNUMINT);
+  ASM_JNE(J, 0); int p1 = J->size - 1;
+
+  ASM_CMP_R_IMM32(J, RA_R9, LUA_VNUMINT);
+  ASM_JNE(J, 0); int p2 = J->size - 1;
+
+  // Fast SUB
+  ASM_MOV_R_MEM_OFF(J, RA_R10, RA_RDX, 0); // Val RB
+  ASM_MOV_R_MEM_OFF(J, RA_R11, RA_RCX, 0); // Val RC
+
+  ASM_SUB_RR(J, RA_R10, RA_R11); // R10 = R10 - R11
+
+  // Check Overflow
+  ASM_JO(J, 0); int p3 = J->size - 1;
+
+  // Store result to RA
+  emit_get_reg_addr(J, ra, RA_RDX);
+  ASM_MOV_MEM_OFF_R(J, RA_RDX, 0, RA_R10);
+  // Store Tag INT
+  ASM_MOV_R_IMM32(J, RA_R11, LUA_VNUMINT);
+  ASM_MOV_MEM_OFF_R(J, RA_RDX, 8, RA_R11);
+
+  // Jump to Done
+  ASM_JMP(J, 0); int p_done = J->size - 1;
+
+  // Slow Path
+  int slow_pos = J->size;
+  J->code[p1] = (unsigned char)(slow_pos - (p1 + 1));
+  J->code[p2] = (unsigned char)(slow_pos - (p2 + 1));
+  J->code[p3] = (unsigned char)(slow_pos - (p3 + 1));
+
   emit_arith_common(J, ra, rb, rc, next_pc, LUA_OPSUB);
+
+  // Done
+  int done_pos = J->size;
+  J->code[p_done] = (unsigned char)(done_pos - (p_done + 1));
 }
+
 static void jit_emit_op_mul(JitState *J, int a, int b, int c, const Instruction *next) {
   emit_arith_common(J, a, b, c, next, LUA_OPMUL);
 }
@@ -1063,7 +1129,41 @@ static void emit_arith_i(JitState *J, int ra, int rb, int imm, const Instruction
   ASM_ADD_R_IMM32(J, RA_RSP, 16); // Restore stack
 }
 
-static void jit_emit_op_addi(JitState *J, int a, int b, int sc, const Instruction *next) { emit_arith_i(J, a, b, sc, next, LUA_OPADD); }
+static void jit_emit_op_addi(JitState *J, int a, int b, int sc, const Instruction *next) {
+  // Fast Path for ADDI (Integers)
+  emit_get_reg_addr(J, b, RA_RDX); // &RB
+  ASM_MOV_R_MEM_OFF(J, RA_R8, RA_RDX, 8); // Tag RB
+
+  ASM_CMP_R_IMM32(J, RA_R8, LUA_VNUMINT);
+  ASM_JNE(J, 0); int p1 = J->size - 1;
+
+  // Fast Add Immediate
+  ASM_MOV_R_MEM_OFF(J, RA_R10, RA_RDX, 0); // Val RB
+  ASM_ADD_R_IMM32(J, RA_R10, sc); // R10 += sc
+
+  // Check Overflow
+  ASM_JO(J, 0); int p2 = J->size - 1;
+
+  // Store result
+  emit_get_reg_addr(J, a, RA_RDX);
+  ASM_MOV_MEM_OFF_R(J, RA_RDX, 0, RA_R10);
+  ASM_MOV_R_IMM32(J, RA_R11, LUA_VNUMINT);
+  ASM_MOV_MEM_OFF_R(J, RA_RDX, 8, RA_R11);
+
+  // Done
+  ASM_JMP(J, 0); int p_done = J->size - 1;
+
+  // Slow Path
+  int slow_pos = J->size;
+  J->code[p1] = (unsigned char)(slow_pos - (p1 + 1));
+  J->code[p2] = (unsigned char)(slow_pos - (p2 + 1));
+
+  emit_arith_i(J, a, b, sc, next, LUA_OPADD);
+
+  int done_pos = J->size;
+  J->code[p_done] = (unsigned char)(done_pos - (p_done + 1));
+}
+
 static void jit_emit_op_addk(JitState *J, int a, int b, int c, const Instruction *next) { emit_arith_k(J, a, b, c, next, LUA_OPADD); }
 static void jit_emit_op_subk(JitState *J, int a, int b, int c, const Instruction *next) { emit_arith_k(J, a, b, c, next, LUA_OPSUB); }
 static void jit_emit_op_mulk(JitState *J, int a, int b, int c, const Instruction *next) { emit_arith_k(J, a, b, c, next, LUA_OPMUL); }
