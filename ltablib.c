@@ -792,7 +792,7 @@ LUAMOD_API int luaopen_table (lua_State *L) {
     lua_setfield(L, -2, "__sub");
 
     /* set it as the default metatable for tables */
-    G(L)->mt[LUA_TTABLE] = hvalue(s2v(L->top.p - 1));
+    G(L)->mt[LUA_TTABLE] = gcvalue(s2v(L->top.p - 1));
 
     lua_pop(L, 1); /* pop metatable */
 

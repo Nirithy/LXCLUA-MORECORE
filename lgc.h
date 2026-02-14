@@ -196,7 +196,7 @@ LUAI_FUNC GCObject *luaC_newobjdt (lua_State *L, int tt, size_t sz,
                                                  size_t offset);
 LUAI_FUNC void luaC_barrier_ (lua_State *L, GCObject *o, GCObject *v);
 LUAI_FUNC void luaC_barrierback_ (lua_State *L, GCObject *o);
-LUAI_FUNC void luaC_checkfinalizer (lua_State *L, GCObject *o, Table *mt);
+LUAI_FUNC void luaC_checkfinalizer (lua_State *L, GCObject *o, GCObject *mt);
 LUAI_FUNC void luaC_changemode (lua_State *L, int newmode);
 
 

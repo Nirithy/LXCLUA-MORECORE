@@ -1298,7 +1298,7 @@ LUA_API void lua_createtable (lua_State *L, int narray, int nrec) {
  */
 LUA_API int lua_getmetatable (lua_State *L, int objindex) {
   const TValue *obj;
-  Table *mt;
+  GCObject *mt;
   int res = 0;
   lua_lock(L);
   obj = index2value(L, objindex);
@@ -1314,7 +1314,11 @@ LUA_API int lua_getmetatable (lua_State *L, int objindex) {
       break;
   }
   if (mt != NULL) {
-    sethvalue2s(L, L->top.p, mt);
+    if (mt->tt == LUA_VSUPERSTRUCT) {
+      setsuperstructvalue(L, s2v(L->top.p), cast(SuperStruct *, mt));
+    } else {
+      sethvalue2s(L, L->top.p, cast(Table *, mt));
+    }
     api_incr_top(L);
     res = 1;
   }
@@ -1601,15 +1605,15 @@ LUA_API void lua_table_iextend (lua_State *L, int idx, int n) {
  */
 LUA_API int lua_setmetatable (lua_State *L, int objindex) {
   TValue *obj;
-  Table *mt;
+  GCObject *mt;
   lua_lock(L);
   api_checknelems(L, 1);
   obj = index2value(L, objindex);
   if (ttisnil(s2v(L->top.p - 1)))
     mt = NULL;
   else {
-    api_check(L, ttistable(s2v(L->top.p - 1)), "table expected");
-    mt = hvalue(s2v(L->top.p - 1));
+    api_check(L, ttistable(s2v(L->top.p - 1)) || ttissuperstruct(s2v(L->top.p - 1)), "table or superstruct expected");
+    mt = gcvalue(s2v(L->top.p - 1));
   }
   switch (ttype(obj)) {
     case LUA_TTABLE: {

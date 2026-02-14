@@ -1301,7 +1301,7 @@ static void correctpointers (global_State *g, GCObject *o) {
  * @param o The object to check.
  * @param mt The metatable of the object.
  */
-void luaC_checkfinalizer (lua_State *L, GCObject *o, Table *mt) {
+void luaC_checkfinalizer (lua_State *L, GCObject *o, GCObject *mt) {
   global_State *g = G(L);
   if (tofinalize(o) ||                 /* obj. is already marked... */
       gfasttm(g, mt, TM_GC) == NULL ||    /* or has no finalizer... */

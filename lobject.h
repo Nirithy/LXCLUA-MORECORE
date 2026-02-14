@@ -592,7 +592,7 @@ typedef struct Udata {
   CommonHeader;
   unsigned short nuvalue;  /**< number of user values */
   size_t len;  /**< number of bytes */
-  struct Table *metatable; /**< metatable */
+  struct GCObject *metatable; /**< metatable */
   GCObject *gclist; /**< garbage collector list */
   UValue uv[1];  /**< user values */
 } Udata;
@@ -607,7 +607,7 @@ typedef struct Udata0 {
   CommonHeader;
   unsigned short nuvalue;  /**< number of user values */
   size_t len;  /**< number of bytes */
-  struct Table *metatable; /**< metatable */
+  struct GCObject *metatable; /**< metatable */
   union {LUAI_MAXALIGN;} bindata; /**< data */
 } Udata0;
 
@@ -1010,7 +1010,7 @@ typedef struct Table {
   TValue *array;  /**< Array part. */
   Node *node;      /**< Hash part. */
   Node *lastfree;  /**< Any free position is before this position. */
-  struct Table *metatable; /**< Metatable pointer. */
+  struct GCObject *metatable; /**< Metatable pointer. */
   GCObject *gclist; /**< garbage collector list */
   lu_byte type;    /**< Custom type flag. */
   l_rwlock_t lock; /**< Lock for thread safety. */

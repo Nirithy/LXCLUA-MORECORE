@@ -100,11 +100,15 @@ const TValue *luaT_gettmbyobj (lua_State *L, const TValue *o, TMS event) {
 ** with metatable, use their '__name' metafield, if present.
 */
 const char *luaT_objtypename (lua_State *L, const TValue *o) {
-  Table *mt;
+  GCObject *mt;
   if ((ttistable(o) && (mt = hvalue(o)->metatable) != NULL) ||
       (ttisfulluserdata(o) && (mt = uvalue(o)->metatable) != NULL)) {
-    const TValue *name = luaH_getshortstr(mt, luaS_new(L, "__name"));
-    if (ttisstring(name))  /* is '__name' a string? */
+    const TValue *name = NULL;
+    if (mt->tt == LUA_VTABLE)
+      name = luaH_getshortstr(cast(Table *, mt), luaS_new(L, "__name"));
+    else if (mt->tt == LUA_VSUPERSTRUCT)
+      name = luaS_getsuperstruct_str(cast(SuperStruct *, mt), luaS_new(L, "__name"));
+    if (name && ttisstring(name))  /* is '__name' a string? */
       return getstr(tsvalue(name));  /* use it as type name */
   }
   return ttypename(ttype(o));  /* else use standard type name */
