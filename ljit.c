@@ -91,6 +91,39 @@ int luaJ_istrue(TValue *o) {
   return !l_isfalse(o);
 }
 
+/*
+** Helper function for OP_CALL in JIT (optimized)
+** Validates and prepares the stack, calls luaD_call to execute the function.
+** Returns the address of the JIT code to jump to, or NULL if fallback/finished.
+*/
+void *luaJ_step_call(lua_State *L, CallInfo *ci, int ra_idx, int b, int c, const Instruction *next_pc) {
+  StkId ra = ci->func.p + 1 + ra_idx;
+  int nresults = c - 1;
+
+  if (b != 0) {
+    L->top.p = ra + b;
+  }
+
+  ci->u.l.savedpc = next_pc;
+
+  CallInfo *newci;
+  if ((newci = luaD_precall(L, ra, nresults)) != NULL) {  /* Lua function? */
+    newci->callstatus |= CIST_FRESH;  /* mark that it is a "fresh" execute */
+
+    LClosure *cl = ci_func(newci);
+    if (!cl->p->jit_code) {
+       luaJ_compile(L, cl->p);
+    }
+
+    if (cl->p->jit_code) {
+       return cl->p->jit_code;
+    }
+
+    luaV_execute(L, newci);  /* call it (interpreter) */
+  }
+  return NULL;
+}
+
 #if defined(__x86_64__) || defined(_M_X64)
   #if defined(__linux__) || defined(__APPLE__)
     #include "ljit_emit_x64.h"

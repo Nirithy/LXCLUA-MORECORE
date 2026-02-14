@@ -701,8 +701,43 @@ static void jit_emit_op_call(JitState *J, int a, int b, int c) {
   ASM_MOV_R_IMM32(J, RA_R8, c);
   ASM_MOV_R_IMM(J, RA_R9, (unsigned long long)(uintptr_t)J->next_pc);
 
-  ASM_MOV_R_IMM(J, RA_RAX, (unsigned long long)(uintptr_t)&luaJ_call_helper);
+  // Call luaJ_step_call
+  ASM_MOV_R_IMM(J, RA_RAX, (unsigned long long)(uintptr_t)&luaJ_step_call);
   ASM_CALL_R(J, RA_RAX);
+
+  // Check result (RAX)
+  // If NULL, we are done (C function or fallback handled inside)
+  ASM_XOR_RR(J, RA_RCX, RA_RCX);
+  ASM_CMP_RR(J, RA_RAX, RA_RCX); // CMP RAX, 0
+  ASM_JE(J, 0); int p_done = J->size - 1;
+
+  // If not NULL, RAX is the address of the JIT function to call.
+  // We need to call it with (L, new_ci).
+  // L is in RBX.
+  // new_ci is L->ci (offset 32).
+
+  ASM_MOV_RR(J, RA_RDI, RA_RBX); // L
+  ASM_MOV_R_MEM(J, RA_RSI, RA_RBX, offsetof(lua_State, ci)); // ci = L->ci
+
+  // Call JIT function
+  ASM_CALL_R(J, RA_RAX);
+
+  // Check result of JIT function (EAX/RAX)
+  // Returns 1 on success, 0 on barrier.
+  ASM_CMP_R_IMM32(J, RA_RAX, 0);
+  ASM_JNE(J, 0); int p_success = J->size - 1;
+
+  // Fallback: Call luaV_execute(L, ci)
+  // ci is still L->ci.
+  ASM_MOV_RR(J, RA_RDI, RA_RBX); // L
+  ASM_MOV_R_MEM(J, RA_RSI, RA_RBX, offsetof(lua_State, ci)); // ci = L->ci
+  ASM_MOV_R_IMM(J, RA_RAX, (unsigned long long)(uintptr_t)&luaV_execute);
+  ASM_CALL_R(J, RA_RAX);
+
+  // Labels
+  int done_pos = J->size;
+  J->code[p_done] = (unsigned char)(done_pos - (p_done + 1));
+  J->code[p_success] = (unsigned char)(done_pos - (p_success + 1));
 }
 
 static void jit_emit_op_tailcall(JitState *J, int a, int b, int c, int k) { emit_barrier(J); }
