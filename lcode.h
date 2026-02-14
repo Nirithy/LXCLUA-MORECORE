@@ -87,6 +87,7 @@ LUAI_FUNC void luaK_checkstack (FuncState *fs, int n);
 LUAI_FUNC int luaK_stringK (FuncState *fs, TString *s);
 LUAI_FUNC int luaK_intK (FuncState *fs, lua_Integer n);
 LUAI_FUNC int luaK_numberK (FuncState *fs, lua_Number r);
+LUAI_FUNC int luaK_bigfloatK (FuncState *fs, GCObject *obj);
 LUAI_FUNC void luaK_int (FuncState *fs, int reg, lua_Integer n);
 LUAI_FUNC void luaK_vapar2local (FuncState *fs, expdesc *var);
 LUAI_FUNC void luaK_dischargevars (FuncState *fs, expdesc *e);

@@ -61,7 +61,7 @@ enum RESERVED {
   TK_SPACESHIP, /* <=> 三路比较运算符 */
   TK_DOLLAR,    /* $ 宏调用前缀 */
   TK_DOLLDOLL,  /* $$ 运算符调用前缀 */
-  TK_FLT, TK_INT, TK_NAME, TK_STRING, TK_INTERPSTRING, TK_RAWSTRING
+  TK_FLT, TK_INT, TK_BIGFLOAT, TK_NAME, TK_STRING, TK_INTERPSTRING, TK_RAWSTRING
 };
 
 /* number of reserved words */
@@ -103,6 +103,7 @@ typedef union {
   lua_Number r;
   lua_Integer i;
   TString *ts;
+  GCObject *gc;
 } SemInfo;  /* semantics information */
 
 

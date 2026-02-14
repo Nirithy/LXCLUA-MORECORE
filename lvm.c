@@ -164,6 +164,10 @@ int luaV_tonumber_ (const TValue *obj, lua_Number *n) {
     *n = cast_num(ivalue(obj));
     return 1;
   }
+  else if (ttisbigfloat(obj)) {
+    *n = luaB_bigflttonumber(obj);
+    return 1;
+  }
   else if (ttispointer(obj)) {
     *n = cast_num((L_P2I)ptrvalue(obj));
     return 1;
@@ -658,6 +662,30 @@ void luaV_finishget (lua_State *L, const TValue *t, TValue *key, StkId val,
             return;
           }
         }
+        if (ttisnumber(t) && ttisinteger(key)) {
+            /* Support number[precision] -> string */
+            lua_Integer prec = ivalue(key);
+            if (prec >= 0) {
+               if (ttisbigfloat(t) || ttisbigint(t)) {
+                   luaB_tostring_prec(L, t, (int)prec, s2v(val));
+                   return;
+               } else if (ttisinteger(t)) {
+                   char buff[128];
+                   if (prec < 90) {
+                       sprintf(buff, "%.*f", (int)prec, (double)ivalue(t));
+                       setsvalue2s(L, val, luaS_new(L, buff));
+                       return;
+                   }
+               } else if (ttisfloat(t)) {
+                   char buff[128];
+                   if (prec < 90) {
+                       sprintf(buff, "%.*f", (int)prec, fltvalue(t));
+                       setsvalue2s(L, val, luaS_new(L, buff));
+                       return;
+                   }
+               }
+            }
+        }
         tm = luaT_gettmbyobj(L, t, TM_INDEX);
         if (l_unlikely(notm(tm)))
           luaG_typeerror(L, t, "index");  /* no metamethod */
@@ -1064,10 +1092,10 @@ l_sinline int LEfloatint (lua_Number f, lua_Integer i) {
  * @param r The right operand.
  * @return 1 if l < r, 0 otherwise.
  */
-l_sinline int LTnum (const TValue *l, const TValue *r) {
+l_sinline int LTnum (lua_State *L, const TValue *l, const TValue *r) {
   lua_assert(ttisnumber(l) && ttisnumber(r));
-  if (ttisbigint(l) || ttisbigint(r)) {
-      return luaB_compare((TValue*)l, (TValue*)r) < 0;
+  if (ttisbigint(l) || ttisbigint(r) || ttisbigfloat(l) || ttisbigfloat(r)) {
+      return luaB_compare(L, (TValue*)l, (TValue*)r) < 0;
   }
   if (ttisinteger(l)) {
     lua_Integer li = ivalue(l);
@@ -1093,10 +1121,10 @@ l_sinline int LTnum (const TValue *l, const TValue *r) {
  * @param r The right operand.
  * @return 1 if l <= r, 0 otherwise.
  */
-l_sinline int LEnum (const TValue *l, const TValue *r) {
+l_sinline int LEnum (lua_State *L, const TValue *l, const TValue *r) {
   lua_assert(ttisnumber(l) && ttisnumber(r));
-  if (ttisbigint(l) || ttisbigint(r)) {
-      return luaB_compare((TValue*)l, (TValue*)r) <= 0;
+  if (ttisbigint(l) || ttisbigint(r) || ttisbigfloat(l) || ttisbigfloat(r)) {
+      return luaB_compare(L, (TValue*)l, (TValue*)r) <= 0;
   }
   if (ttisinteger(l)) {
     lua_Integer li = ivalue(l);
@@ -1144,7 +1172,7 @@ static int lessthanothers (lua_State *L, const TValue *l, const TValue *r) {
  */
 int luaV_lessthan (lua_State *L, const TValue *l, const TValue *r) {
   if (ttisnumber(l) && ttisnumber(r))  /* both operands are numbers? */
-    return LTnum(l, r);
+    return LTnum(L, l, r);
   else return lessthanothers(L, l, r);
 }
 
@@ -1178,7 +1206,7 @@ static int lessequalothers (lua_State *L, const TValue *l, const TValue *r) {
  */
 int luaV_lessequal (lua_State *L, const TValue *l, const TValue *r) {
   if (ttisnumber(l) && ttisnumber(r))  /* both operands are numbers? */
-    return LEnum(l, r);
+    return LEnum(L, l, r);
   else return lessequalothers(L, l, r);
 }
 
@@ -1213,7 +1241,8 @@ int luaV_equalobj (lua_State *L, const TValue *t1, const TValue *t2) {
     case LUA_VNIL: case LUA_VFALSE: case LUA_VTRUE: return 1;
     case LUA_VNUMINT: return (ivalue(t1) == ivalue(t2));
     case LUA_VNUMFLT: return luai_numeq(fltvalue(t1), fltvalue(t2));
-    case LUA_VNUMBIG: return luaB_compare((TValue*)t1, (TValue*)t2) == 0;
+    case LUA_VNUMBIG: return luaB_compare(L, (TValue*)t1, (TValue*)t2) == 0;
+    case LUA_VNUMFLTBIG: return luaB_compare(L, (TValue*)t1, (TValue*)t2) == 0;
     case LUA_VLIGHTUSERDATA: return pvalue(t1) == pvalue(t2);
     case LUA_VPOINTER: return ptrvalue(t1) == ptrvalue(t2);
     case LUA_VLCF: return fvalue(t1) == fvalue(t2);
@@ -1656,15 +1685,15 @@ static void inopr (lua_State *L, StkId ra, TValue *a, TValue *b) {
     if (tryop(i1, i2, &r)) { \
        pc++; setivalue(s2v(ra), r); \
     } else { \
-       bigop(L, v1, v2, s2v(ra)); \
+       Protect(bigop(L, v1, v2, s2v(ra))); \
        pc++; \
     } \
   }  \
-  else if (ttisbigint(v1) || ttisbigint(v2)) { \
-      bigop(L, v1, v2, s2v(ra)); \
+  else if (ttisbigint(v1) || ttisbigint(v2) || ttisbigfloat(v1) || ttisbigfloat(v2)) { \
+      Protect(bigop(L, v1, v2, s2v(ra))); \
       pc++; \
   } \
-  else op_arithf_aux(L, v1, v2, fop); }
+  else op_arithf_aux(L, v1, v2, fop, bigop); }
 
 #define op_arith_overflow(L,tryop,fop,bigop) {  \
   TValue *v1 = vRB(i);  \
@@ -1687,13 +1716,13 @@ static void inopr (lua_State *L, StkId ra, TValue *a, TValue *b) {
        pc++; setivalue(s2v(ra), r); \
     } else { \
        TValue vimm; setivalue(&vimm, imm); \
-       bigop(L, v1, &vimm, s2v(ra)); \
+       Protect(bigop(L, v1, &vimm, s2v(ra))); \
        pc++; \
     } \
   }  \
-  else if (ttisbigint(v1)) { \
+  else if (ttisbigint(v1) || ttisbigfloat(v1)) { \
       TValue vimm; setivalue(&vimm, imm); \
-      bigop(L, v1, &vimm, s2v(ra)); \
+      Protect(bigop(L, v1, &vimm, s2v(ra))); \
       pc++; \
   } \
   else if (ttisfloat(v1)) {  \
@@ -1707,61 +1736,70 @@ static void inopr (lua_State *L, StkId ra, TValue *a, TValue *b) {
  * @brief Auxiliary function for arithmetic operations over floats and others
  * with two register operands.
  */
-#define op_arithf_aux(L,v1,v2,fop) {  \
-  lua_Number n1; lua_Number n2;  \
-  if (tonumberns(v1, n1) && tonumberns(v2, n2)) {  \
-    pc++; setfltvalue(s2v(ra), fop(L, n1, n2));  \
+#define op_arithf_aux(L,v1,v2,fop,bigop) {  \
+  if (ttisbigfloat(v1) || ttisbigfloat(v2) || ttisbigint(v1) || ttisbigint(v2)) { \
+      Protect(bigop(L, v1, v2, s2v(ra))); pc++; \
+  } else { \
+      lua_Number n1; lua_Number n2;  \
+      if (tonumberns(v1, n1) && tonumberns(v2, n2)) {  \
+        lua_Number res = fop(L, n1, n2); \
+        if (fabs(res) < 1e-308 && (res!=0.0 || (n1!=0.0))) { \
+             Protect(bigop(L, v1, v2, s2v(ra))); pc++; \
+        } else { \
+             pc++; setfltvalue(s2v(ra), res); \
+        } \
+      } \
   }}
 
 
 /**
  * @brief Arithmetic operations over floats and others with register operands.
  */
-#define op_arithf(L,fop) {  \
+#define op_arithf(L,fop,bigop) {  \
   StkId ra = RA(i); \
   TValue *v1 = vRB(i);  \
   TValue *v2 = vRC(i);  \
-  op_arithf_aux(L, v1, v2, fop); }
+  op_arithf_aux(L, v1, v2, fop, bigop); }
 
 
 /**
  * @brief Arithmetic operations with K operands for floats.
  */
-#define op_arithfK(L,fop) {  \
+#define op_arithfK(L,fop,bigop) {  \
   StkId ra = RA(i); \
   TValue *v1 = vRB(i);  \
   TValue *v2 = KC(i); lua_assert(ttisnumber(v2));  \
-  op_arithf_aux(L, v1, v2, fop); }
+  op_arithf_aux(L, v1, v2, fop, bigop); }
 
 
 /**
  * @brief Arithmetic operations over integers and floats.
  */
-#define op_arith_aux(L,v1,v2,iop,fop) {  \
+#define op_arith_aux(L,v1,v2,iop,fop,bigop) {  \
   StkId ra = RA(i); \
   if (ttisinteger(v1) && ttisinteger(v2)) {  \
     lua_Integer i1 = ivalue(v1); lua_Integer i2 = ivalue(v2);  \
     pc++; setivalue(s2v(ra), iop(L, i1, i2));  \
   }  \
-  else op_arithf_aux(L, v1, v2, fop); }
+  else op_arithf_aux(L, v1, v2, fop, bigop); }
 
 
 /**
  * @brief Arithmetic operations with register operands.
  */
-#define op_arith(L,iop,fop) {  \
+#define op_arith(L,iop,fop,bigop) {  \
   TValue *v1 = vRB(i);  \
   TValue *v2 = vRC(i);  \
-  op_arith_aux(L, v1, v2, iop, fop); }
+  op_arith_aux(L, v1, v2, iop, fop, bigop); }
 
 
 /**
  * @brief Arithmetic operations with K operands.
  */
-#define op_arithK(L,iop,fop) {  \
+#define op_arithK(L,iop,fop,bigop) {  \
   TValue *v1 = vRB(i);  \
   TValue *v2 = KC(i); lua_assert(ttisnumber(v2));  \
-  op_arith_aux(L, v1, v2, iop, fop); }
+  op_arith_aux(L, v1, v2, iop, fop, bigop); }
 
 
 /**
@@ -1806,7 +1844,7 @@ static void inopr (lua_State *L, StkId ra, TValue *a, TValue *b) {
     cond = opi(ia, ib);  \
   }  \
   else if (ttisnumber(s2v(ra)) && ttisnumber(rb))  \
-    cond = opn(s2v(ra), rb);  \
+    Protect(cond = opn(L, s2v(ra), rb));  \
   else  \
     Protect(cond = other(L, s2v(ra), rb));  \
   docondjump(); }
@@ -2378,20 +2416,20 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
       }
       vmcase(OP_MODK) {
         savestate(L, ci);  /* in case of division by 0 */
-        op_arithK(L, luaV_mod, luaV_modf);
+        op_arithK(L, luaV_mod, luaV_modf, luaB_mod);
         vmbreak;
       }
       vmcase(OP_POWK) {
-        op_arithfK(L, luai_numpow);
+        op_arithfK(L, luai_numpow, luaB_pow);
         vmbreak;
       }
       vmcase(OP_DIVK) {
-        op_arithfK(L, luai_numdiv);
+        op_arithfK(L, luai_numdiv, luaB_div);
         vmbreak;
       }
       vmcase(OP_IDIVK) {
         savestate(L, ci);  /* in case of division by 0 */
-        op_arithK(L, luaV_idiv, luai_numidiv);
+        op_arithK(L, luaV_idiv, luai_numidiv, luaB_div);
         vmbreak;
       }
       vmcase(OP_BANDK) {
@@ -2464,20 +2502,20 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
       }
       vmcase(OP_MOD) {
         savestate(L, ci);  /* in case of division by 0 */
-        op_arith(L, luaV_mod, luaV_modf);
+        op_arith(L, luaV_mod, luaV_modf, luaB_mod);
         vmbreak;
       }
       vmcase(OP_POW) {
-        op_arithf(L, luai_numpow);
+        op_arithf(L, luai_numpow, luaB_pow);
         vmbreak;
       }
       vmcase(OP_DIV) {  /* float division (always with floats) */
-        op_arithf(L, luai_numdiv);
+        op_arithf(L, luai_numdiv, luaB_div);
         vmbreak;
       }
       vmcase(OP_IDIV) {  /* floor division */
         savestate(L, ci);  /* in case of division by 0 */
-        op_arith(L, luaV_idiv, luai_numidiv);
+        op_arith(L, luaV_idiv, luai_numidiv, luaB_div);
         vmbreak;
       }
       vmcase(OP_BAND) {

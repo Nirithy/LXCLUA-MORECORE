@@ -167,7 +167,7 @@ static lua_Number numarith (lua_State *L, int op, lua_Number v1,
  */
 int luaO_rawarith (lua_State *L, int op, const TValue *p1, const TValue *p2,
                    TValue *res) {
-  if (ttisbigint(p1) || ttisbigint(p2)) {
+  if (ttisbigint(p1) || ttisbigint(p2) || ttisbigfloat(p1) || ttisbigfloat(p2)) {
     switch (op) {
       case LUA_OPADD: luaB_add(L, (TValue*)p1, (TValue*)p2, res); return 1;
       case LUA_OPSUB: luaB_sub(L, (TValue*)p1, (TValue*)p2, res); return 1;
@@ -193,7 +193,16 @@ int luaO_rawarith (lua_State *L, int op, const TValue *p1, const TValue *p2,
     case LUA_OPDIV: case LUA_OPPOW: {  /* operate only on floats */
       lua_Number n1; lua_Number n2;
       if (tonumberns(p1, n1) && tonumberns(p2, n2)) {
-        setfltvalue(res, numarith(L, op, n1, n2));
+        lua_Number r = numarith(L, op, n1, n2);
+        /* Check for underflow/smallness */
+        if (fabs(r) < 1e-308 && (r != 0.0 || (n1 != 0.0))) {
+             /* Promote to BigFloat */
+             if (op == LUA_OPDIV) luaB_div(L, (TValue*)p1, (TValue*)p2, res);
+             else if (op == LUA_OPPOW) luaB_pow(L, (TValue*)p1, (TValue*)p2, res);
+             else setfltvalue(res, r);
+        } else {
+             setfltvalue(res, r);
+        }
         return 1;
       }
       else return 0;  /* fail */
@@ -205,7 +214,19 @@ int luaO_rawarith (lua_State *L, int op, const TValue *p1, const TValue *p2,
         return 1;
       }
       else if (tonumberns(p1, n1) && tonumberns(p2, n2)) {
-        setfltvalue(res, numarith(L, op, n1, n2));
+        lua_Number r = numarith(L, op, n1, n2);
+        /* Check for underflow/smallness */
+        if (fabs(r) < 1e-308 && (r != 0.0 || (n1 != 0.0 && n2 != 0.0))) {
+             /* Promote */
+             switch (op) {
+               case LUA_OPADD: luaB_add(L, (TValue*)p1, (TValue*)p2, res); break;
+               case LUA_OPSUB: luaB_sub(L, (TValue*)p1, (TValue*)p2, res); break;
+               case LUA_OPMUL: luaB_mul(L, (TValue*)p1, (TValue*)p2, res); break;
+               default: setfltvalue(res, r); break;
+             }
+        } else {
+             setfltvalue(res, r);
+        }
         return 1;
       }
       else return 0;  /* fail */
@@ -537,7 +558,7 @@ unsigned luaO_tostringbuff (const TValue *obj, char *buff) {
  * @param obj The object to convert (must be a number).
  */
 void luaO_tostring (lua_State *L, TValue *obj) {
-  if (ttisbigint(obj)) {
+  if (ttisbigint(obj) || ttisbigfloat(obj)) {
     luaB_tostring(L, obj);
     return;
   }

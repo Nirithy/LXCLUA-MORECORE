@@ -3452,6 +3452,11 @@ static void simpleexp (LexState *ls, expdesc *v) {
       luaX_next(ls);
       break;
     }
+    case TK_BIGFLOAT: {
+      init_exp(v, VK, luaK_bigfloatK(ls->fs, ls->t.seminfo.gc));
+      luaX_next(ls);
+      break;
+    }
     case TK_INT: {
       init_exp(v, VKINT, 0);
       v->u.ival = ls->t.seminfo.i;
@@ -11976,7 +11981,9 @@ LClosure *luaY_parser (lua_State *L, ZIO *z, Mbuffer *buff,
   lexstate.tokpos=0;
   dyd->actvar.n = dyd->gt.n = dyd->label.n = 0;
   luaX_setinput(L, &lexstate, z, funcstate.f->source, firstchar);
+  StkId anchor_top = L->top.p;
   mainfunc(&lexstate, &funcstate);
+  L->top.p = anchor_top; /* Restore stack to remove tokens anchored during parsing */
   lua_assert(!funcstate.prev && funcstate.nups == 1 && !lexstate.fs);
   /* all scopes should be correctly finished */
   lua_assert(dyd->actvar.n == 0 && dyd->gt.n == 0 && dyd->label.n == 0);

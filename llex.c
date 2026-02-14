@@ -30,6 +30,8 @@
 #include "lzio.h"
 #include "aes.h"
 #include "sha256.h"
+#include "lbigint.h"
+#include <math.h>
 
 
 
@@ -299,7 +301,7 @@ static const char *const luaX_tokens [] = {
     /* 复合赋值运算符 */
     "+=", "-=", "*=", "/=", "//=", "%=", "&=", "|=", "~=", ">>=", "<<=", "..=", "++",
     "?.", "??", "<=>", "$", "$$",
-    "<number>", "<integer>", "<name>", "<string>", "<interpstring>", "<rawstring>"
+    "<number>", "<integer>", "<bigfloat>", "<name>", "<string>", "<interpstring>", "<rawstring>"
 };
 
 
@@ -460,10 +462,13 @@ static const char *txtToken22 (LexState *ls, int token) {
         return luaO_pushfstring(ls->L, "'%s'", "<STRING>");
       }
     case TK_FLT: {
-        return luaO_pushfstring(ls->L, "'%d'",(long long) ls->t.seminfo.r);
+        return luaO_pushfstring(ls->L, "'%f'", ls->t.seminfo.r);
     }
     case TK_INT: {
-      return luaO_pushfstring(ls->L, "'%d'", (long long)ls->t.seminfo.i);
+      return luaO_pushfstring(ls->L, "'%I'", ls->t.seminfo.i);
+    }
+    case TK_BIGFLOAT: {
+        return luaO_pushfstring(ls->L, "<bigfloat>");
     }
     default:
       return luaX_token2str(ls, token);
@@ -473,7 +478,7 @@ static const char *txtToken22 (LexState *ls, int token) {
 static const char *txtToken (LexState *ls, int token) {
   switch (token) {
     case TK_NAME: case TK_STRING:
-    case TK_FLT: case TK_INT:
+    case TK_FLT: case TK_INT: case TK_BIGFLOAT:
       save(ls, '\0');
       return luaO_pushfstring(ls->L, "'%s'", luaZ_buffer(ls->buff));
     default:
@@ -734,6 +739,29 @@ static int read_numeral (LexState *ls, SemInfo *seminfo) {
   }
   else {
     lua_assert(ttisfloat(&obj));
+    /* Check for BigFloat promotion */
+    lua_Number n = fltvalue(&obj);
+    /* Promote if underflow (0.0 but not "0") or subnormal (< 1e-308) */
+    /* Check string for non-zero digits if n is 0 */
+    int is_zero_str = 1;
+    if (n == 0.0) {
+        const char *s = luaZ_buffer(ls->buff);
+        while (*s) { if (strchr("123456789", *s)) { is_zero_str = 0; break; } s++; }
+    }
+
+    if (fabs(n) < 1e-308 && (n != 0.0 || !is_zero_str)) {
+        /* Promote to BigFloat */
+        /* Anchor in stack? parser logic should handle it. */
+        /* We use L->top to anchor. */
+        luaD_checkstack(ls->L, 1);
+        setnilvalue(s2v(ls->L->top.p)); /* Initialize slot */
+        ls->L->top.p++; /* Increment top to root the value */
+        luaB_str2bigfloat(ls->L, luaZ_buffer(ls->buff), s2v(ls->L->top.p - 1));
+        /* Get object from stack top-1 */
+        seminfo->gc = val_(s2v(ls->L->top.p - 1)).gc;
+        return TK_BIGFLOAT;
+    }
+
     seminfo->r = fltvalue(&obj);
     return TK_FLT;
   }

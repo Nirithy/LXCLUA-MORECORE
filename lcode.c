@@ -625,6 +625,12 @@ int luaK_numberK (FuncState *fs, lua_Number r) {
   }
 }
 
+int luaK_bigfloatK (FuncState *fs, GCObject *obj) {
+  TValue o;
+  setgcovalue(fs->ls->L, &o, obj);
+  return addk(fs, &o, &o);
+}
+
 
 /*
 ** Add a false to list of constants and return its index.
