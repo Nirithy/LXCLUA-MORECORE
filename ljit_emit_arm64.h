@@ -346,6 +346,11 @@ static void emit_barrier(JitState *J) {
   jit_emit_epilogue(J);
 }
 
+static void emit_update_savedpc(JitState *J) {
+  emit_mov_r_imm(J, RA_X0, (unsigned long long)(uintptr_t)(J->next_pc - 1));
+  emit_str_r_mem(J, RA_X0, RA_X20, 32);
+}
+
 static void jit_emit_op_move(JitState *J, int a, int b) {
   // Load &R[B]
   emit_get_reg_addr(J, b, RA_X2);
@@ -420,8 +425,7 @@ static void jit_emit_op_gettabup(JitState *J, int a, int b, int c) { emit_barrie
 
 static void jit_emit_op_gettable(JitState *J, int a, int b, int c) {
   // Update savedpc
-  emit_mov_r_imm(J, RA_X0, (unsigned long long)(uintptr_t)J->next_pc);
-  emit_str_r_mem(J, RA_X0, RA_X20, 32);
+  emit_update_savedpc(J);
 
   emit_mov_r_r(J, RA_X0, RA_X19); // L
 
@@ -440,8 +444,7 @@ static void jit_emit_op_getfield(JitState *J, int a, int b, int c) { emit_barrie
 static void jit_emit_op_settabup(JitState *J, int a, int b, int c) { emit_barrier(J); }
 
 static void jit_emit_op_settable(JitState *J, int a, int b, int c) {
-  emit_mov_r_imm(J, RA_X0, (unsigned long long)(uintptr_t)J->next_pc);
-  emit_str_r_mem(J, RA_X0, RA_X20, 32);
+  emit_update_savedpc(J);
 
   emit_mov_r_r(J, RA_X0, RA_X19); // L
 
@@ -578,31 +581,32 @@ static void jit_emit_op_jmp(JitState *J, int sj) {
 static void emit_branch_on_k(JitState *J, int k, int sj) {
   emit_cmp_w_imm(J, RA_X0, k);
 
-  // B.NE Skip (Condition != k)
+  // B.NE Mismatch (Skip JMP)
   int branch_pos = J->size;
   emit_b_cond(J, 1, 0); // NE = 1
 
-  // Execute JMP path
-  const Instruction *target_jmp = J->next_pc + sj + 1;
-  emit_mov_r_imm(J, RA_X0, (unsigned long long)(uintptr_t)target_jmp);
-  emit_str_r_mem(J, RA_X0, RA_X20, 32);
-  emit_mov_r_imm(J, RA_X0, 0);
-  jit_emit_epilogue(J);
+  // Match: Execute JMP
+  int op_jmp_index = (int)(J->next_pc - J->p->code);
+  int target_pc_index = op_jmp_index + 1 + sj;
 
-  // Skip JMP path
+  if (sj < 0) { // Backward
+     unsigned char *target = J->pc_map[target_pc_index];
+     int rel = (int)(target - (J->code + J->size)) / 4;
+     emit_u32(J, 0x14000000 | (rel & 0x03FFFFFF)); // B rel
+  } else { // Forward
+     jit_add_fixup(J, J->size, target_pc_index);
+     emit_u32(J, 0x14000000); // B #0
+  }
+
+  // Mismatch label
   int skip_pos = J->size;
   int offset = (skip_pos - branch_pos) / 4;
   unsigned int *code = (unsigned int *)(J->code + branch_pos);
   *code |= ((offset & 0x7FFFF) << 5);
-
-  const Instruction *target_skip = J->next_pc + 1;
-  emit_mov_r_imm(J, RA_X0, (unsigned long long)(uintptr_t)target_skip);
-  emit_str_r_mem(J, RA_X0, RA_X20, 32);
-  emit_mov_r_imm(J, RA_X0, 0);
-  jit_emit_epilogue(J);
 }
 
 static void jit_emit_op_eq(JitState *J, int a, int b, int k, int sj) {
+  emit_update_savedpc(J);
   emit_get_reg_addr(J, b, RA_X2); // Arg3 = b
   emit_get_reg_addr(J, a, RA_X1); // Arg2 = a
   emit_mov_r_r(J, RA_X0, RA_X19);
@@ -612,6 +616,7 @@ static void jit_emit_op_eq(JitState *J, int a, int b, int k, int sj) {
 }
 
 static void jit_emit_op_lt(JitState *J, int a, int b, int k, int sj) {
+  emit_update_savedpc(J);
   emit_get_reg_addr(J, b, RA_X2); // Arg3 = b
   emit_get_reg_addr(J, a, RA_X1); // Arg2 = a
   emit_mov_r_r(J, RA_X0, RA_X19);
@@ -621,6 +626,7 @@ static void jit_emit_op_lt(JitState *J, int a, int b, int k, int sj) {
 }
 
 static void jit_emit_op_le(JitState *J, int a, int b, int k, int sj) {
+  emit_update_savedpc(J);
   emit_get_reg_addr(J, b, RA_X2); // Arg3 = b
   emit_get_reg_addr(J, a, RA_X1); // Arg2 = a
   emit_mov_r_r(J, RA_X0, RA_X19);
@@ -631,6 +637,7 @@ static void jit_emit_op_le(JitState *J, int a, int b, int k, int sj) {
 
 static void jit_emit_op_eqk(JitState *J, int a, int b, int k, int sj) {
   if (!J->p) { emit_barrier(J); return; }
+  emit_update_savedpc(J);
   TValue *rb = &J->p->k[b];
   emit_mov_r_imm(J, RA_X2, (unsigned long long)(uintptr_t)rb); // Arg3 = K[b]
   emit_get_reg_addr(J, a, RA_X1); // Arg2 = a
@@ -641,6 +648,7 @@ static void jit_emit_op_eqk(JitState *J, int a, int b, int k, int sj) {
 }
 
 static void jit_emit_op_eqi(JitState *J, int a, int sb, int k, int sj) {
+  emit_update_savedpc(J);
   emit_get_reg_addr(J, a, RA_X1); // Arg2 = a
   emit_mov_r_imm(J, RA_X2, sb);   // Arg3 = sb
   emit_mov_r_r(J, RA_X0, RA_X19);
@@ -650,6 +658,7 @@ static void jit_emit_op_eqi(JitState *J, int a, int sb, int k, int sj) {
 }
 
 static void jit_emit_op_lti(JitState *J, int a, int sb, int k, int sj) {
+  emit_update_savedpc(J);
   emit_get_reg_addr(J, a, RA_X1);
   emit_mov_r_imm(J, RA_X2, sb);
   emit_mov_r_r(J, RA_X0, RA_X19);
@@ -659,6 +668,7 @@ static void jit_emit_op_lti(JitState *J, int a, int sb, int k, int sj) {
 }
 
 static void jit_emit_op_lei(JitState *J, int a, int sb, int k, int sj) {
+  emit_update_savedpc(J);
   emit_get_reg_addr(J, a, RA_X1);
   emit_mov_r_imm(J, RA_X2, sb);
   emit_mov_r_r(J, RA_X0, RA_X19);
@@ -668,6 +678,7 @@ static void jit_emit_op_lei(JitState *J, int a, int sb, int k, int sj) {
 }
 
 static void jit_emit_op_gti(JitState *J, int a, int sb, int k, int sj) {
+  emit_update_savedpc(J);
   emit_get_reg_addr(J, a, RA_X1);
   emit_mov_r_imm(J, RA_X2, sb);
   emit_mov_r_r(J, RA_X0, RA_X19);
@@ -677,6 +688,7 @@ static void jit_emit_op_gti(JitState *J, int a, int sb, int k, int sj) {
 }
 
 static void jit_emit_op_gei(JitState *J, int a, int sb, int k, int sj) {
+  emit_update_savedpc(J);
   emit_get_reg_addr(J, a, RA_X1);
   emit_mov_r_imm(J, RA_X2, sb);
   emit_mov_r_r(J, RA_X0, RA_X19);

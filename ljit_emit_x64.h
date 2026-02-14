@@ -402,6 +402,12 @@ static void emit_barrier(JitState *J) {
   jit_emit_epilogue(J);
 }
 
+// Update savedpc to next_pc - 1 (current instruction)
+static void emit_update_savedpc(JitState *J) {
+  ASM_MOV_R_IMM(J, RA_RAX, (unsigned long long)(uintptr_t)(J->next_pc - 1));
+  ASM_MOV_MEM_R(J, RA_R12, 32, RA_RAX);
+}
+
 // Helper: Get address of register A
 // R[A] is at ci->func.p + 1 + A
 // ci->func.p is at [R12]
@@ -431,16 +437,9 @@ static void jit_emit_op_loadi(JitState *J, int a, int sbx) {
   // val.i = sbx
   ASM_MOV_R_IMM(J, RA_RCX, (long long)sbx);
   ASM_MOV_MEM_OFF_R(J, RA_RDX, 0, RA_RCX);
-  // tt_ = LUA_VNUMINT (tag)
-  // LUA_VNUMINT is (LUA_TNUMBER | (0 << 4)) which is LUA_TNUMBER (3).
-  // But wait, makevariant(LUA_TNUMBER, 0)
-  // LUA_TNUMBER is 3.
-  // We need to write the tag byte. TValue layout: value (8), tag (1), padding.
-  // Actually on 64-bit, TValue is struct { Value value_; lu_byte tt_; }
-  // Value is union.
-  // tt_ is at offset 8.
+  // Tag
   ASM_MOV_R_IMM32(J, RA_RCX, LUA_VNUMINT);
-  ASM_MOV_MEM_OFF_R(J, RA_RDX, 8, RA_RCX); // Writes 4 bytes (ok, tt_ is byte but padding follows)
+  ASM_MOV_MEM_OFF_R(J, RA_RDX, 8, RA_RCX);
 }
 
 static void jit_emit_op_loadf(JitState *J, int a, int sbx) {
@@ -482,18 +481,12 @@ static void jit_emit_op_loadkx(JitState *J, int a) {
 
 static void jit_emit_op_loadnil(JitState *J, int a, int b) {
   // R[A]...R[A+B] = nil
-  // Just do loop in C? No, unroll or loop in ASM.
-  // For simplicity, unroll for small B, or just do one.
-  // Implementation: Barrier for now? No, simple to loop.
-  // But let's just do A to A+B.
-  // b is count.
   emit_get_reg_addr(J, a, RA_RDX); // R[A] address
   ASM_MOV_R_IMM32(J, RA_RCX, LUA_VNIL); // Tag
 
   for (int i = 0; i <= b; i++) {
      // Store tag to [RDX + 8 + i*16]
      ASM_MOV_MEM_OFF_R(J, RA_RDX, 8 + i*16, RA_RCX);
-     // Value doesn't matter for nil, but good to zero it? Not strictly required.
   }
 }
 
@@ -512,16 +505,8 @@ static void jit_emit_op_loadtrue(JitState *J, int a) {
 static void jit_emit_op_lfalseskip(JitState *J, int a) { emit_barrier(J); }
 
 static void jit_emit_op_gettable(JitState *J, int a, int b, int c) {
-  // luaV_finishget(L, R[B], R[C], R[A], NULL)
-  // L: RDI (RBX)
-  // t: RSI (&R[B])
-  // key: RDX (&R[C])
-  // val: RCX (&R[A])
-  // slot: R8 (0)
-
-  // Update savedpc first because luaV_finishget can error
-  ASM_MOV_R_IMM(J, RA_RAX, (unsigned long long)(uintptr_t)J->next_pc);
-  ASM_MOV_MEM_R(J, RA_R12, 32, RA_RAX);
+  // Update savedpc first
+  emit_update_savedpc(J);
 
   ASM_MOV_RR(J, RA_RDI, RA_RBX); // L
 
@@ -536,15 +521,8 @@ static void jit_emit_op_gettable(JitState *J, int a, int b, int c) {
 }
 
 static void jit_emit_op_settable(JitState *J, int a, int b, int c) {
-  // luaV_finishset(L, R[A], R[B], R[C], NULL)
-  // L: RDI
-  // t: RSI (&R[A])
-  // key: RDX (&R[B])
-  // val: RCX (&R[C])
-  // slot: R8 (NULL)
-
-  ASM_MOV_R_IMM(J, RA_RAX, (unsigned long long)(uintptr_t)J->next_pc);
-  ASM_MOV_MEM_R(J, RA_R12, 32, RA_RAX);
+  // Update savedpc first
+  emit_update_savedpc(J);
 
   ASM_MOV_RR(J, RA_RDI, RA_RBX); // L
   emit_get_reg_addr(J, a, RA_RSI); // t
@@ -578,29 +556,34 @@ static void jit_emit_op_jmp(JitState *J, int sj) {
 static void emit_branch_on_k(JitState *J, int k, int sj) {
   ASM_CMP_R_IMM32(J, RA_RAX, k);
 
-  // JNE Skip
-  ASM_JNE(J, 0);
-  int patch_pos = J->size - 1;
+  // JNE Mismatch (Skip JMP)
+  emit_byte(J, 0x75); // JNE rel8
+  emit_byte(J, 0); // placeholder
+  int patch_jne = J->size - 1;
 
-  // Execute JMP path
-  const Instruction *target_jmp = J->next_pc + sj + 1;
-  ASM_MOV_R_IMM(J, RA_RAX, (unsigned long long)(uintptr_t)target_jmp);
-  ASM_MOV_MEM_R(J, RA_R12, 32, RA_RAX);
-  ASM_XOR_RR(J, RA_RAX, RA_RAX);
-  jit_emit_epilogue(J);
+  // Match: Execute JMP
+  // Target index = index of OP_JMP + 1 + sj
+  int op_jmp_index = (int)(J->next_pc - J->p->code);
+  int target_pc_index = op_jmp_index + 1 + sj;
 
-  // Skip JMP path
-  int skip_pos = J->size;
-  J->code[patch_pos] = (unsigned char)(skip_pos - (patch_pos + 1));
+  if (sj < 0) { // Backward
+     unsigned char *target = J->pc_map[target_pc_index];
+     emit_byte(J, 0xE9);
+     int rel = (int)(target - (J->code + J->size + 4));
+     emit_u32(J, rel);
+  } else { // Forward
+     emit_byte(J, 0xE9);
+     jit_add_fixup(J, J->size, target_pc_index);
+     emit_u32(J, 0);
+  }
 
-  const Instruction *target_skip = J->next_pc + 1;
-  ASM_MOV_R_IMM(J, RA_RAX, (unsigned long long)(uintptr_t)target_skip);
-  ASM_MOV_MEM_R(J, RA_R12, 32, RA_RAX);
-  ASM_XOR_RR(J, RA_RAX, RA_RAX);
-  jit_emit_epilogue(J);
+  // Mismatch label
+  int mismatch_pos = J->size;
+  J->code[patch_jne] = (unsigned char)(mismatch_pos - (patch_jne + 1));
 }
 
 static void jit_emit_op_eq(JitState *J, int a, int b, int k, int sj) {
+  emit_update_savedpc(J);
   emit_get_reg_addr(J, b, RA_RDX);
   emit_get_reg_addr(J, a, RA_RSI);
   ASM_MOV_RR(J, RA_RDI, RA_RBX);
@@ -610,6 +593,7 @@ static void jit_emit_op_eq(JitState *J, int a, int b, int k, int sj) {
 }
 
 static void jit_emit_op_lt(JitState *J, int a, int b, int k, int sj) {
+  emit_update_savedpc(J);
   emit_get_reg_addr(J, b, RA_RDX);
   emit_get_reg_addr(J, a, RA_RSI);
   ASM_MOV_RR(J, RA_RDI, RA_RBX);
@@ -619,6 +603,7 @@ static void jit_emit_op_lt(JitState *J, int a, int b, int k, int sj) {
 }
 
 static void jit_emit_op_le(JitState *J, int a, int b, int k, int sj) {
+  emit_update_savedpc(J);
   emit_get_reg_addr(J, b, RA_RDX);
   emit_get_reg_addr(J, a, RA_RSI);
   ASM_MOV_RR(J, RA_RDI, RA_RBX);
@@ -629,6 +614,7 @@ static void jit_emit_op_le(JitState *J, int a, int b, int k, int sj) {
 
 static void jit_emit_op_eqk(JitState *J, int a, int b, int k, int sj) {
   if (!J->p) { emit_barrier(J); return; }
+  emit_update_savedpc(J);
   TValue *rb = &J->p->k[b];
   ASM_MOV_R_IMM(J, RA_RDX, (unsigned long long)(uintptr_t)rb);
   emit_get_reg_addr(J, a, RA_RSI);
@@ -639,6 +625,7 @@ static void jit_emit_op_eqk(JitState *J, int a, int b, int k, int sj) {
 }
 
 static void jit_emit_op_eqi(JitState *J, int a, int sb, int k, int sj) {
+  emit_update_savedpc(J);
   emit_get_reg_addr(J, a, RA_RSI);
   ASM_MOV_R_IMM32(J, RA_RDX, sb);
   ASM_MOV_RR(J, RA_RDI, RA_RBX);
@@ -648,6 +635,7 @@ static void jit_emit_op_eqi(JitState *J, int a, int sb, int k, int sj) {
 }
 
 static void jit_emit_op_lti(JitState *J, int a, int sb, int k, int sj) {
+  emit_update_savedpc(J);
   emit_get_reg_addr(J, a, RA_RSI);
   ASM_MOV_R_IMM32(J, RA_RDX, sb);
   ASM_MOV_RR(J, RA_RDI, RA_RBX);
@@ -657,6 +645,7 @@ static void jit_emit_op_lti(JitState *J, int a, int sb, int k, int sj) {
 }
 
 static void jit_emit_op_lei(JitState *J, int a, int sb, int k, int sj) {
+  emit_update_savedpc(J);
   emit_get_reg_addr(J, a, RA_RSI);
   ASM_MOV_R_IMM32(J, RA_RDX, sb);
   ASM_MOV_RR(J, RA_RDI, RA_RBX);
@@ -666,6 +655,7 @@ static void jit_emit_op_lei(JitState *J, int a, int sb, int k, int sj) {
 }
 
 static void jit_emit_op_gti(JitState *J, int a, int sb, int k, int sj) {
+  emit_update_savedpc(J);
   emit_get_reg_addr(J, a, RA_RSI);
   ASM_MOV_R_IMM32(J, RA_RDX, sb);
   ASM_MOV_RR(J, RA_RDI, RA_RBX);
@@ -675,6 +665,7 @@ static void jit_emit_op_gti(JitState *J, int a, int sb, int k, int sj) {
 }
 
 static void jit_emit_op_gei(JitState *J, int a, int sb, int k, int sj) {
+  emit_update_savedpc(J);
   emit_get_reg_addr(J, a, RA_RSI);
   ASM_MOV_R_IMM32(J, RA_RDX, sb);
   ASM_MOV_RR(J, RA_RDI, RA_RBX);
@@ -684,6 +675,10 @@ static void jit_emit_op_gei(JitState *J, int a, int sb, int k, int sj) {
 }
 
 static void jit_emit_op_test(JitState *J, int a, int k, int sj) {
+  // luaJ_istrue is safe (no error), but no harm in saving pc?
+  // It's fast enough. But maybe not needed.
+  // Keep it simple and skip savepc for test if not required.
+  // Actually luaJ_istrue checks tags, never errors.
   emit_get_reg_addr(J, a, RA_RSI);
   ASM_MOV_R_IMM(J, RA_RAX, (unsigned long long)(uintptr_t)&luaJ_istrue);
   ASM_CALL_R(J, RA_RAX);
