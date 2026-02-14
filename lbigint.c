@@ -413,14 +413,15 @@ static void add_abs_raw(l_uint32 *dst, unsigned int *dlen,
                         const l_uint32 *b, unsigned int blen) {
   unsigned int len = alen > blen ? alen : blen;
   l_uint64 carry = 0;
-  for (unsigned int i = 0; i < len || carry; i++) {
+  unsigned int i;
+  for (i = 0; i < len || carry; i++) {
     l_uint64 sum = carry;
     if (i < alen) sum += a[i];
     if (i < blen) sum += b[i];
     dst[i] = (l_uint32)sum;
     carry = sum >> 32;
   }
-  *dlen = len + (carry ? 1 : 0);
+  *dlen = i;
   while (*dlen > 0 && dst[*dlen - 1] == 0) (*dlen)--;
 }
 
