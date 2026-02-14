@@ -272,6 +272,16 @@ static void ASM_ADD_R_IMM32(JitState *J, int reg, int imm) {
   emit_u32(J, imm);
 }
 
+// SUB reg, imm32
+static void ASM_SUB_R_IMM32(JitState *J, int reg, int imm) {
+  unsigned char rex = 0x48;
+  if (reg >= 8) rex |= 1;
+  emit_byte(J, rex);
+  emit_byte(J, 0x81);
+  emit_byte(J, 0xE8 + (reg & 7)); // ModRM: 11 101 reg (0xE8)
+  emit_u32(J, imm);
+}
+
 // MOV [dst_reg + offset], src_reg
 static void ASM_MOV_MEM_OFF_R(JitState *J, int dst_reg, int offset, int src_reg) {
   // Same as ASM_MOV_MEM_R but generalized name
@@ -949,6 +959,30 @@ static void emit_unary_arith_common(JitState *J, int ra, int rb, const Instructi
   ASM_CALL_R(J, RA_RAX);
 }
 
+static void emit_arith_k(JitState *J, int ra, int rb, int k_idx, const Instruction *next_pc, int op) {
+  ASM_MOV_R_IMM(J, RA_RAX, (unsigned long long)(uintptr_t)next_pc);
+  ASM_MOV_MEM_R(J, RA_R12, 32, RA_RAX);
+
+  ASM_MOV_RR(J, RA_RDI, RA_RBX); // L
+  ASM_MOV_R_IMM32(J, RA_RSI, op); // op
+
+  // p1 = &R[rb]
+  ASM_MOV_R_MEM(J, RA_RDX, RA_R12, 0);
+  ASM_ADD_R_IMM32(J, RA_RDX, 16 + rb * 16);
+
+  // p2 = &K[k_idx]
+  if (!J->p) { emit_barrier(J); return; }
+  TValue *k = &J->p->k[k_idx];
+  ASM_MOV_R_IMM(J, RA_RCX, (unsigned long long)(uintptr_t)k);
+
+  // res = &R[ra]
+  ASM_MOV_R_MEM(J, RA_R8, RA_R12, 0);
+  ASM_ADD_R_IMM32(J, RA_R8, 16 + ra * 16);
+
+  ASM_MOV_R_IMM(J, RA_RAX, (unsigned long long)(uintptr_t)&luaO_arith);
+  ASM_CALL_R(J, RA_RAX);
+}
+
 static void jit_emit_op_unm(JitState *J, int a, int b, const Instruction *next) {
   emit_unary_arith_common(J, a, b, next, LUA_OPUNM);
 }
@@ -957,7 +991,36 @@ static void jit_emit_op_bnot(JitState *J, int a, int b, const Instruction *next)
 }
 
 /* Stubs or Barriers for others */
-static void jit_emit_op_getupval(JitState *J, int a, int b) { emit_barrier(J); }
+static void jit_emit_op_getupval(JitState *J, int a, int b) {
+  emit_update_savedpc(J);
+
+  // 1. Get func (StkId) from ci->func (ci is in R12)
+  ASM_MOV_R_MEM(J, RA_RDX, RA_R12, 0);
+
+  // 2. Get LClosure (GCobj*) from func->val.gc
+  ASM_MOV_R_MEM_OFF(J, RA_RCX, RA_RDX, 0);
+
+  // 3. Get UpVal* from LClosure->upvals[b]
+  // LClosure: CommonHeader(16) + nupvalues(1) + ishotfixed(1) + padding(6) + gclist(8) + Proto*(8) + upvals
+  // Offset of upvals is 32.
+  ASM_MOV_R_MEM_OFF(J, RA_R8, RA_RCX, 32 + b * 8);
+
+  // 4. Get value pointer from UpVal->v.p
+  // UpVal: CommonHeader(16) + v(16)
+  ASM_MOV_R_MEM_OFF(J, RA_R9, RA_R8, 16);
+
+  // 5. Copy value to R[A]
+  emit_get_reg_addr(J, a, RA_R10);
+
+  // Value
+  ASM_MOV_R_MEM_OFF(J, RA_R11, RA_R9, 0);
+  ASM_MOV_MEM_OFF_R(J, RA_R10, 0, RA_R11);
+
+  // Tag
+  ASM_MOV_R_MEM_OFF(J, RA_R11, RA_R9, 8);
+  ASM_MOV_MEM_OFF_R(J, RA_R10, 8, RA_R11);
+}
+
 static void jit_emit_op_setupval(JitState *J, int a, int b) { emit_barrier(J); }
 static void jit_emit_op_gettabup(JitState *J, int a, int b, int c) { emit_barrier(J); }
 static void jit_emit_op_settabup(JitState *J, int a, int b, int c) { emit_barrier(J); }
@@ -967,19 +1030,52 @@ static void jit_emit_op_getfield(JitState *J, int a, int b, int c) { emit_barrie
 static void jit_emit_op_setfield(JitState *J, int a, int b, int c) { emit_barrier(J); }
 static void jit_emit_op_newtable(JitState *J, int a, int vb, int vc, int k) { emit_barrier(J); }
 static void jit_emit_op_self(JitState *J, int a, int b, int c) { emit_barrier(J); }
-static void jit_emit_op_addi(JitState *J, int a, int b, int sc, const Instruction *next) { emit_barrier(J); }
-static void jit_emit_op_addk(JitState *J, int a, int b, int c, const Instruction *next) { emit_barrier(J); }
-static void jit_emit_op_subk(JitState *J, int a, int b, int c, const Instruction *next) { emit_barrier(J); }
-static void jit_emit_op_mulk(JitState *J, int a, int b, int c, const Instruction *next) { emit_barrier(J); }
-static void jit_emit_op_modk(JitState *J, int a, int b, int c, const Instruction *next) { emit_barrier(J); }
-static void jit_emit_op_powk(JitState *J, int a, int b, int c, const Instruction *next) { emit_barrier(J); }
-static void jit_emit_op_divk(JitState *J, int a, int b, int c, const Instruction *next) { emit_barrier(J); }
-static void jit_emit_op_idivk(JitState *J, int a, int b, int c, const Instruction *next) { emit_barrier(J); }
-static void jit_emit_op_bandk(JitState *J, int a, int b, int c, const Instruction *next) { emit_barrier(J); }
-static void jit_emit_op_bork(JitState *J, int a, int b, int c, const Instruction *next) { emit_barrier(J); }
-static void jit_emit_op_bxork(JitState *J, int a, int b, int c, const Instruction *next) { emit_barrier(J); }
-static void jit_emit_op_shli(JitState *J, int a, int b, int sc, const Instruction *next) { emit_barrier(J); }
-static void jit_emit_op_shri(JitState *J, int a, int b, int sc, const Instruction *next) { emit_barrier(J); }
+static void emit_arith_i(JitState *J, int ra, int rb, int imm, const Instruction *next_pc, int op) {
+  ASM_MOV_R_IMM(J, RA_RAX, (unsigned long long)(uintptr_t)next_pc);
+  ASM_MOV_MEM_R(J, RA_R12, 32, RA_RAX);
+
+  ASM_MOV_RR(J, RA_RDI, RA_RBX); // L
+  ASM_MOV_R_IMM32(J, RA_RSI, op); // op
+
+  // p1 = &R[rb]
+  ASM_MOV_R_MEM(J, RA_RDX, RA_R12, 0);
+  ASM_ADD_R_IMM32(J, RA_RDX, 16 + rb * 16);
+
+  // p2 = Construct TValue on stack (SUB RSP, 16)
+  ASM_SUB_R_IMM32(J, RA_RSP, 16);
+
+  // Fill [RSP] with integer value
+  ASM_MOV_R_IMM(J, RA_RAX, (long long)imm);
+  ASM_MOV_MEM_R(J, RA_RSP, 0, RA_RAX);
+  // Fill [RSP+8] with LUA_VNUMINT
+  ASM_MOV_R_IMM32(J, RA_RAX, LUA_VNUMINT);
+  ASM_MOV_MEM_R(J, RA_RSP, 8, RA_RAX);
+
+  ASM_MOV_RR(J, RA_RCX, RA_RSP); // p2 = RSP
+
+  // res = &R[ra]
+  ASM_MOV_R_MEM(J, RA_R8, RA_R12, 0);
+  ASM_ADD_R_IMM32(J, RA_R8, 16 + ra * 16);
+
+  ASM_MOV_R_IMM(J, RA_RAX, (unsigned long long)(uintptr_t)&luaO_arith);
+  ASM_CALL_R(J, RA_RAX);
+
+  ASM_ADD_R_IMM32(J, RA_RSP, 16); // Restore stack
+}
+
+static void jit_emit_op_addi(JitState *J, int a, int b, int sc, const Instruction *next) { emit_arith_i(J, a, b, sc, next, LUA_OPADD); }
+static void jit_emit_op_addk(JitState *J, int a, int b, int c, const Instruction *next) { emit_arith_k(J, a, b, c, next, LUA_OPADD); }
+static void jit_emit_op_subk(JitState *J, int a, int b, int c, const Instruction *next) { emit_arith_k(J, a, b, c, next, LUA_OPSUB); }
+static void jit_emit_op_mulk(JitState *J, int a, int b, int c, const Instruction *next) { emit_arith_k(J, a, b, c, next, LUA_OPMUL); }
+static void jit_emit_op_modk(JitState *J, int a, int b, int c, const Instruction *next) { emit_arith_k(J, a, b, c, next, LUA_OPMOD); }
+static void jit_emit_op_powk(JitState *J, int a, int b, int c, const Instruction *next) { emit_arith_k(J, a, b, c, next, LUA_OPPOW); }
+static void jit_emit_op_divk(JitState *J, int a, int b, int c, const Instruction *next) { emit_arith_k(J, a, b, c, next, LUA_OPDIV); }
+static void jit_emit_op_idivk(JitState *J, int a, int b, int c, const Instruction *next) { emit_arith_k(J, a, b, c, next, LUA_OPIDIV); }
+static void jit_emit_op_bandk(JitState *J, int a, int b, int c, const Instruction *next) { emit_arith_k(J, a, b, c, next, LUA_OPBAND); }
+static void jit_emit_op_bork(JitState *J, int a, int b, int c, const Instruction *next) { emit_arith_k(J, a, b, c, next, LUA_OPBOR); }
+static void jit_emit_op_bxork(JitState *J, int a, int b, int c, const Instruction *next) { emit_arith_k(J, a, b, c, next, LUA_OPBXOR); }
+static void jit_emit_op_shli(JitState *J, int a, int b, int sc, const Instruction *next) { emit_arith_i(J, a, b, sc, next, LUA_OPSHL); }
+static void jit_emit_op_shri(JitState *J, int a, int b, int sc, const Instruction *next) { emit_arith_i(J, a, b, sc, next, LUA_OPSHR); }
 static void jit_emit_op_spaceship(JitState *J, int a, int b, int c) { emit_barrier(J); }
 static void jit_emit_op_not(JitState *J, int a, int b) { emit_barrier(J); }
 static void jit_emit_op_len(JitState *J, int a, int b) { emit_barrier(J); }
