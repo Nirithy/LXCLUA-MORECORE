@@ -353,9 +353,9 @@ static void jit_emit_op_loadnil(JitState *J, int a, int b) {
      emit_str_w_mem(J, RA_X3, RA_X2, 8 + i*16);
   }
 }
-static void jit_emit_op_getupval(JitState *J, int a, int b) { (void)J; }
-static void jit_emit_op_setupval(JitState *J, int a, int b) { (void)J; }
-static void jit_emit_op_gettabup(JitState *J, int a, int b, int c) { (void)J; }
+static void jit_emit_op_getupval(JitState *J, int a, int b) { emit_barrier(J); }
+static void jit_emit_op_setupval(JitState *J, int a, int b) { emit_barrier(J); }
+static void jit_emit_op_gettabup(JitState *J, int a, int b, int c) { emit_barrier(J); }
 
 static void jit_emit_op_gettable(JitState *J, int a, int b, int c) {
   // Update savedpc
@@ -374,9 +374,9 @@ static void jit_emit_op_gettable(JitState *J, int a, int b, int c) {
   emit_blr(J, RA_X8);
 }
 
-static void jit_emit_op_geti(JitState *J, int a, int b, int c) { (void)J; }
-static void jit_emit_op_getfield(JitState *J, int a, int b, int c) { (void)J; }
-static void jit_emit_op_settabup(JitState *J, int a, int b, int c) { (void)J; }
+static void jit_emit_op_geti(JitState *J, int a, int b, int c) { emit_barrier(J); }
+static void jit_emit_op_getfield(JitState *J, int a, int b, int c) { emit_barrier(J); }
+static void jit_emit_op_settabup(JitState *J, int a, int b, int c) { emit_barrier(J); }
 
 static void jit_emit_op_settable(JitState *J, int a, int b, int c) {
   emit_mov_r_imm(J, RA_X0, (unsigned long long)(uintptr_t)J->next_pc);
@@ -393,10 +393,10 @@ static void jit_emit_op_settable(JitState *J, int a, int b, int c) {
   emit_mov_r_imm(J, RA_X8, (unsigned long long)(uintptr_t)&luaV_finishset);
   emit_blr(J, RA_X8);
 }
-static void jit_emit_op_seti(JitState *J, int a, int b, int c) { (void)J; }
-static void jit_emit_op_setfield(JitState *J, int a, int b, int c) { (void)J; }
-static void jit_emit_op_newtable(JitState *J, int a, int vb, int vc, int k) { (void)J; }
-static void jit_emit_op_self(JitState *J, int a, int b, int c) { (void)J; }
+static void jit_emit_op_seti(JitState *J, int a, int b, int c) { emit_barrier(J); }
+static void jit_emit_op_setfield(JitState *J, int a, int b, int c) { emit_barrier(J); }
+static void jit_emit_op_newtable(JitState *J, int a, int vb, int vc, int k) { emit_barrier(J); }
+static void jit_emit_op_self(JitState *J, int a, int b, int c) { emit_barrier(J); }
 static void jit_emit_op_addi(JitState *J, int a, int b, int sc, const Instruction *next) { emit_barrier(J); }
 static void jit_emit_op_addk(JitState *J, int a, int b, int c, const Instruction *next) { emit_barrier(J); }
 static void jit_emit_op_subk(JitState *J, int a, int b, int c, const Instruction *next) { emit_barrier(J); }
@@ -496,11 +496,9 @@ static void jit_emit_op_unm(JitState *J, int a, int b, const Instruction *next) 
 static void jit_emit_op_bnot(JitState *J, int a, int b, const Instruction *next) {
   emit_unary_arith_common(J, a, b, next, LUA_OPBNOT);
 }
-static void jit_emit_op_not(JitState *J, int a, int b) { (void)J; }
-static void jit_emit_op_len(JitState *J, int a, int b) { (void)J; }
-static void jit_emit_op_concat(JitState *J, int a, int b) { (void)J; }
-static void jit_emit_op_close(JitState *J, int a) { (void)J; }
-static void jit_emit_op_tbc(JitState *J, int a) { (void)J; }
+static void jit_emit_op_not(JitState *J, int a, int b) { emit_barrier(J); }
+static void jit_emit_op_len(JitState *J, int a, int b) { emit_barrier(J); }
+static void jit_emit_op_concat(JitState *J, int a, int b) { emit_barrier(J); }
 static void jit_emit_op_jmp(JitState *J, int sj) {
   const Instruction *target = J->next_pc + sj;
   // Load target into X0
@@ -691,37 +689,39 @@ static void jit_emit_op_return1(JitState *J, int ra) {
   emit_mov_r_imm(J, RA_X0, 1);
   jit_emit_epilogue(J);
 }
-static void jit_emit_op_forloop(JitState *J, int a, int bx) { (void)J; }
-static void jit_emit_op_forprep(JitState *J, int a, int bx) { (void)J; }
-static void jit_emit_op_tforprep(JitState *J, int a, int bx) { (void)J; }
-static void jit_emit_op_tforcall(JitState *J, int a, int c) { (void)J; }
-static void jit_emit_op_tforloop(JitState *J, int a, int bx) { (void)J; }
-static void jit_emit_op_setlist(JitState *J, int a, int vb, int vc, int k) { (void)J; }
-static void jit_emit_op_closure(JitState *J, int a, int bx) { (void)J; }
-static void jit_emit_op_vararg(JitState *J, int a, int b, int c, int k) { (void)J; }
-static void jit_emit_op_getvarg(JitState *J, int a, int b, int c) { (void)J; }
-static void jit_emit_op_errnnil(JitState *J, int a, int bx) { (void)J; }
-static void jit_emit_op_varargprep(JitState *J, int a) { (void)J; }
-static void jit_emit_op_is(JitState *J, int a, int b, int c, int k) { (void)J; }
-static void jit_emit_op_testnil(JitState *J, int a, int b, int k) { (void)J; }
-static void jit_emit_op_newclass(JitState *J, int a, int bx) { (void)J; }
-static void jit_emit_op_inherit(JitState *J, int a, int b) { (void)J; }
-static void jit_emit_op_getsuper(JitState *J, int a, int b, int c) { (void)J; }
-static void jit_emit_op_setmethod(JitState *J, int a, int b, int c) { (void)J; }
-static void jit_emit_op_setstatic(JitState *J, int a, int b, int c) { (void)J; }
-static void jit_emit_op_newobj(JitState *J, int a, int b, int c) { (void)J; }
-static void jit_emit_op_getprop(JitState *J, int a, int b, int c) { (void)J; }
-static void jit_emit_op_setprop(JitState *J, int a, int b, int c) { (void)J; }
-static void jit_emit_op_instanceof(JitState *J, int a, int b, int c, int k) { (void)J; }
-static void jit_emit_op_implement(JitState *J, int a, int b) { (void)J; }
-static void jit_emit_op_setifaceflag(JitState *J, int a) { (void)J; }
-static void jit_emit_op_addmethod(JitState *J, int a, int b, int c) { (void)J; }
-static void jit_emit_op_in(JitState *J, int a, int b, int c) { (void)J; }
-static void jit_emit_op_slice(JitState *J, int a, int b, int c) { (void)J; }
-static void jit_emit_op_nop(JitState *J, int a, int b, int c) { (void)J; }
-static void jit_emit_op_case(JitState *J, int a, int b, int c) { (void)J; }
-static void jit_emit_op_newconcept(JitState *J, int a, int bx) { (void)J; }
-static void jit_emit_op_newnamespace(JitState *J, int a, int bx) { (void)J; }
-static void jit_emit_op_linknamespace(JitState *J, int a, int b) { (void)J; }
+static void jit_emit_op_forloop(JitState *J, int a, int bx) { emit_barrier(J); }
+static void jit_emit_op_forprep(JitState *J, int a, int bx) { emit_barrier(J); }
+static void jit_emit_op_tforprep(JitState *J, int a, int bx) { emit_barrier(J); }
+static void jit_emit_op_tforcall(JitState *J, int a, int c) { emit_barrier(J); }
+static void jit_emit_op_tforloop(JitState *J, int a, int bx) { emit_barrier(J); }
+static void jit_emit_op_setlist(JitState *J, int a, int vb, int vc, int k) { emit_barrier(J); }
+static void jit_emit_op_closure(JitState *J, int a, int bx) { emit_barrier(J); }
+static void jit_emit_op_vararg(JitState *J, int a, int b, int c, int k) { emit_barrier(J); }
+static void jit_emit_op_getvarg(JitState *J, int a, int b, int c) { emit_barrier(J); }
+static void jit_emit_op_errnnil(JitState *J, int a, int bx) { emit_barrier(J); }
+static void jit_emit_op_varargprep(JitState *J, int a) { emit_barrier(J); }
+static void jit_emit_op_is(JitState *J, int a, int b, int c, int k) { emit_barrier(J); }
+static void jit_emit_op_testnil(JitState *J, int a, int b, int k) { emit_barrier(J); }
+static void jit_emit_op_newclass(JitState *J, int a, int bx) { emit_barrier(J); }
+static void jit_emit_op_inherit(JitState *J, int a, int b) { emit_barrier(J); }
+static void jit_emit_op_getsuper(JitState *J, int a, int b, int c) { emit_barrier(J); }
+static void jit_emit_op_setmethod(JitState *J, int a, int b, int c) { emit_barrier(J); }
+static void jit_emit_op_setstatic(JitState *J, int a, int b, int c) { emit_barrier(J); }
+static void jit_emit_op_newobj(JitState *J, int a, int b, int c) { emit_barrier(J); }
+static void jit_emit_op_getprop(JitState *J, int a, int b, int c) { emit_barrier(J); }
+static void jit_emit_op_setprop(JitState *J, int a, int b, int c) { emit_barrier(J); }
+static void jit_emit_op_instanceof(JitState *J, int a, int b, int c, int k) { emit_barrier(J); }
+static void jit_emit_op_implement(JitState *J, int a, int b) { emit_barrier(J); }
+static void jit_emit_op_setifaceflag(JitState *J, int a) { emit_barrier(J); }
+static void jit_emit_op_addmethod(JitState *J, int a, int b, int c) { emit_barrier(J); }
+static void jit_emit_op_in(JitState *J, int a, int b, int c) { emit_barrier(J); }
+static void jit_emit_op_slice(JitState *J, int a, int b, int c) { emit_barrier(J); }
+static void jit_emit_op_nop(JitState *J, int a, int b, int c) { emit_barrier(J); }
+static void jit_emit_op_case(JitState *J, int a, int b, int c) { emit_barrier(J); }
+static void jit_emit_op_newconcept(JitState *J, int a, int bx) { emit_barrier(J); }
+static void jit_emit_op_newnamespace(JitState *J, int a, int bx) { emit_barrier(J); }
+static void jit_emit_op_linknamespace(JitState *J, int a, int b) { emit_barrier(J); }
+static void jit_emit_op_close(JitState *J, int a) { emit_barrier(J); }
+static void jit_emit_op_tbc(JitState *J, int a) { emit_barrier(J); }
 
 #endif

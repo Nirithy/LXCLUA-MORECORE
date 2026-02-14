@@ -798,7 +798,7 @@ static void jit_emit_op_case(JitState *J, int a, int b, int c) { emit_barrier(J)
 static void jit_emit_op_newconcept(JitState *J, int a, int bx) { emit_barrier(J); }
 static void jit_emit_op_newnamespace(JitState *J, int a, int bx) { emit_barrier(J); }
 static void jit_emit_op_linknamespace(JitState *J, int a, int b) { emit_barrier(J); }
-
-#endif
 static void jit_emit_op_close(JitState *J, int a) { emit_barrier(J); }
 static void jit_emit_op_tbc(JitState *J, int a) { emit_barrier(J); }
+
+#endif

@@ -74,17 +74,17 @@ static void jit_emit_op_concat(JitState *J, int a, int b) { (void)J; }
 static void jit_emit_op_close(JitState *J, int a) { (void)J; }
 static void jit_emit_op_tbc(JitState *J, int a) { (void)J; }
 static void jit_emit_op_jmp(JitState *J, int sj) { (void)J; }
-static void jit_emit_op_eq(JitState *J, int a, int b, int k) { (void)J; }
-static void jit_emit_op_lt(JitState *J, int a, int b, int k) { (void)J; }
-static void jit_emit_op_le(JitState *J, int a, int b, int k) { (void)J; }
-static void jit_emit_op_eqk(JitState *J, int a, int b, int k) { (void)J; }
-static void jit_emit_op_eqi(JitState *J, int a, int sb, int k) { (void)J; }
-static void jit_emit_op_lti(JitState *J, int a, int sb, int k) { (void)J; }
-static void jit_emit_op_lei(JitState *J, int a, int sb, int k) { (void)J; }
-static void jit_emit_op_gti(JitState *J, int a, int sb, int k) { (void)J; }
-static void jit_emit_op_gei(JitState *J, int a, int sb, int k) { (void)J; }
-static void jit_emit_op_test(JitState *J, int a, int k) { (void)J; }
-static void jit_emit_op_testset(JitState *J, int a, int b, int k) { (void)J; }
+static void jit_emit_op_eq(JitState *J, int a, int b, int k, int sj) { (void)J; }
+static void jit_emit_op_lt(JitState *J, int a, int b, int k, int sj) { (void)J; }
+static void jit_emit_op_le(JitState *J, int a, int b, int k, int sj) { (void)J; }
+static void jit_emit_op_eqk(JitState *J, int a, int b, int k, int sj) { (void)J; }
+static void jit_emit_op_eqi(JitState *J, int a, int sb, int k, int sj) { (void)J; }
+static void jit_emit_op_lti(JitState *J, int a, int sb, int k, int sj) { (void)J; }
+static void jit_emit_op_lei(JitState *J, int a, int sb, int k, int sj) { (void)J; }
+static void jit_emit_op_gti(JitState *J, int a, int sb, int k, int sj) { (void)J; }
+static void jit_emit_op_gei(JitState *J, int a, int sb, int k, int sj) { (void)J; }
+static void jit_emit_op_test(JitState *J, int a, int k, int sj) { (void)J; }
+static void jit_emit_op_testset(JitState *J, int a, int b, int k, int sj) { (void)J; }
 static void jit_emit_op_call(JitState *J, int a, int b, int c) { (void)J; }
 static void jit_emit_op_tailcall(JitState *J, int a, int b, int c, int k) { (void)J; }
 static void jit_emit_op_return(JitState *J, int a, int b, int c, int k) { (void)J; }
