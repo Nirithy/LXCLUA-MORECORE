@@ -58,6 +58,18 @@ void luaJ_compile(lua_State *L, Proto *p) {
     switch (op) {
       case OP_ADD:
       case OP_SUB:
+      case OP_MUL:
+      case OP_MOD:
+      case OP_POW:
+      case OP_DIV:
+      case OP_IDIV:
+      case OP_BAND:
+      case OP_BOR:
+      case OP_BXOR:
+      case OP_SHL:
+      case OP_SHR:
+      case OP_UNM:
+      case OP_BNOT:
       case OP_RETURN0:
       case OP_RETURN1:
       case OP_MMBIN:
@@ -133,8 +145,8 @@ void luaJ_compile(lua_State *L, Proto *p) {
       case OP_MMBIN: break; // Metadata
       case OP_MMBINI: break; // Metadata
       case OP_MMBINK: break; // Metadata
-      case OP_UNM: jit_emit_op_unm(J, GETARG_A(inst), GETARG_B(inst)); break;
-      case OP_BNOT: jit_emit_op_bnot(J, GETARG_A(inst), GETARG_B(inst)); break;
+      case OP_UNM: jit_emit_op_unm(J, GETARG_A(inst), GETARG_B(inst), &p->code[i+1]); break;
+      case OP_BNOT: jit_emit_op_bnot(J, GETARG_A(inst), GETARG_B(inst), &p->code[i+1]); break;
       case OP_NOT: jit_emit_op_not(J, GETARG_A(inst), GETARG_B(inst)); break;
       case OP_LEN: jit_emit_op_len(J, GETARG_A(inst), GETARG_B(inst)); break;
       case OP_CONCAT: jit_emit_op_concat(J, GETARG_A(inst), GETARG_B(inst)); break;

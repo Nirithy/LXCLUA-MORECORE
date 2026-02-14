@@ -205,8 +205,8 @@ static void jit_emit_op_bxor(JitState *J, int a, int b, int c, const Instruction
 static void jit_emit_op_shl(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
 static void jit_emit_op_shr(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
 static void jit_emit_op_spaceship(JitState *J, int a, int b, int c) { (void)J; }
-static void jit_emit_op_unm(JitState *J, int a, int b) { (void)J; }
-static void jit_emit_op_bnot(JitState *J, int a, int b) { (void)J; }
+static void jit_emit_op_unm(JitState *J, int a, int b, const Instruction *next) { (void)J; }
+static void jit_emit_op_bnot(JitState *J, int a, int b, const Instruction *next) { (void)J; }
 static void jit_emit_op_not(JitState *J, int a, int b) { (void)J; }
 static void jit_emit_op_len(JitState *J, int a, int b) { (void)J; }
 static void jit_emit_op_concat(JitState *J, int a, int b) { (void)J; }

@@ -364,6 +364,80 @@ static void jit_emit_op_sub(JitState *J, int ra, int rb, int rc, const Instructi
   emit_arith_common(J, ra, rb, rc, next_pc, LUA_OPSUB);
 }
 
+static void emit_unary_arith_common(JitState *J, int ra, int rb, const Instruction *next_pc, int op) {
+  // Update savedpc: mov [r12 + 32], next_pc
+  ASM_MOV_R_IMM(J, RA_RAX, (unsigned long long)(uintptr_t)next_pc);
+  ASM_MOV_MEM_R(J, RA_R12, 32, RA_RAX);
+
+  // Call luaO_arith(L, op, &rb, &rb, &ra)
+  ASM_MOV_RR(J, RA_RDI, RA_RBX); // L
+
+  ASM_MOV_R_IMM32(J, RA_RSI, op); // op
+
+  // RDX = &R[rb]
+  ASM_MOV_R_MEM(J, RA_RDX, RA_R12, 0); // ci->func.p
+  ASM_ADD_R_IMM32(J, RA_RDX, 16 + rb * 16); // base + rb
+
+  // RCX = &R[rb] (same as RDX)
+  ASM_MOV_RR(J, RA_RCX, RA_RDX);
+
+  // R8 = &R[ra]
+  ASM_MOV_R_MEM(J, RA_R8, RA_R12, 0); // ci->func.p
+  ASM_ADD_R_IMM32(J, RA_R8, 16 + ra * 16);
+
+  // Call luaO_arith
+  ASM_MOV_R_IMM(J, RA_RAX, (unsigned long long)(uintptr_t)&luaO_arith);
+  ASM_CALL_R(J, RA_RAX);
+}
+
+static void jit_emit_op_mul(JitState *J, int a, int b, int c, const Instruction *next) {
+  emit_arith_common(J, a, b, c, next, LUA_OPMUL);
+}
+
+static void jit_emit_op_mod(JitState *J, int a, int b, int c, const Instruction *next) {
+  emit_arith_common(J, a, b, c, next, LUA_OPMOD);
+}
+
+static void jit_emit_op_pow(JitState *J, int a, int b, int c, const Instruction *next) {
+  emit_arith_common(J, a, b, c, next, LUA_OPPOW);
+}
+
+static void jit_emit_op_div(JitState *J, int a, int b, int c, const Instruction *next) {
+  emit_arith_common(J, a, b, c, next, LUA_OPDIV);
+}
+
+static void jit_emit_op_idiv(JitState *J, int a, int b, int c, const Instruction *next) {
+  emit_arith_common(J, a, b, c, next, LUA_OPIDIV);
+}
+
+static void jit_emit_op_band(JitState *J, int a, int b, int c, const Instruction *next) {
+  emit_arith_common(J, a, b, c, next, LUA_OPBAND);
+}
+
+static void jit_emit_op_bor(JitState *J, int a, int b, int c, const Instruction *next) {
+  emit_arith_common(J, a, b, c, next, LUA_OPBOR);
+}
+
+static void jit_emit_op_bxor(JitState *J, int a, int b, int c, const Instruction *next) {
+  emit_arith_common(J, a, b, c, next, LUA_OPBXOR);
+}
+
+static void jit_emit_op_shl(JitState *J, int a, int b, int c, const Instruction *next) {
+  emit_arith_common(J, a, b, c, next, LUA_OPSHL);
+}
+
+static void jit_emit_op_shr(JitState *J, int a, int b, int c, const Instruction *next) {
+  emit_arith_common(J, a, b, c, next, LUA_OPSHR);
+}
+
+static void jit_emit_op_unm(JitState *J, int a, int b, const Instruction *next) {
+  emit_unary_arith_common(J, a, b, next, LUA_OPUNM);
+}
+
+static void jit_emit_op_bnot(JitState *J, int a, int b, const Instruction *next) {
+  emit_unary_arith_common(J, a, b, next, LUA_OPBNOT);
+}
+
 /* Stubs for other opcodes */
 static void jit_emit_op_move(JitState *J, int a, int b) { (void)J; }
 static void jit_emit_op_loadi(JitState *J, int a, int sbx) { (void)J; }
@@ -399,19 +473,7 @@ static void jit_emit_op_bork(JitState *J, int a, int b, int c, const Instruction
 static void jit_emit_op_bxork(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
 static void jit_emit_op_shli(JitState *J, int a, int b, int sc, const Instruction *next) { (void)J; }
 static void jit_emit_op_shri(JitState *J, int a, int b, int sc, const Instruction *next) { (void)J; }
-static void jit_emit_op_mul(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
-static void jit_emit_op_mod(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
-static void jit_emit_op_pow(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
-static void jit_emit_op_div(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
-static void jit_emit_op_idiv(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
-static void jit_emit_op_band(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
-static void jit_emit_op_bor(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
-static void jit_emit_op_bxor(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
-static void jit_emit_op_shl(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
-static void jit_emit_op_shr(JitState *J, int a, int b, int c, const Instruction *next) { (void)J; }
 static void jit_emit_op_spaceship(JitState *J, int a, int b, int c) { (void)J; }
-static void jit_emit_op_unm(JitState *J, int a, int b) { (void)J; }
-static void jit_emit_op_bnot(JitState *J, int a, int b) { (void)J; }
 static void jit_emit_op_not(JitState *J, int a, int b) { (void)J; }
 static void jit_emit_op_len(JitState *J, int a, int b) { (void)J; }
 static void jit_emit_op_concat(JitState *J, int a, int b) { (void)J; }
