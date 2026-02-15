@@ -169,6 +169,30 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                 cc.mov(ptr_tt(base, a), tt.r8());
                 break;
             }
+            case OP_NOT: {
+                int b = GETARG_B(i);
+                x86::Gp tag_b = cc.new_gp32();
+                cc.movzx(tag_b, ptr_tt(base, b));
+
+                x86::Gp tag_res = cc.new_gp32();
+                Label is_true = cc.new_label();
+                Label done = cc.new_label();
+
+                cc.cmp(tag_b, LUA_VNIL);
+                cc.je(is_true);
+                cc.cmp(tag_b, LUA_VFALSE);
+                cc.je(is_true);
+
+                cc.mov(tag_res, LUA_VFALSE);
+                cc.jmp(done);
+
+                cc.bind(is_true);
+                cc.mov(tag_res, LUA_VTRUE);
+
+                cc.bind(done);
+                cc.mov(ptr_tt(base, a), tag_res.r8());
+                break;
+            }
             case OP_ADD: {
                 int b = GETARG_B(i);
                 int c = GETARG_C(i);
@@ -242,6 +266,69 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                 cc.jmp(labels[pc + 2]);
                 break;
             }
+            case OP_BAND: {
+                int b = GETARG_B(i);
+                int c = GETARG_C(i);
+                x86::Gp tb = cc.new_gp32();
+                cc.movzx(tb, ptr_tt(base, b));
+                cc.cmp(tb, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.je, pc);
+                x86::Gp tc = cc.new_gp32();
+                cc.movzx(tc, ptr_tt(base, c));
+                cc.cmp(tc, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.je, pc);
+                x86::Gp vb = cc.new_gp64();
+                x86::Gp vc = cc.new_gp64();
+                cc.mov(vb, ptr_ivalue(base, b));
+                cc.mov(vc, ptr_ivalue(base, c));
+                cc.and_(vb, vc);
+                cc.mov(ptr_ivalue(base, a), vb);
+                cc.mov(ptr_tt(base, a), LUA_VNUMINT);
+                cc.jmp(labels[pc + 2]);
+                break;
+            }
+            case OP_BOR: {
+                int b = GETARG_B(i);
+                int c = GETARG_C(i);
+                x86::Gp tb = cc.new_gp32();
+                cc.movzx(tb, ptr_tt(base, b));
+                cc.cmp(tb, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.je, pc);
+                x86::Gp tc = cc.new_gp32();
+                cc.movzx(tc, ptr_tt(base, c));
+                cc.cmp(tc, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.je, pc);
+                x86::Gp vb = cc.new_gp64();
+                x86::Gp vc = cc.new_gp64();
+                cc.mov(vb, ptr_ivalue(base, b));
+                cc.mov(vc, ptr_ivalue(base, c));
+                cc.or_(vb, vc);
+                cc.mov(ptr_ivalue(base, a), vb);
+                cc.mov(ptr_tt(base, a), LUA_VNUMINT);
+                cc.jmp(labels[pc + 2]);
+                break;
+            }
+            case OP_BXOR: {
+                int b = GETARG_B(i);
+                int c = GETARG_C(i);
+                x86::Gp tb = cc.new_gp32();
+                cc.movzx(tb, ptr_tt(base, b));
+                cc.cmp(tb, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.je, pc);
+                x86::Gp tc = cc.new_gp32();
+                cc.movzx(tc, ptr_tt(base, c));
+                cc.cmp(tc, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.je, pc);
+                x86::Gp vb = cc.new_gp64();
+                x86::Gp vc = cc.new_gp64();
+                cc.mov(vb, ptr_ivalue(base, b));
+                cc.mov(vc, ptr_ivalue(base, c));
+                cc.xor_(vb, vc);
+                cc.mov(ptr_ivalue(base, a), vb);
+                cc.mov(ptr_tt(base, a), LUA_VNUMINT);
+                cc.jmp(labels[pc + 2]);
+                break;
+            }
             case OP_EQ: {
                 int b = GETARG_B(i);
                 x86::Gp va = cc.new_gp64();
@@ -276,6 +363,14 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                 Label dest_false = labels[pc + 2];
                 if (k_flag) cc.jg(dest_false);
                 else cc.jle(dest_false);
+                break;
+            }
+            case OP_TEST: {
+                unsupported = true;
+                break;
+            }
+            case OP_TESTSET: {
+                unsupported = true;
                 break;
             }
             case OP_JMP: {
@@ -720,6 +815,30 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                 cc.strb(tt, ptr_tt(base, a));
                 break;
             }
+            case OP_NOT: {
+                int b = GETARG_B(i);
+                a64::Gp tag_b = cc.new_gp32();
+                cc.ldrb(tag_b, ptr_tt(base, b));
+
+                a64::Gp tag_res = cc.new_gp32();
+                Label is_true = cc.new_label();
+                Label done = cc.new_label();
+
+                cc.cmp(tag_b, LUA_VNIL);
+                cc.b_eq(is_true);
+                cc.cmp(tag_b, LUA_VFALSE);
+                cc.b_eq(is_true);
+
+                cc.mov(tag_res, LUA_VFALSE);
+                cc.b(done);
+
+                cc.bind(is_true);
+                cc.mov(tag_res, LUA_VTRUE);
+
+                cc.bind(done);
+                cc.strb(tag_res, ptr_tt(base, a));
+                break;
+            }
             case OP_ADD: {
                 int b = GETARG_B(i);
                 int c = GETARG_C(i);
@@ -762,6 +881,75 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                 cc.strb(tt, ptr_tt(base, a));
                 break;
             }
+            case OP_BAND: {
+                int b = GETARG_B(i);
+                int c = GETARG_C(i);
+                a64::Gp tb = cc.new_gp32();
+                cc.ldrb(tb, ptr_tt(base, b));
+                cc.cmp(tb, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.b_eq, pc);
+                a64::Gp tc = cc.new_gp32();
+                cc.ldrb(tc, ptr_tt(base, c));
+                cc.cmp(tc, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.b_eq, pc);
+                a64::Gp vb = cc.new_gp64();
+                a64::Gp vc = cc.new_gp64();
+                cc.ldr(vb, ptr_ivalue(base, b));
+                cc.ldr(vc, ptr_ivalue(base, c));
+                cc.and_(vb, vb, vc);
+                cc.str(vb, ptr_ivalue(base, a));
+                a64::Gp tt = cc.new_gp32();
+                cc.mov(tt, LUA_VNUMINT);
+                cc.strb(tt, ptr_tt(base, a));
+                cc.b(labels[pc + 2]);
+                break;
+            }
+            case OP_BOR: {
+                int b = GETARG_B(i);
+                int c = GETARG_C(i);
+                a64::Gp tb = cc.new_gp32();
+                cc.ldrb(tb, ptr_tt(base, b));
+                cc.cmp(tb, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.b_eq, pc);
+                a64::Gp tc = cc.new_gp32();
+                cc.ldrb(tc, ptr_tt(base, c));
+                cc.cmp(tc, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.b_eq, pc);
+                a64::Gp vb = cc.new_gp64();
+                a64::Gp vc = cc.new_gp64();
+                cc.ldr(vb, ptr_ivalue(base, b));
+                cc.ldr(vc, ptr_ivalue(base, c));
+                cc.orr(vb, vb, vc);
+                cc.str(vb, ptr_ivalue(base, a));
+                a64::Gp tt = cc.new_gp32();
+                cc.mov(tt, LUA_VNUMINT);
+                cc.strb(tt, ptr_tt(base, a));
+                cc.b(labels[pc + 2]);
+                break;
+            }
+            case OP_BXOR: {
+                int b = GETARG_B(i);
+                int c = GETARG_C(i);
+                a64::Gp tb = cc.new_gp32();
+                cc.ldrb(tb, ptr_tt(base, b));
+                cc.cmp(tb, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.b_eq, pc);
+                a64::Gp tc = cc.new_gp32();
+                cc.ldrb(tc, ptr_tt(base, c));
+                cc.cmp(tc, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.b_eq, pc);
+                a64::Gp vb = cc.new_gp64();
+                a64::Gp vc = cc.new_gp64();
+                cc.ldr(vb, ptr_ivalue(base, b));
+                cc.ldr(vc, ptr_ivalue(base, c));
+                cc.eor(vb, vb, vc);
+                cc.str(vb, ptr_ivalue(base, a));
+                a64::Gp tt = cc.new_gp32();
+                cc.mov(tt, LUA_VNUMINT);
+                cc.strb(tt, ptr_tt(base, a));
+                cc.b(labels[pc + 2]);
+                break;
+            }
             case OP_EQ: {
                 int b = GETARG_B(i);
                 a64::Gp va = cc.new_gp64();
@@ -798,9 +986,186 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                 else cc.b_le(dest_false);
                 break;
             }
+            case OP_TEST: {
+                unsupported = true;
+                break;
+            }
+            case OP_TESTSET: {
+                unsupported = true;
+                break;
+            }
             case OP_JMP: {
                 int sJ = GETARG_sJ(i);
                 cc.b(labels[pc + 1 + sJ]);
+                break;
+            }
+            case OP_GETTABLE: {
+                int b = GETARG_B(i);
+                int c = GETARG_C(i);
+                a64::Gp tb = cc.new_gp32();
+                cc.ldrb(tb, ptr_tt(base, b));
+                cc.cmp(tb, LUA_VTABLE);
+                EMIT_BAILOUT(cc.b_eq, pc);
+                a64::Gp table_ptr = cc.new_gp64();
+                cc.ldr(table_ptr, ptr_ivalue(base, b));
+                a64::Gp key_ptr = cc.new_gp64();
+                cc.add(key_ptr, base, c * sizeof(StackValue));
+                InvokeNode* invoke;
+                a64::Gp result_ptr = cc.new_gp64();
+                cc.invoke(asmjit::Out(invoke), (uint64_t)&luaH_get, FuncSignature::build<const TValue*, Table*, const TValue*>(CallConvId::kCDecl));
+                invoke->set_arg(0, table_ptr);
+                invoke->set_arg(1, key_ptr);
+                invoke->set_ret(0, result_ptr);
+                cc.ldrb(tb, a64::ptr(result_ptr, offsetof(TValue, tt_)));
+                cc.cmp(tb, LUA_VNIL);
+                EMIT_BAILOUT(cc.b_ne, pc);
+                a64::Gp val = cc.new_gp64();
+                cc.ldr(val, a64::ptr(result_ptr, offsetof(TValue, value_)));
+                cc.str(val, ptr_ivalue(base, a));
+                a64::Gp tag = cc.new_gp32();
+                cc.ldrb(tag, a64::ptr(result_ptr, offsetof(TValue, tt_)));
+                cc.strb(tag, ptr_tt(base, a));
+                break;
+            }
+            case OP_SETTABLE: {
+                int b = GETARG_B(i);
+                int c = GETARG_C(i);
+                a64::Gp ta = cc.new_gp32();
+                cc.ldrb(ta, ptr_tt(base, a));
+                cc.cmp(ta, LUA_VTABLE);
+                EMIT_BAILOUT(cc.b_eq, pc);
+                a64::Gp table_ptr = cc.new_gp64();
+                cc.ldr(table_ptr, ptr_ivalue(base, a));
+                cc.ldr(ta.x(), a64::ptr(table_ptr, offsetof(Table, metatable)));
+                cc.cmp(ta.x(), 0);
+                EMIT_BAILOUT(cc.b_eq, pc);
+                a64::Gp key_ptr = cc.new_gp64();
+                cc.add(key_ptr, base, b * sizeof(StackValue));
+                a64::Gp val_ptr = cc.new_gp64();
+                if (k_flag) {
+                    TValue* k_val = &p->k[c];
+                    cc.mov(val_ptr, (uint64_t)k_val);
+                } else {
+                    cc.add(val_ptr, base, c * sizeof(StackValue));
+                }
+                InvokeNode* invoke;
+                cc.invoke(asmjit::Out(invoke), (uint64_t)&luaH_set, FuncSignature::build<void, lua_State*, Table*, const TValue*, TValue*>(CallConvId::kCDecl));
+                invoke->set_arg(0, L_reg);
+                invoke->set_arg(1, table_ptr);
+                invoke->set_arg(2, key_ptr);
+                invoke->set_arg(3, val_ptr);
+                break;
+            }
+            case OP_GETFIELD: {
+                int b = GETARG_B(i);
+                int c = GETARG_C(i);
+                a64::Gp tb = cc.new_gp32();
+                cc.ldrb(tb, ptr_tt(base, b));
+                cc.cmp(tb, LUA_VTABLE);
+                EMIT_BAILOUT(cc.b_eq, pc);
+                a64::Gp table_ptr = cc.new_gp64();
+                cc.ldr(table_ptr, ptr_ivalue(base, b));
+                a64::Gp key_str_ptr = cc.new_gp64();
+                a64::Gp k_val_addr = cc.new_gp64();
+                cc.mov(k_val_addr, (uint64_t)&p->k[c]);
+                cc.ldr(key_str_ptr, a64::ptr(k_val_addr, offsetof(TValue, value_)));
+                InvokeNode* invoke;
+                a64::Gp result_ptr = cc.new_gp64();
+                cc.invoke(asmjit::Out(invoke), (uint64_t)&luaH_getshortstr, FuncSignature::build<const TValue*, Table*, TString*>(CallConvId::kCDecl));
+                invoke->set_arg(0, table_ptr);
+                invoke->set_arg(1, key_str_ptr);
+                invoke->set_ret(0, result_ptr);
+                cc.ldrb(tb, a64::ptr(result_ptr, offsetof(TValue, tt_)));
+                cc.cmp(tb, LUA_VNIL);
+                EMIT_BAILOUT(cc.b_ne, pc);
+                a64::Gp val = cc.new_gp64();
+                cc.ldr(val, a64::ptr(result_ptr, offsetof(TValue, value_)));
+                cc.str(val, ptr_ivalue(base, a));
+                a64::Gp tag = cc.new_gp32();
+                cc.ldrb(tag, a64::ptr(result_ptr, offsetof(TValue, tt_)));
+                cc.strb(tag, ptr_tt(base, a));
+                break;
+            }
+            case OP_SETFIELD: {
+                int b = GETARG_B(i);
+                int c = GETARG_C(i);
+                a64::Gp ta = cc.new_gp32();
+                cc.ldrb(ta, ptr_tt(base, a));
+                cc.cmp(ta, LUA_VTABLE);
+                EMIT_BAILOUT(cc.b_eq, pc);
+                a64::Gp table_ptr = cc.new_gp64();
+                cc.ldr(table_ptr, ptr_ivalue(base, a));
+                cc.ldr(ta.x(), a64::ptr(table_ptr, offsetof(Table, metatable)));
+                cc.cmp(ta.x(), 0);
+                EMIT_BAILOUT(cc.b_eq, pc);
+                a64::Gp key_ptr = cc.new_gp64();
+                cc.mov(key_ptr, (uint64_t)&p->k[b]);
+                a64::Gp val_ptr = cc.new_gp64();
+                if (k_flag) {
+                    TValue* k_val = &p->k[c];
+                    cc.mov(val_ptr, (uint64_t)k_val);
+                } else {
+                    cc.add(val_ptr, base, c * sizeof(StackValue));
+                }
+                InvokeNode* invoke;
+                cc.invoke(asmjit::Out(invoke), (uint64_t)&luaH_set, FuncSignature::build<void, lua_State*, Table*, const TValue*, TValue*>(CallConvId::kCDecl));
+                invoke->set_arg(0, L_reg);
+                invoke->set_arg(1, table_ptr);
+                invoke->set_arg(2, key_ptr);
+                invoke->set_arg(3, val_ptr);
+                break;
+            }
+            case OP_GETI: {
+                int b = GETARG_B(i);
+                int c = GETARG_C(i);
+                a64::Gp tb = cc.new_gp32();
+                cc.ldrb(tb, ptr_tt(base, b));
+                cc.cmp(tb, LUA_VTABLE);
+                EMIT_BAILOUT(cc.b_eq, pc);
+                a64::Gp table_ptr = cc.new_gp64();
+                cc.ldr(table_ptr, ptr_ivalue(base, b));
+                InvokeNode* invoke;
+                a64::Gp result_ptr = cc.new_gp64();
+                cc.invoke(asmjit::Out(invoke), (uint64_t)&luaH_getint, FuncSignature::build<const TValue*, Table*, lua_Integer>(CallConvId::kCDecl));
+                invoke->set_arg(0, table_ptr);
+                invoke->set_arg(1, c);
+                invoke->set_ret(0, result_ptr);
+                cc.ldrb(tb, a64::ptr(result_ptr, offsetof(TValue, tt_)));
+                cc.cmp(tb, LUA_VNIL);
+                EMIT_BAILOUT(cc.b_ne, pc);
+                a64::Gp val = cc.new_gp64();
+                cc.ldr(val, a64::ptr(result_ptr, offsetof(TValue, value_)));
+                cc.str(val, ptr_ivalue(base, a));
+                a64::Gp tag = cc.new_gp32();
+                cc.ldrb(tag, a64::ptr(result_ptr, offsetof(TValue, tt_)));
+                cc.strb(tag, ptr_tt(base, a));
+                break;
+            }
+            case OP_SETI: {
+                int b = GETARG_B(i);
+                int c = GETARG_C(i);
+                a64::Gp ta = cc.new_gp32();
+                cc.ldrb(ta, ptr_tt(base, a));
+                cc.cmp(ta, LUA_VTABLE);
+                EMIT_BAILOUT(cc.b_eq, pc);
+                a64::Gp table_ptr = cc.new_gp64();
+                cc.ldr(table_ptr, ptr_ivalue(base, a));
+                cc.ldr(ta.x(), a64::ptr(table_ptr, offsetof(Table, metatable)));
+                cc.cmp(ta.x(), 0);
+                EMIT_BAILOUT(cc.b_eq, pc);
+                a64::Gp val_ptr = cc.new_gp64();
+                if (k_flag) {
+                    TValue* k_val = &p->k[c];
+                    cc.mov(val_ptr, (uint64_t)k_val);
+                } else {
+                    cc.add(val_ptr, base, c * sizeof(StackValue));
+                }
+                InvokeNode* invoke;
+                cc.invoke(asmjit::Out(invoke), (uint64_t)&luaH_setint, FuncSignature::build<void, lua_State*, Table*, lua_Integer, TValue*>(CallConvId::kCDecl));
+                invoke->set_arg(0, L_reg);
+                invoke->set_arg(1, table_ptr);
+                invoke->set_arg(2, b);
+                invoke->set_arg(3, val_ptr);
                 break;
             }
             case OP_CALL: {
