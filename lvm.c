@@ -81,6 +81,7 @@ static int try_mul(lua_Integer a, lua_Integer b, lua_Integer *r) {
 ** By default, use jump tables in the main interpreter loop on gcc
 ** and compatible compilers.
 */
+#define LUA_USE_JUMPTABLE 0
 #if !defined(LUA_USE_JUMPTABLE)
 #if defined(__GNUC__)
 #define LUA_USE_JUMPTABLE	1
@@ -1945,17 +1946,44 @@ static void inopr (lua_State *L, StkId ra, TValue *a, TValue *b) {
 
 
 /* fetch an instruction and prepare its execution */
-#define vmfetch()	{ \
-  if (l_unlikely(trap)) {  /* stack reallocation or hooks? */ \
-    trap = luaG_traceexec(L, pc);  /* handle hooks */ \
-    updatebase(ci);  /* correct stack */ \
-  } \
-  i = *(pc++); \
-}
+/*
+** Fetches the next instruction and dispatches to the corresponding handler.
+** Optimized for speed: no trap check in the fast path.
+*/
+#define DISPATCH_NEXT \
+  do { \
+    i = *pc++; \
+    goto *dispatch_table[GET_OPCODE(i)]; \
+  } while (0)
 
-#define vmdispatch(o)	switch(o)
-#define vmcase(l)	case l:
-#define vmbreak		break
+/*
+** Checks for traps (hooks, signals) and then dispatches.
+** Used at control flow points (backward jumps, calls, returns).
+*/
+#define DISPATCH_CHECK_TRAP \
+  do { \
+    if (l_unlikely(trap)) { \
+      trap = luaG_traceexec(L, pc); \
+      updatebase(ci); \
+    } \
+    DISPATCH_NEXT; \
+  } while (0)
+
+/*
+** Original vmfetch for the initial entry point (checks traps).
+*/
+#define vmfetch() \
+  do { \
+    if (l_unlikely(trap)) { \
+      trap = luaG_traceexec(L, pc); \
+      updatebase(ci); \
+    } \
+    i = *(pc++); \
+  } while(0)
+
+#define vmdispatch(o)	goto *dispatch_table[o];
+#define vmcase(l)	L_##l:
+#define vmbreak		DISPATCH_NEXT
 
 
 /**
@@ -1973,9 +2001,117 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
   StkId base;
   const Instruction *pc;
   int trap;
-#if LUA_USE_JUMPTABLE
-#include "ljumptab.h"
-#endif
+static const void *const dispatch_table[NUM_OPCODES] = {
+  &&L_OP_MOVE,
+  &&L_OP_LOADI,
+  &&L_OP_LOADF,
+  &&L_OP_LOADK,
+  &&L_OP_LOADKX,
+  &&L_OP_LOADFALSE,
+  &&L_OP_LFALSESKIP,
+  &&L_OP_LOADTRUE,
+  &&L_OP_LOADNIL,
+  &&L_OP_GETUPVAL,
+  &&L_OP_SETUPVAL,
+  &&L_OP_GETTABUP,
+  &&L_OP_GETTABLE,
+  &&L_OP_GETI,
+  &&L_OP_GETFIELD,
+  &&L_OP_SETTABUP,
+  &&L_OP_SETTABLE,
+  &&L_OP_SETI,
+  &&L_OP_SETFIELD,
+  &&L_OP_NEWTABLE,
+  &&L_OP_SELF,
+  &&L_OP_ADDI,
+  &&L_OP_ADDK,
+  &&L_OP_SUBK,
+  &&L_OP_MULK,
+  &&L_OP_MODK,
+  &&L_OP_POWK,
+  &&L_OP_DIVK,
+  &&L_OP_IDIVK,
+  &&L_OP_BANDK,
+  &&L_OP_BORK,
+  &&L_OP_BXORK,
+  &&L_OP_SHRI,
+  &&L_OP_SHLI,
+  &&L_OP_ADD,
+  &&L_OP_SUB,
+  &&L_OP_MUL,
+  &&L_OP_MOD,
+  &&L_OP_POW,
+  &&L_OP_DIV,
+  &&L_OP_IDIV,
+  &&L_OP_BAND,
+  &&L_OP_BOR,
+  &&L_OP_BXOR,
+  &&L_OP_SHL,
+  &&L_OP_SHR,
+  &&L_OP_SPACESHIP,
+  &&L_OP_MMBIN,
+  &&L_OP_MMBINI,
+  &&L_OP_MMBINK,
+  &&L_OP_UNM,
+  &&L_OP_BNOT,
+  &&L_OP_NOT,
+  &&L_OP_LEN,
+  &&L_OP_CONCAT,
+  &&L_OP_CLOSE,
+  &&L_OP_TBC,
+  &&L_OP_JMP,
+  &&L_OP_EQ,
+  &&L_OP_LT,
+  &&L_OP_LE,
+  &&L_OP_EQK,
+  &&L_OP_EQI,
+  &&L_OP_LTI,
+  &&L_OP_LEI,
+  &&L_OP_GTI,
+  &&L_OP_GEI,
+  &&L_OP_TEST,
+  &&L_OP_TESTSET,
+  &&L_OP_CALL,
+  &&L_OP_TAILCALL,
+  &&L_OP_RETURN,
+  &&L_OP_RETURN0,
+  &&L_OP_RETURN1,
+  &&L_OP_FORLOOP,
+  &&L_OP_FORPREP,
+  &&L_OP_TFORPREP,
+  &&L_OP_TFORCALL,
+  &&L_OP_TFORLOOP,
+  &&L_OP_SETLIST,
+  &&L_OP_CLOSURE,
+  &&L_OP_VARARG,
+  &&L_OP_GETVARG,
+  &&L_OP_ERRNNIL,
+  &&L_OP_VARARGPREP,
+  &&L_OP_IS,
+  &&L_OP_TESTNIL,
+  &&L_OP_NEWCLASS,
+  &&L_OP_INHERIT,
+  &&L_OP_GETSUPER,
+  &&L_OP_SETMETHOD,
+  &&L_OP_SETSTATIC,
+  &&L_OP_NEWOBJ,
+  &&L_OP_GETPROP,
+  &&L_OP_SETPROP,
+  &&L_OP_INSTANCEOF,
+  &&L_OP_IMPLEMENT,
+  &&L_OP_SETIFACEFLAG,
+  &&L_OP_ADDMETHOD,
+  &&L_OP_IN,
+  &&L_OP_SLICE,
+  &&L_OP_NOP,
+  &&L_OP_CASE,
+  &&L_OP_NEWCONCEPT,
+  &&L_OP_NEWNAMESPACE,
+  &&L_OP_LINKNAMESPACE,
+  &&L_OP_NEWSUPER,
+  &&L_OP_SETSUPER,
+  &&L_OP_EXTRAARG
+};
  startfunc:
   trap = L->hookmask;
  returning:  /* trap already set */
@@ -2697,7 +2833,7 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
       }
       vmcase(OP_JMP) {
         dojump(ci, i, 0);
-        vmbreak;
+        DISPATCH_CHECK_TRAP;
       }
       vmcase(OP_EQ) {
         StkId ra = RA(i);
@@ -2802,7 +2938,7 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
                 setnilvalue(s2v(ra + j - 1));
               }
             }
-            vmbreak;
+            DISPATCH_CHECK_TRAP;
           }
         }
         
@@ -2812,7 +2948,7 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
           ci = newci;
           goto startfunc;
         }
-        vmbreak;
+        DISPATCH_CHECK_TRAP;
       }
       vmcase(OP_TAILCALL) {
         StkId ra = RA(i);
@@ -2925,7 +3061,7 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
         else if (floatforloop(ra))  /* float loop */
           pc -= GETARG_Bx(i);  /* jump back */
         updatetrap(ci);  /* allows a signal to break the loop */
-        vmbreak;
+        DISPATCH_CHECK_TRAP;
       }
       vmcase(OP_FORPREP) {
         StkId ra = RA(i);
@@ -2974,7 +3110,7 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
           setobjs2s(L, ra + 2, ra + 4);  /* save control variable */
           pc -= GETARG_Bx(i);  /* jump back */
         }
-        vmbreak;
+        DISPATCH_CHECK_TRAP;
       }}
       vmcase(OP_SETLIST) {
         StkId ra = RA(i);
