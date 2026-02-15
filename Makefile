@@ -6,6 +6,11 @@
 # Your platform. See PLATS for possible values.
 PLAT= guess
 
+CMAKE_GEN=
+ifeq ($(PLAT), mingw)
+	CMAKE_GEN= -G "Unix Makefiles"
+endif
+
 CC= gcc -std=c11 -pipe
 CFLAGS= -O3 -funroll-loops -fomit-frame-pointer -ffunction-sections -fdata-sections -fstrict-aliasing -g0 -DNDEBUG -fno-exceptions -fno-unwind-tables -fno-asynchronous-unwind-tables -Wimplicit-function-declaration -D_GNU_SOURCE
 
@@ -147,25 +152,25 @@ Darwin macos macosx:
 	$(MAKE) $(ALL) SYSCFLAGS="-DLUA_USE_MACOSX -DLUA_USE_READLINE" SYSLIBS="-lreadline"
 
 mingw:
-	TMPDIR=. TMP=. TEMP=. $(MAKE) "LUA_A=lua55.dll" "LUA_T=lxclua.exe" \
+	TMPDIR=. TMP=. TEMP=. $(MAKE) "PLAT=mingw" "LUA_A=lua55.dll" "LUA_T=lxclua.exe" \
 	"AR=$(CC) -shared -o" "RANLIB=strip --strip-unneeded" \
 	"SYSCFLAGS=-DLUA_BUILD_AS_DLL -DLUA_COMPAT_MATHLIB -DLUA_COMPAT_MAXN -DLUA_COMPAT_MODULE" "SYSLIBS=$(MYLIBS)" "SYSLDFLAGS=-s -lwininet -lws2_32" \
 	"MYOBJS=$(MYOBJS)" lxclua.exe
-	TMPDIR=. TMP=. TEMP=. $(MAKE) "LUA_A=liblua.a" "LUAC_T=luac.exe" \
+	TMPDIR=. TMP=. TEMP=. $(MAKE) "PLAT=mingw" "LUA_A=liblua.a" "LUAC_T=luac.exe" \
 	"SYSCFLAGS=-DLUA_BUILD_AS_DLL -DLUA_COMPAT_MATHLIB -DLUA_COMPAT_MAXN -DLUA_COMPAT_MODULE" "SYSLIBS=$(MYLIBS)" "SYSLDFLAGS=-s -lwininet -lws2_32" \
 	luac.exe
-	TMPDIR=. TMP=. TEMP=. $(MAKE) "LBCDUMP_T=lbcdump.exe" "SYSLDFLAGS=-s -lwininet -lws2_32" lbcdump.exe
+	TMPDIR=. TMP=. TEMP=. $(MAKE) "PLAT=mingw" "LBCDUMP_T=lbcdump.exe" "SYSLDFLAGS=-s -lwininet -lws2_32" lbcdump.exe
 
 mingw-static:
-	TMPDIR=. TMP=. TEMP=. $(MAKE) "LUA_A=liblua.a" "LUA_T=lxclua.exe" \
+	TMPDIR=. TMP=. TEMP=. $(MAKE) "PLAT=mingw" "LUA_A=liblua.a" "LUA_T=lxclua.exe" \
 	"AR=$(AR)" "RANLIB=$(RANLIB)" \
 	"SYSCFLAGS=-DLUA_COMPAT_MATHLIB -DLUA_COMPAT_MAXN -DLUA_COMPAT_MODULE" "SYSLIBS=$(MYLIBS)" "SYSLDFLAGS=-s -lwininet -lws2_32" \
 	"MYOBJS=$(MYOBJS)" lxclua.exe
-	TMPDIR=. TMP=. TEMP=. $(MAKE) "LUA_A=liblua.a" "LUAC_T=luac.exe" \
+	TMPDIR=. TMP=. TEMP=. $(MAKE) "PLAT=mingw" "LUA_A=liblua.a" "LUAC_T=luac.exe" \
 	"AR=$(AR)" "RANLIB=$(RANLIB)" \
 	"SYSCFLAGS=-DLUA_COMPAT_MATHLIB -DLUA_COMPAT_MAXN -DLUA_COMPAT_MODULE" "SYSLIBS=$(MYLIBS)" "SYSLDFLAGS=-s -lwininet -lws2_32" \
 	luac.exe
-	TMPDIR=. TMP=. TEMP=. $(MAKE) "LBCDUMP_T=lbcdump.exe" "SYSLDFLAGS=-s -lwininet -lws2_32" lbcdump.exe
+	TMPDIR=. TMP=. TEMP=. $(MAKE) "PLAT=mingw" "LBCDUMP_T=lbcdump.exe" "SYSLDFLAGS=-s -lwininet -lws2_32" lbcdump.exe
 
 
 posix:
@@ -396,10 +401,11 @@ setup_asmjit:
 		rm -rf asmjit; \
 		git clone https://github.com/asmjit/asmjit.git; \
 	fi
-	@if [ ! -d "asmjit/build" ]; then \
+	@if [ ! -f "asmjit/build/libasmjit.a" ]; then \
 		echo "Building asmjit..."; \
+		rm -rf asmjit/build; \
 		mkdir -p asmjit/build; \
-		cd asmjit/build && cmake .. -DASMJIT_STATIC=ON -DASMJIT_TEST=OFF && make -j4; \
+		cd asmjit/build && cmake $(CMAKE_GEN) .. -DASMJIT_STATIC=ON -DASMJIT_TEST=OFF && make -j4; \
 	fi
 
 jit_backend.o: setup_asmjit
