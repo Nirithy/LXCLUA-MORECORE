@@ -17,6 +17,8 @@
 // Undefine to avoid pollution
 #undef _Atomic
 
+#ifndef __EMSCRIPTEN__
+
 #include "asmjit/core.h"
 
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
@@ -409,3 +411,18 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
 extern "C" void jit_free(Proto *p) {
     p->jit_code = NULL;
 }
+
+#else
+
+extern "C" void jit_init(void) {
+}
+
+extern "C" int jit_compile(lua_State *L, Proto *p) {
+    return 0;
+}
+
+extern "C" void jit_free(Proto *p) {
+    p->jit_code = NULL;
+}
+
+#endif

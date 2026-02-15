@@ -5,6 +5,7 @@
 
 # Your platform. See PLATS for possible values.
 PLAT= guess
+CXX?= g++
 
 CMAKE_GEN=
 ifeq ($(PLAT), mingw)
@@ -190,7 +191,8 @@ EMAR= $(EMSDK_PATH)/emar.bat
 EMRANLIB= $(EMSDK_PATH)/emranlib.bat
 
 wasm:
-	$(MAKE) $(ALL) CC="$(EMCC) -std=c23" \
+	$(MAKE) $(ALL) PLAT=wasm CC="$(EMCC) -std=c23" \
+	"CXX=$(EMCC)" \
 	"CFLAGS=-O3 -DNDEBUG -fno-exceptions -DLUA_32BITS=0" \
 	"SYSCFLAGS=-DLUA_USE_LONGJMP -DLUA_COMPAT_MATHLIB -DLUA_COMPAT_MAXN" \
 	"SYSLIBS=" \
@@ -199,6 +201,7 @@ wasm:
 	"LUA_T=lxclua.js" \
 	"LUAC_T=luac.js" \
 	"LBCDUMP_T=lbcdump.js" \
+	"LIBS=-lm" \
 	"LDFLAGS=-sWASM=1 -sSINGLE_FILE=1 -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,callMain,FS -sMODULARIZE=1 -sEXPORT_NAME=LuaModule -sALLOW_MEMORY_GROWTH=1 -sFILESYSTEM=1 -sINVOKE_RUN=0 --closure 1"
 
 # WASM 最小化版本（无文件系统，更小体积）
@@ -396,17 +399,21 @@ lzio.o: lzio.c lprefix.h lua.h luaconf.h lapi.h llimits.h lstate.h \
 # (end of Makefile)
 
 setup_asmjit:
-	@if [ ! -f "asmjit/CMakeLists.txt" ]; then \
-		echo "Cloning asmjit..."; \
-		rm -rf asmjit; \
-		git clone https://github.com/asmjit/asmjit.git; \
-	fi
-	@if [ ! -f "asmjit/build/libasmjit.a" ]; then \
-		echo "Building asmjit..."; \
-		rm -rf asmjit/build; \
-		mkdir -p asmjit/build; \
-		cd asmjit/build && cmake $(CMAKE_GEN) .. -DASMJIT_STATIC=ON -DASMJIT_TEST=OFF && make -j4; \
+	@if [ "$(PLAT)" = "wasm" ]; then \
+		echo "Skipping asmjit setup for WASM"; \
+	else \
+		if [ ! -f "asmjit/CMakeLists.txt" ]; then \
+			echo "Cloning asmjit..."; \
+			rm -rf asmjit; \
+			git clone https://github.com/asmjit/asmjit.git; \
+		fi; \
+		if [ ! -f "asmjit/build/libasmjit.a" ]; then \
+			echo "Building asmjit..."; \
+			rm -rf asmjit/build; \
+			mkdir -p asmjit/build; \
+			cd asmjit/build && cmake $(CMAKE_GEN) .. -DASMJIT_STATIC=ON -DASMJIT_TEST=OFF && make -j4; \
+		fi; \
 	fi
 
 jit_backend.o: setup_asmjit
-	g++ -std=c++17 -O3 -fomit-frame-pointer -g0 -DNDEBUG -D_GNU_SOURCE -DASMJIT_STATIC -I./asmjit -c jit_backend.cpp
+	$(CXX) -std=c++17 -O3 -fomit-frame-pointer -g0 -DNDEBUG -D_GNU_SOURCE -DASMJIT_STATIC -I./asmjit -c jit_backend.cpp
