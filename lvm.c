@@ -1883,6 +1883,9 @@ static void inopr (lua_State *L, StkId ra, TValue *a, TValue *b) {
 	{ if (l_unlikely(trap)) { updatebase(ci); ra = RA(i); } }
 
 
+#define next_ci(L)  (L->ci->next ? L->ci->next : luaE_extendCI(L))
+
+
 /*
 ** Execute a jump instruction. The 'updatetrap' allows signals to stop
 ** tight loops. (Without it, the local copy of 'trap' could never change.)
@@ -2757,6 +2760,22 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
             }
             vmbreak;
           }
+
+          int narg = cast_int(L->top.p - ra) - 1;
+          int nfixparams = p->numparams;
+          int fsize = p->maxstacksize;
+          checkstackGCp(L, fsize, ra);
+          CallInfo *nci = L->ci = next_ci(L);
+          nci->func.p = ra;
+          nci->nresults = nresults;
+          nci->callstatus = 0;
+          nci->top.p = ra + 1 + fsize;
+          nci->u.l.savedpc = p->code;
+          for (; narg < nfixparams; narg++)
+            setnilvalue(s2v(L->top.p++));
+          lua_assert(nci->top.p <= L->stack_last.p);
+          ci = nci;
+          goto startfunc;
         }
         
         if ((newci = luaD_precall(L, ra, nresults)) == LUA_NULLPTR)

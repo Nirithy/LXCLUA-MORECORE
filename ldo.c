@@ -839,26 +839,6 @@ CallInfo *luaD_precall (lua_State *L, StkId func, int nresults) {
     case LUA_VCONCEPT: {  /* Lua concept */
       CallInfo *ci;
       Proto *p = gco2concept(val_(s2v(func)).gc)->p;
-
-      /* Enhanced Upvalue check */
-      if (p->sizeupvalues > 0) {
-        for (int i = 0; i < p->sizeupvalues; i++) {
-          const Upvaldesc *uv = &p->upvalues[i];
-          // Check instack value
-          if (uv->instack != 0 && uv->instack != 1) {
-            luaG_runerror(L, "invalid upvalue instack value");
-          }
-          // Check idx value range (lu_byte max 255)
-          if (uv->idx > 255) {
-            luaG_runerror(L, "invalid upvalue idx value");
-          }
-          // Check kind value
-          if (uv->kind < 0 || uv->kind > 2) {
-            luaG_runerror(L, "invalid upvalue kind value");
-          }
-        }
-      }
-
       int narg = cast_int(L->top.p - func) - 1;  /* number of real arguments */
       int nfixparams = p->numparams;
       int fsize = p->maxstacksize;  /* frame size */
@@ -873,26 +853,6 @@ CallInfo *luaD_precall (lua_State *L, StkId func, int nresults) {
     case LUA_VLCL: {  /* Lua function */
       CallInfo *ci;
       Proto *p = clLvalue(s2v(func))->p;
-      
-      /* Enhanced Upvalue check */
-      if (p->sizeupvalues > 0) {
-        for (int i = 0; i < p->sizeupvalues; i++) {
-          const Upvaldesc *uv = &p->upvalues[i];
-          // Check instack value
-          if (uv->instack != 0 && uv->instack != 1) {
-            luaG_runerror(L, "invalid upvalue instack value");
-          }
-          // Check idx value range (lu_byte max 255)
-          if (uv->idx > 255) {
-            luaG_runerror(L, "invalid upvalue idx value");
-          }
-          // Check kind value
-          if (uv->kind < 0 || uv->kind > 2) {
-            luaG_runerror(L, "invalid upvalue kind value");
-          }
-        }
-      }
-      
       int narg = cast_int(L->top.p - func) - 1;  /* number of real arguments */
       int nfixparams = p->numparams;
       int fsize = p->maxstacksize;  /* frame size */
