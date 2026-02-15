@@ -1,0 +1,6 @@
+--- JIT Test Start ---
+Running Arithmetic Test...
+[JIT] Compiling function with 10 instructions
+[JIT] Compiling function with 31 instructions
+Arithmetic Test Done. Time: 4.966365262
+--- JIT Test End ---

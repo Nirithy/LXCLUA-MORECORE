@@ -588,9 +588,70 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                 cc.bind(exit_loop);
                 break;
             }
-            case OP_RETURN:
-            case OP_RETURN0:
+            case OP_RETURN: {
+                int b = GETARG_B(i);
+                int n = b - 1;
+
+                x86::Gp ra = cc.new_gp64();
+                cc.lea(ra, x86::ptr(base, a * sizeof(StackValue)));
+
+                if (n >= 0) {
+                    x86::Gp new_top = cc.new_gp64();
+                    cc.lea(new_top, x86::ptr(ra, n * sizeof(StackValue)));
+                    cc.mov(x86::ptr(L_reg, offsetof(lua_State, top)), new_top);
+
+                    InvokeNode* invoke;
+                    cc.invoke(asmjit::Out(invoke), (uint64_t)&luaD_poscall, FuncSignature::build<void, lua_State*, CallInfo*, int>(CallConvId::kCDecl));
+                    invoke->set_arg(0, L_reg);
+                    invoke->set_arg(1, ci);
+                    invoke->set_arg(2, n);
+                } else {
+                    x86::Gp top_ptr = cc.new_gp64();
+                    cc.mov(top_ptr, x86::ptr(L_reg, offsetof(lua_State, top)));
+                    x86::Gp n_reg = cc.new_gp64();
+                    cc.mov(n_reg, top_ptr);
+                    cc.sub(n_reg, ra);
+                    cc.sar(n_reg, 4);
+
+                    InvokeNode* invoke;
+                    cc.invoke(asmjit::Out(invoke), (uint64_t)&luaD_poscall, FuncSignature::build<void, lua_State*, CallInfo*, int>(CallConvId::kCDecl));
+                    invoke->set_arg(0, L_reg);
+                    invoke->set_arg(1, ci);
+                    invoke->set_arg(2, n_reg);
+                }
+
+                cc.mov(x86::eax, 1);
+                cc.ret();
+                break;
+            }
+            case OP_RETURN0: {
+                x86::Gp ra = cc.new_gp64();
+                cc.lea(ra, x86::ptr(base, a * sizeof(StackValue)));
+                cc.mov(x86::ptr(L_reg, offsetof(lua_State, top)), ra);
+
+                InvokeNode* invoke;
+                cc.invoke(asmjit::Out(invoke), (uint64_t)&luaD_poscall, FuncSignature::build<void, lua_State*, CallInfo*, int>(CallConvId::kCDecl));
+                invoke->set_arg(0, L_reg);
+                invoke->set_arg(1, ci);
+                invoke->set_arg(2, 0);
+
+                cc.mov(x86::eax, 1);
+                cc.ret();
+                break;
+            }
             case OP_RETURN1: {
+                x86::Gp ra = cc.new_gp64();
+                cc.lea(ra, x86::ptr(base, a * sizeof(StackValue)));
+                x86::Gp new_top = cc.new_gp64();
+                cc.lea(new_top, x86::ptr(ra, sizeof(StackValue)));
+                cc.mov(x86::ptr(L_reg, offsetof(lua_State, top)), new_top);
+
+                InvokeNode* invoke;
+                cc.invoke(asmjit::Out(invoke), (uint64_t)&luaD_poscall, FuncSignature::build<void, lua_State*, CallInfo*, int>(CallConvId::kCDecl));
+                invoke->set_arg(0, L_reg);
+                invoke->set_arg(1, ci);
+                invoke->set_arg(2, 1);
+
                 cc.mov(x86::eax, 1);
                 cc.ret();
                 break;
@@ -810,9 +871,71 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                 cc.bind(exit_loop);
                 break;
             }
-            case OP_RETURN:
-            case OP_RETURN0:
+            case OP_RETURN: {
+                int b = GETARG_B(i);
+                int n = b - 1;
+
+                a64::Gp ra = cc.new_gp64();
+                cc.add(ra, base, a * sizeof(StackValue));
+
+                if (n >= 0) {
+                    a64::Gp new_top = cc.new_gp64();
+                    cc.add(new_top, ra, n * sizeof(StackValue));
+                    cc.str(new_top, a64::ptr(L_reg, offsetof(lua_State, top)));
+
+                    InvokeNode* invoke;
+                    cc.invoke(asmjit::Out(invoke), (uint64_t)&luaD_poscall, FuncSignature::build<void, lua_State*, CallInfo*, int>(CallConvId::kCDecl));
+                    invoke->set_arg(0, L_reg);
+                    invoke->set_arg(1, ci);
+                    invoke->set_arg(2, n);
+                } else {
+                    a64::Gp top_ptr = cc.new_gp64();
+                    cc.ldr(top_ptr, a64::ptr(L_reg, offsetof(lua_State, top)));
+                    a64::Gp n_reg = cc.new_gp64();
+                    cc.sub(n_reg, top_ptr, ra);
+                    cc.lsr(n_reg, n_reg, 4);
+
+                    InvokeNode* invoke;
+                    cc.invoke(asmjit::Out(invoke), (uint64_t)&luaD_poscall, FuncSignature::build<void, lua_State*, CallInfo*, int>(CallConvId::kCDecl));
+                    invoke->set_arg(0, L_reg);
+                    invoke->set_arg(1, ci);
+                    invoke->set_arg(2, n_reg);
+                }
+
+                a64::Gp ret_reg = cc.new_gp32();
+                cc.mov(ret_reg, 1);
+                cc.ret(ret_reg);
+                break;
+            }
+            case OP_RETURN0: {
+                a64::Gp ra = cc.new_gp64();
+                cc.add(ra, base, a * sizeof(StackValue));
+                cc.str(ra, a64::ptr(L_reg, offsetof(lua_State, top)));
+
+                InvokeNode* invoke;
+                cc.invoke(asmjit::Out(invoke), (uint64_t)&luaD_poscall, FuncSignature::build<void, lua_State*, CallInfo*, int>(CallConvId::kCDecl));
+                invoke->set_arg(0, L_reg);
+                invoke->set_arg(1, ci);
+                invoke->set_arg(2, 0);
+
+                a64::Gp ret_reg = cc.new_gp32();
+                cc.mov(ret_reg, 1);
+                cc.ret(ret_reg);
+                break;
+            }
             case OP_RETURN1: {
+                a64::Gp ra = cc.new_gp64();
+                cc.add(ra, base, a * sizeof(StackValue));
+                a64::Gp new_top = cc.new_gp64();
+                cc.add(new_top, ra, sizeof(StackValue));
+                cc.str(new_top, a64::ptr(L_reg, offsetof(lua_State, top)));
+
+                InvokeNode* invoke;
+                cc.invoke(asmjit::Out(invoke), (uint64_t)&luaD_poscall, FuncSignature::build<void, lua_State*, CallInfo*, int>(CallConvId::kCDecl));
+                invoke->set_arg(0, L_reg);
+                invoke->set_arg(1, ci);
+                invoke->set_arg(2, 1);
+
                 a64::Gp ret_reg = cc.new_gp32();
                 cc.mov(ret_reg, 1);
                 cc.ret(ret_reg);
