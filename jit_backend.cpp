@@ -193,6 +193,25 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                 cc.jmp(labels[pc + 2]);
                 break;
             }
+            case OP_ADDI: {
+                int b = GETARG_B(i);
+                int sc = GETARG_sC(i);
+
+                // Guard: check if input is integer
+                x86::Gp tag = cc.new_gp32();
+                cc.movzx(tag, ptr_tt(base, b));
+                cc.cmp(tag, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.je, pc);
+
+                x86::Gp val = cc.new_gp64();
+                cc.mov(val, ptr_ivalue(base, b));
+                cc.add(val, sc);
+
+                cc.mov(ptr_ivalue(base, a), val);
+                cc.mov(ptr_tt(base, a), LUA_VNUMINT);
+                cc.jmp(labels[pc + 2]);
+                break;
+            }
             case OP_SUB: {
                 int b = GETARG_B(i);
                 int c = GETARG_C(i);
@@ -509,6 +528,12 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                 int b = GETARG_B(i);
                 int c = GETARG_C(i);
                 if (b == 0) { unsupported = true; break; }
+
+                // Update L->top = base + a + b
+                x86::Gp new_top = cc.new_gp64();
+                cc.lea(new_top, x86::ptr(base, (a + b) * sizeof(StackValue)));
+                cc.mov(x86::ptr(L_reg, offsetof(lua_State, top)), new_top);
+
                 x86::Gp func_arg = cc.new_gp64();
                 cc.lea(func_arg, x86::ptr(base, a * sizeof(StackValue)));
                 x86::Gp call_addr = cc.new_gp64();
@@ -654,6 +679,65 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
 
                 cc.mov(x86::eax, 1);
                 cc.ret();
+                break;
+            }
+            case OP_LTI:
+            case OP_LEI:
+            case OP_GTI:
+            case OP_GEI:
+            case OP_EQI: {
+                int b = GETARG_sB(i);
+
+                // Guard: check if input is integer
+                x86::Gp tag = cc.new_gp32();
+                cc.movzx(tag, ptr_tt(base, a));
+                cc.cmp(tag, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.je, pc);
+
+                x86::Gp val = cc.new_gp64();
+                cc.mov(val, ptr_ivalue(base, a));
+
+                cc.cmp(val, b);
+
+                Label skip = labels[pc + 2];
+                if (k_flag) { // k=1: skip if false
+                    if (op == OP_LTI) cc.jge(skip);
+                    else if (op == OP_LEI) cc.jg(skip);
+                    else if (op == OP_GTI) cc.jle(skip);
+                    else if (op == OP_GEI) cc.jl(skip);
+                    else if (op == OP_EQI) cc.jne(skip);
+                } else { // k=0: skip if true
+                    if (op == OP_LTI) cc.jl(skip);
+                    else if (op == OP_LEI) cc.jle(skip);
+                    else if (op == OP_GTI) cc.jg(skip);
+                    else if (op == OP_GEI) cc.jge(skip);
+                    else if (op == OP_EQI) cc.je(skip);
+                }
+                break;
+            }
+            case OP_GETUPVAL: {
+                int b = GETARG_B(i);
+
+                // Load LClosure* from func on stack
+                x86::Gp cl_ptr = cc.new_gp64();
+                cc.mov(cl_ptr, x86::ptr(func_ptr, offsetof(TValue, value_)));
+
+                // Load UpVal* from cl->upvals[b]
+                x86::Gp upval_ptr = cc.new_gp64();
+                cc.mov(upval_ptr, x86::ptr(cl_ptr, offsetof(LClosure, upvals) + b * sizeof(UpVal*)));
+
+                // Load TValue* v from UpVal
+                x86::Gp val_ptr = cc.new_gp64();
+                cc.mov(val_ptr, x86::ptr(upval_ptr, offsetof(UpVal, v)));
+
+                // Copy TValue to R[A]
+                x86::Gp tmp1 = cc.new_gp64();
+                x86::Gp tmp2 = cc.new_gp64();
+                cc.mov(tmp1, x86::ptr(val_ptr, 0));
+                cc.mov(tmp2, x86::ptr(val_ptr, 8));
+
+                cc.mov(x86::ptr(base, a * sizeof(StackValue)), tmp1);
+                cc.mov(x86::ptr(base, a * sizeof(StackValue) + 8), tmp2);
                 break;
             }
             default: {
@@ -806,6 +890,11 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                 int b = GETARG_B(i);
                 int c = GETARG_C(i);
                 if (b == 0) { unsupported = true; break; }
+
+                a64::Gp new_top = cc.new_gp64();
+                cc.add(new_top, base, (a + b) * sizeof(StackValue));
+                cc.str(new_top, a64::ptr(L_reg, offsetof(lua_State, top)));
+
                 a64::Gp func_arg = cc.new_gp64();
                 cc.add(func_arg, base, a * sizeof(StackValue));
                 a64::Gp call_addr = cc.new_gp64();
@@ -939,6 +1028,62 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                 a64::Gp ret_reg = cc.new_gp32();
                 cc.mov(ret_reg, 1);
                 cc.ret(ret_reg);
+                break;
+            }
+            case OP_LTI:
+            case OP_LEI:
+            case OP_GTI:
+            case OP_GEI:
+            case OP_EQI: {
+                int b = GETARG_sB(i);
+
+                a64::Gp tag = cc.new_gp32();
+                cc.ldrb(tag, ptr_tt(base, a));
+                cc.cmp(tag, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.b_eq, pc);
+
+                a64::Gp val = cc.new_gp64();
+                cc.ldr(val, ptr_ivalue(base, a));
+
+                a64::Gp imm = cc.new_gp64();
+                cc.mov(imm, b);
+                cc.cmp(val, imm);
+
+                Label skip = labels[pc + 2];
+                if (k_flag) { // k=1: skip if false
+                    if (op == OP_LTI) cc.b_ge(skip);
+                    else if (op == OP_LEI) cc.b_gt(skip);
+                    else if (op == OP_GTI) cc.b_le(skip);
+                    else if (op == OP_GEI) cc.b_lt(skip);
+                    else if (op == OP_EQI) cc.b_ne(skip);
+                } else { // k=0: skip if true
+                    if (op == OP_LTI) cc.b_lt(skip);
+                    else if (op == OP_LEI) cc.b_le(skip);
+                    else if (op == OP_GTI) cc.b_gt(skip);
+                    else if (op == OP_GEI) cc.b_ge(skip);
+                    else if (op == OP_EQI) cc.b_eq(skip);
+                }
+                break;
+            }
+            case OP_GETUPVAL: {
+                int b = GETARG_B(i);
+
+                a64::Gp cl_ptr = cc.new_gp64();
+                cc.ldr(cl_ptr, a64::ptr(func_ptr, offsetof(TValue, value_)));
+
+                a64::Gp upval_ptr = cc.new_gp64();
+                cc.ldr(upval_ptr, a64::ptr(cl_ptr, offsetof(LClosure, upvals) + b * sizeof(UpVal*)));
+
+                a64::Gp val_ptr = cc.new_gp64();
+                cc.ldr(val_ptr, a64::ptr(upval_ptr, offsetof(UpVal, v)));
+
+                a64::Gp tmp1 = cc.new_gp64();
+                a64::Gp tmp2 = cc.new_gp64();
+                cc.ldr(tmp1, a64::ptr(val_ptr, 0));
+                cc.ldr(tmp2, a64::ptr(val_ptr, 8));
+
+                cc.str(tmp1, a64::ptr(base, a * sizeof(StackValue)));
+                cc.str(tmp2, a64::ptr(base, a * sizeof(StackValue) + 8));
                 break;
             }
             default: {
