@@ -1664,10 +1664,10 @@ static void inopr (lua_State *L, StkId ra, TValue *a, TValue *b) {
 
 #define op_arith_overflow_aux(L,v1,v2,tryop,fop,bigop) {  \
   StkId ra = RA(i); \
-  if (ttisinteger(v1) && ttisinteger(v2)) {  \
+  if (l_likely(ttisinteger(v1) && ttisinteger(v2))) {  \
     lua_Integer i1 = ivalue(v1); lua_Integer i2 = ivalue(v2); \
     lua_Integer r; \
-    if (tryop(i1, i2, &r)) { \
+    if (l_likely(tryop(i1, i2, &r))) { \
        pc++; setivalue(s2v(ra), r); \
     } else { \
        bigop(L, v1, v2, s2v(ra)); \
@@ -2116,7 +2116,7 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
         StkId ra = RA(i);
         TValue *rb = vRB(i);
         TValue *rc = vRC(i);
-        if (ttistable(rb)) {
+        if (l_likely(ttistable(rb))) {
            Table *h = hvalue(rb);
            l_rwlock_rdlock(&h->lock);
            const TValue *res = luaH_get_optimized(h, rc);
@@ -2667,7 +2667,13 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
         StkId ra = RA(i);
         int cond;
         TValue *rb = vRB(i);
-        Protect(cond = luaV_equalobj(L, s2v(ra), rb));
+        TValue *rc = s2v(ra);
+        if (l_likely(ttisinteger(rc) && ttisinteger(rb))) {
+          cond = (ivalue(rc) == ivalue(rb));
+          goto do_eq_jump;
+        }
+        Protect(cond = luaV_equalobj(L, rc, rb));
+        do_eq_jump:
         docondjump();
         vmbreak;
       }
@@ -2882,9 +2888,9 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
       }
       vmcase(OP_FORLOOP) {
         StkId ra = RA(i);
-        if (ttisinteger(s2v(ra + 2))) {  /* integer loop? */
+        if (l_likely(ttisinteger(s2v(ra + 2)))) {  /* integer loop? */
           lua_Unsigned count = l_castS2U(ivalue(s2v(ra + 1)));
-          if (count > 0) {  /* still more iterations? */
+          if (l_likely(count > 0)) {  /* still more iterations? */
             lua_Integer step = ivalue(s2v(ra + 2));
             lua_Integer idx = ivalue(s2v(ra));  /* internal index */
             chgivalue(s2v(ra + 1), count - 1);  /* update counter */
