@@ -133,7 +133,7 @@ jobs:
             emsdk-${{ runner.os }}-
 
       - name: Setup Emscripten
-        uses: emscripten-core/emsdk@v3
+        uses: mymindstorm/setup-emsdk@v14
         with:
           version: 3.1.51
           actions-cache-folder: 'emsdk-cache'
