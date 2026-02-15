@@ -58,6 +58,7 @@
 #include "lnamespace.h"
 #include "lsuper.h"
 #include "lbigint.h"
+#include "jit_backend.h"
 
 static int try_add(lua_Integer a, lua_Integer b, lua_Integer *r) {
     if ((b > 0 && a > LUA_MAXINTEGER - b) || (b < 0 && a < LUA_MININTEGER - b)) return 0;
@@ -1984,6 +1985,18 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
  returning:  /* trap already set */
   cl = ci_func(ci);
 
+  if (cl->p->jit_code) {
+      JitFunction jf = (JitFunction)cl->p->jit_code;
+      if (jf(L)) {
+         if (ci->callstatus & CIST_FRESH)
+            return;
+         else {
+            ci = ci->previous;
+            goto returning;
+         }
+      }
+  }
+
   /** VM protection detection: If the function enables VM protection, use a custom VM interpreter */
   if (cl->p->difierline_mode & OBFUSCATE_VM_PROTECT) {
     int vm_result = luaO_executeVM(L, cl->p);
@@ -2888,6 +2901,14 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
       }
       vmcase(OP_FORLOOP) {
         StkId ra = RA(i);
+        if (!cl->p->jit_code) {
+             cl->p->jit_counter++;
+             if (cl->p->jit_counter > 200) {
+                  if (!jit_compile(L, cl->p)) {
+                      cl->p->jit_counter = -100000; // Backoff for a while
+                  }
+             }
+        }
         if (l_likely(ttisinteger(s2v(ra + 2)))) {  /* integer loop? */
           lua_Unsigned count = l_castS2U(ivalue(s2v(ra + 1)));
           if (l_likely(count > 0)) {  /* still more iterations? */
@@ -2907,6 +2928,14 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
       }
       vmcase(OP_FORPREP) {
         StkId ra = RA(i);
+        if (!cl->p->jit_code) {
+            cl->p->jit_counter++;
+            if (cl->p->jit_counter > 200) {
+                 if (!jit_compile(L, cl->p)) {
+                     cl->p->jit_counter = -100000; // Backoff for a while
+                 }
+            }
+        }
         savestate(L, ci);  /* in case of errors */
         if (forprep(L, ra))
           pc += GETARG_Bx(i) + 1;  /* skip the loop */

@@ -26,7 +26,7 @@ MYOBJS=
 
 # Combine flags for linker
 LDFLAGS= $(SYSLDFLAGS) $(MYLDFLAGS)
-LIBS= -lm $(SYSLIBS) $(MYLIBS)
+LIBS= -lm $(SYSLIBS) $(MYLIBS) -L./asmjit/build -lasmjit -lstdc++
 
 # Special flags for compiler modules; -Os reduces code size.
 CMCFLAGS= 
@@ -37,7 +37,7 @@ CMCFLAGS=
 PLATS= guess aix bsd c89 freebsd generic ios linux macosx mingw posix solaris
 
 LUA_A=	liblua.a
-CORE_O= lapi.o lcode.o lctype.o ldebug.o ldo.o ldump.o lfunc.o lgc.o llex.o lmem.o lobject.o lopcodes.o lparser.o lstate.o lstring.o ltable.o ltm.o lundump.o lvm.o lzio.o lobfuscate.o lthread.o lstruct.o lnamespace.o lbigint.o lsuper.o
+CORE_O= lapi.o lcode.o lctype.o ldebug.o ldo.o ldump.o lfunc.o lgc.o llex.o lmem.o lobject.o lopcodes.o lparser.o lstate.o lstring.o ltable.o ltm.o lundump.o lvm.o lzio.o lobfuscate.o lthread.o lstruct.o lnamespace.o lbigint.o lsuper.o jit_backend.o
 LIB_O= lauxlib.o lbaselib.o lcorolib.o ldblib.o liolib.o lmathlib.o loadlib.o loslib.o lstrlib.o ltablib.o lutf8lib.o linit.o json_parser.o lboolib.o lbitlib.o lptrlib.o ludatalib.o lvmlib.o lclass.o ltranslator.o lsmgrlib.o logtable.o sha256.o aes.o crc.o lthreadlib.o libhttp.o lfs.o lproclib.o lvmpro.o
 BASE_O= $(CORE_O) $(LIB_O) $(MYOBJS)
 
@@ -68,10 +68,10 @@ $(LUA_A): $(BASE_O)
 	$(RANLIB) $@
 
 $(LUA_T): $(LUA_O) $(LUA_A)
-	$(CC) -o $@ $(LDFLAGS) $(LUA_O) $(LUA_A) $(LIBS)
+	g++ -o $@ $(LDFLAGS) $(LUA_O) $(LUA_A) $(LIBS)
 
 $(LUAC_T): $(LUAC_O) $(LUA_A)
-	$(CC) -o $@ $(LDFLAGS) $(LUAC_O) $(LUA_A) $(LIBS)
+	g++ -o $@ $(LDFLAGS) $(LUAC_O) $(LUA_A) $(LIBS)
 
 $(LBCDUMP_T): $(LBCDUMP_O)
 	$(CC) -o $@ $(LDFLAGS) $(LBCDUMP_O)
@@ -389,3 +389,17 @@ lzio.o: lzio.c lprefix.h lua.h luaconf.h lapi.h llimits.h lstate.h \
  lobject.h ltm.h lzio.h lmem.h
 
 # (end of Makefile)
+
+setup_asmjit:
+	@if [ ! -d "asmjit" ]; then \
+		echo "Cloning asmjit..."; \
+		git clone https://github.com/asmjit/asmjit.git; \
+	fi
+	@if [ ! -d "asmjit/build" ]; then \
+		echo "Building asmjit..."; \
+		mkdir -p asmjit/build; \
+		cd asmjit/build && cmake .. -DASMJIT_STATIC=ON -DASMJIT_TEST=OFF && make -j4; \
+	fi
+
+jit_backend.o: setup_asmjit
+	g++ -O3 -fomit-frame-pointer -g0 -DNDEBUG -D_GNU_SOURCE -I./asmjit -c jit_backend.cpp

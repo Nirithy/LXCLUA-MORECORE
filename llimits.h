@@ -45,8 +45,14 @@ typedef long l_mem;
 #define l_atomic_load(a) atomic_load(a)
 #define l_atomic_set(a, n) atomic_store(a, n)
 #define l_atomic_store(a, n) atomic_store(a, n)
+#ifdef __cplusplus
+#include <atomic>
+typedef std::atomic<l_mem> l_atomic_mem;
+typedef std::atomic<int> l_atomic;
+#else
 typedef _Atomic l_mem l_atomic_mem;
 typedef _Atomic int l_atomic;
+#endif
 
 
 /* chars used as small naturals (so that 'char' is reserved for characters) */

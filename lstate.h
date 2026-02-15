@@ -278,7 +278,11 @@ typedef struct global_State {
   lua_Alloc frealloc;  /**< function to reallocate memory */
   void *ud;         /**< auxiliary data to 'frealloc' */
   l_mem GCtotalbytes;  /**< number of bytes currently allocated - GCdebt */
+#ifdef __cplusplus
+  std::atomic<l_mem> GCdebt;
+#else
   _Atomic l_mem GCdebt;  /**< bytes allocated not yet compensated by the collector */
+#endif
   lu_mem GCestimate;  /**< an estimate of the non-garbage memory in use */
   l_mutex_t lock;       /**< global lock for shared resources (strings, registry) */
   lu_mem lastatomic;  /**< see function 'genstep' in file 'lgc.c' */
