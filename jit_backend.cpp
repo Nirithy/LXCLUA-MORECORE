@@ -1694,13 +1694,13 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                 cc.ldr(key_val, ptr_ivalue(base, c));
                 cc.ldrb(key_tt, ptr_tt(base, c));
 
-                a64::Mem key_val_mem = key_slot; key_val_mem.set_offset(offsetof(TValue, value_)); key_val_mem.set_size(8);
+                a64::Mem key_val_mem = key_slot; key_val_mem.set_offset(offsetof(TValue, value_));
                 cc.str(key_val, key_val_mem);
-                a64::Mem key_tt_mem = key_slot; key_tt_mem.set_offset(offsetof(TValue, tt_)); key_tt_mem.set_size(1);
+                a64::Mem key_tt_mem = key_slot; key_tt_mem.set_offset(offsetof(TValue, tt_));
                 cc.strb(key_tt, key_tt_mem);
 
                 a64::Gp key_ptr = cc.new_gp64();
-                cc.add(key_ptr, cc.sp(), key_slot.offset());
+                cc.add(key_ptr, a64::sp, key_slot.offset());
 
                 InvokeNode* invoke;
                 a64::Gp result_ptr = cc.new_gp64();
@@ -1733,8 +1733,8 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                 a64::Gp table_ptr = cc.new_gp64();
                 cc.ldr(table_ptr, ptr_ivalue(base, a));
 
-                cc.ldr(ta.u64(), a64::ptr(table_ptr, offsetof(Table, metatable)));
-                cc.cmp(ta.u64(), 0);
+                cc.ldr(ta.r64(), a64::ptr(table_ptr, offsetof(Table, metatable)));
+                cc.cmp(ta.r64(), 0);
                 EMIT_BAILOUT(cc.b_ne, pc);
 
                 // Secure Key (R[B])
@@ -1744,13 +1744,13 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                 cc.ldr(key_val, ptr_ivalue(base, b));
                 cc.ldrb(key_tt, ptr_tt(base, b));
 
-                a64::Mem key_val_mem = key_slot; key_val_mem.set_offset(offsetof(TValue, value_)); key_val_mem.set_size(8);
+                a64::Mem key_val_mem = key_slot; key_val_mem.set_offset(offsetof(TValue, value_));
                 cc.str(key_val, key_val_mem);
-                a64::Mem key_tt_mem = key_slot; key_tt_mem.set_offset(offsetof(TValue, tt_)); key_tt_mem.set_size(1);
+                a64::Mem key_tt_mem = key_slot; key_tt_mem.set_offset(offsetof(TValue, tt_));
                 cc.strb(key_tt, key_tt_mem);
 
                 a64::Gp key_ptr = cc.new_gp64();
-                cc.add(key_ptr, cc.sp(), key_slot.offset());
+                cc.add(key_ptr, a64::sp, key_slot.offset());
 
                 // Secure Value (RK[C])
                 a64::Mem val_slot = cc.new_stack(sizeof(TValue), 16);
@@ -1766,9 +1766,9 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                     cc.ldr(tmp_val, a64::ptr(k_val_addr, offsetof(TValue, value_)));
                     cc.ldrb(tmp_tt, a64::ptr(k_val_addr, offsetof(TValue, tt_)));
 
-                    a64::Mem dst_val = val_slot; dst_val.set_offset(offsetof(TValue, value_)); dst_val.set_size(8);
+                    a64::Mem dst_val = val_slot; dst_val.set_offset(offsetof(TValue, value_));
                     cc.str(tmp_val, dst_val);
-                    a64::Mem dst_tt = val_slot; dst_tt.set_offset(offsetof(TValue, tt_)); dst_tt.set_size(1);
+                    a64::Mem dst_tt = val_slot; dst_tt.set_offset(offsetof(TValue, tt_));
                     cc.strb(tmp_tt, dst_tt);
                 } else {
                     a64::Gp r_val = cc.new_gp64();
@@ -1776,12 +1776,12 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                     cc.ldr(r_val, ptr_ivalue(base, c));
                     cc.ldrb(r_tt, ptr_tt(base, c));
 
-                    a64::Mem dst_val = val_slot; dst_val.set_offset(offsetof(TValue, value_)); dst_val.set_size(8);
+                    a64::Mem dst_val = val_slot; dst_val.set_offset(offsetof(TValue, value_));
                     cc.str(r_val, dst_val);
-                    a64::Mem dst_tt = val_slot; dst_tt.set_offset(offsetof(TValue, tt_)); dst_tt.set_size(1);
+                    a64::Mem dst_tt = val_slot; dst_tt.set_offset(offsetof(TValue, tt_));
                     cc.strb(r_tt, dst_tt);
                 }
-                cc.add(val_ptr, cc.sp(), val_slot.offset());
+                cc.add(val_ptr, a64::sp, val_slot.offset());
 
                 InvokeNode* invoke;
                 cc.invoke(asmjit::Out(invoke), (uint64_t)&luaH_set, FuncSignature::build<void, lua_State*, Table*, const TValue*, TValue*>(CallConvId::kCDecl));
@@ -1841,8 +1841,8 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                 a64::Gp table_ptr = cc.new_gp64();
                 cc.ldr(table_ptr, ptr_ivalue(base, a));
 
-                cc.ldr(ta.u64(), a64::ptr(table_ptr, offsetof(Table, metatable)));
-                cc.cmp(ta.u64(), 0);
+                cc.ldr(ta.r64(), a64::ptr(table_ptr, offsetof(Table, metatable)));
+                cc.cmp(ta.r64(), 0);
                 EMIT_BAILOUT(cc.b_ne, pc);
 
                 // Key (K[B])
@@ -1863,9 +1863,9 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                     cc.ldr(tmp_val, a64::ptr(k_val_addr, offsetof(TValue, value_)));
                     cc.ldrb(tmp_tt, a64::ptr(k_val_addr, offsetof(TValue, tt_)));
 
-                    a64::Mem dst_val = val_slot; dst_val.set_offset(offsetof(TValue, value_)); dst_val.set_size(8);
+                    a64::Mem dst_val = val_slot; dst_val.set_offset(offsetof(TValue, value_));
                     cc.str(tmp_val, dst_val);
-                    a64::Mem dst_tt = val_slot; dst_tt.set_offset(offsetof(TValue, tt_)); dst_tt.set_size(1);
+                    a64::Mem dst_tt = val_slot; dst_tt.set_offset(offsetof(TValue, tt_));
                     cc.strb(tmp_tt, dst_tt);
                 } else {
                     a64::Gp r_val = cc.new_gp64();
@@ -1873,12 +1873,12 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                     cc.ldr(r_val, ptr_ivalue(base, c));
                     cc.ldrb(r_tt, ptr_tt(base, c));
 
-                    a64::Mem dst_val = val_slot; dst_val.set_offset(offsetof(TValue, value_)); dst_val.set_size(8);
+                    a64::Mem dst_val = val_slot; dst_val.set_offset(offsetof(TValue, value_));
                     cc.str(r_val, dst_val);
-                    a64::Mem dst_tt = val_slot; dst_tt.set_offset(offsetof(TValue, tt_)); dst_tt.set_size(1);
+                    a64::Mem dst_tt = val_slot; dst_tt.set_offset(offsetof(TValue, tt_));
                     cc.strb(r_tt, dst_tt);
                 }
-                cc.add(val_ptr, cc.sp(), val_slot.offset());
+                cc.add(val_ptr, a64::sp, val_slot.offset());
 
                 InvokeNode* invoke;
                 cc.invoke(asmjit::Out(invoke), (uint64_t)&luaH_set, FuncSignature::build<void, lua_State*, Table*, const TValue*, TValue*>(CallConvId::kCDecl));
@@ -1931,8 +1931,8 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                 a64::Gp table_ptr = cc.new_gp64();
                 cc.ldr(table_ptr, ptr_ivalue(base, a));
 
-                cc.ldr(ta.u64(), a64::ptr(table_ptr, offsetof(Table, metatable)));
-                cc.cmp(ta.u64(), 0);
+                cc.ldr(ta.r64(), a64::ptr(table_ptr, offsetof(Table, metatable)));
+                cc.cmp(ta.r64(), 0);
                 EMIT_BAILOUT(cc.b_ne, pc);
 
                 // Secure Value (RK[C])
@@ -1949,9 +1949,9 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                     cc.ldr(tmp_val, a64::ptr(k_val_addr, offsetof(TValue, value_)));
                     cc.ldrb(tmp_tt, a64::ptr(k_val_addr, offsetof(TValue, tt_)));
 
-                    a64::Mem dst_val = val_slot; dst_val.set_offset(offsetof(TValue, value_)); dst_val.set_size(8);
+                    a64::Mem dst_val = val_slot; dst_val.set_offset(offsetof(TValue, value_));
                     cc.str(tmp_val, dst_val);
-                    a64::Mem dst_tt = val_slot; dst_tt.set_offset(offsetof(TValue, tt_)); dst_tt.set_size(1);
+                    a64::Mem dst_tt = val_slot; dst_tt.set_offset(offsetof(TValue, tt_));
                     cc.strb(tmp_tt, dst_tt);
                 } else {
                     a64::Gp r_val = cc.new_gp64();
@@ -1959,12 +1959,12 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                     cc.ldr(r_val, ptr_ivalue(base, c));
                     cc.ldrb(r_tt, ptr_tt(base, c));
 
-                    a64::Mem dst_val = val_slot; dst_val.set_offset(offsetof(TValue, value_)); dst_val.set_size(8);
+                    a64::Mem dst_val = val_slot; dst_val.set_offset(offsetof(TValue, value_));
                     cc.str(r_val, dst_val);
-                    a64::Mem dst_tt = val_slot; dst_tt.set_offset(offsetof(TValue, tt_)); dst_tt.set_size(1);
+                    a64::Mem dst_tt = val_slot; dst_tt.set_offset(offsetof(TValue, tt_));
                     cc.strb(r_tt, dst_tt);
                 }
-                cc.add(val_ptr, cc.sp(), val_slot.offset());
+                cc.add(val_ptr, a64::sp, val_slot.offset());
 
                 InvokeNode* invoke;
                 cc.invoke(asmjit::Out(invoke), (uint64_t)&luaH_setint, FuncSignature::build<void, lua_State*, Table*, lua_Integer, TValue*>(CallConvId::kCDecl));
