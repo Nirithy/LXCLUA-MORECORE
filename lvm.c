@@ -60,6 +60,10 @@
 #include "lbigint.h"
 #include "jit_backend.h"
 
+/* JIT compilation thresholds */
+#define JIT_COMPILE_THRESHOLD	200
+#define JIT_COMPILE_BACKOFF	-1000000000
+
 static int try_add(lua_Integer a, lua_Integer b, lua_Integer *r) {
     if ((b > 0 && a > LUA_MAXINTEGER - b) || (b < 0 && a < LUA_MININTEGER - b)) return 0;
     *r = a + b; return 1;
@@ -1996,8 +2000,9 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
          }
       }
   } else {
-      cl->p->jit_counter++;
-      if (cl->p->jit_counter > 200) {
+      if (cl->p->jit_counter < INT_MAX)
+          cl->p->jit_counter++;
+      if (cl->p->jit_counter > JIT_COMPILE_THRESHOLD) {
           if (jit_compile(L, cl->p)) {
               JitFunction jf = (JitFunction)cl->p->jit_code;
               if (jf(L)) {
@@ -2009,7 +2014,7 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
                  }
               }
           } else {
-              cl->p->jit_counter = -1000000000;
+              cl->p->jit_counter = JIT_COMPILE_BACKOFF;
           }
       }
   }
@@ -2691,10 +2696,11 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
       }
       vmcase(OP_JMP) {
         if (!cl->p->jit_code && GETARG_sJ(i) < 0) {
-            cl->p->jit_counter++;
-            if (cl->p->jit_counter > 200) {
+            if (cl->p->jit_counter < INT_MAX)
+                cl->p->jit_counter++;
+            if (cl->p->jit_counter > JIT_COMPILE_THRESHOLD) {
                  if (!jit_compile(L, cl->p)) {
-                     cl->p->jit_counter = -1000000000; // Backoff for a while
+                     cl->p->jit_counter = JIT_COMPILE_BACKOFF; // Backoff for a while
                  }
             }
         }
@@ -2927,10 +2933,11 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
       vmcase(OP_FORLOOP) {
         StkId ra = RA(i);
         if (!cl->p->jit_code) {
-             cl->p->jit_counter++;
-             if (cl->p->jit_counter > 200) {
+             if (cl->p->jit_counter < INT_MAX)
+                 cl->p->jit_counter++;
+             if (cl->p->jit_counter > JIT_COMPILE_THRESHOLD) {
                   if (!jit_compile(L, cl->p)) {
-                      cl->p->jit_counter = -1000000000; // Backoff for a while
+                      cl->p->jit_counter = JIT_COMPILE_BACKOFF; // Backoff for a while
                   }
              }
         }
@@ -2954,10 +2961,11 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
       vmcase(OP_FORPREP) {
         StkId ra = RA(i);
         if (!cl->p->jit_code) {
-            cl->p->jit_counter++;
-            if (cl->p->jit_counter > 200) {
+            if (cl->p->jit_counter < INT_MAX)
+                cl->p->jit_counter++;
+            if (cl->p->jit_counter > JIT_COMPILE_THRESHOLD) {
                  if (!jit_compile(L, cl->p)) {
-                     cl->p->jit_counter = -1000000000; // Backoff for a while
+                     cl->p->jit_counter = JIT_COMPILE_BACKOFF; // Backoff for a while
                  }
             }
         }
@@ -3003,10 +3011,11 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
        l_tforloop: {
         StkId ra = RA(i);
         if (!cl->p->jit_code) {
-             cl->p->jit_counter++;
-             if (cl->p->jit_counter > 200) {
+             if (cl->p->jit_counter < INT_MAX)
+                 cl->p->jit_counter++;
+             if (cl->p->jit_counter > JIT_COMPILE_THRESHOLD) {
                   if (!jit_compile(L, cl->p)) {
-                      cl->p->jit_counter = -1000000000; // Backoff for a while
+                      cl->p->jit_counter = JIT_COMPILE_BACKOFF; // Backoff for a while
                   }
              }
         }
