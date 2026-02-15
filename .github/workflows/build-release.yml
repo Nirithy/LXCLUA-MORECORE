@@ -76,6 +76,7 @@ jobs:
             make
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-ccache
+            mingw-w64-x86_64-cmake
             tar
             zip
 
@@ -116,9 +117,45 @@ jobs:
       - name: Cleanup compiled content
         run: make clean
 
+  build-wasm:
+    name: Build WebAssembly
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Cache emsdk
+        uses: actions/cache@v4
+        with:
+          path: emsdk-cache
+          key: emsdk-${{ runner.os }}-3.1.51
+          restore-keys: |
+            emsdk-${{ runner.os }}-
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.51
+          actions-cache-folder: 'emsdk-cache'
+
+      - name: Build WASM Release
+        run: |
+          make wasm-release
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-release
+          path: |
+            *.zip
+            *.wasm
+
+      - name: Cleanup compiled content
+        run: make clean
+
   release:
     name: Create Release
-    needs: [build-linux, build-windows, build-macos]
+    needs: [build-linux, build-windows, build-macos, build-wasm]
     if: always() && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
@@ -138,6 +175,7 @@ jobs:
           files: |
             artifacts/*.tar.gz
             artifacts/*.zip
+            artifacts/*.wasm
           draft: false
           prerelease: false
         env:

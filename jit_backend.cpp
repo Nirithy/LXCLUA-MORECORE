@@ -17,6 +17,8 @@
 // Undefine to avoid pollution
 #undef _Atomic
 
+#ifndef __EMSCRIPTEN__
+
 #include "asmjit/core.h"
 
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
@@ -38,17 +40,27 @@ extern "C" void jit_init(void) {
     }
 }
 
+#ifdef JIT_ARCH_X86
 // Access register R[i] (StackValue is TValue + padding/delta)
-template<typename RegT>
-static x86::Mem ptr_ivalue(RegT& base, int i) {
+static x86::Mem ptr_ivalue(x86::Gp& base, int i) {
     return x86::qword_ptr(base, i * sizeof(StackValue) + offsetof(TValue, value_));
 }
 
 // Access TValue tag field
-template<typename RegT>
-static x86::Mem ptr_tt(RegT& base, int i) {
+static x86::Mem ptr_tt(x86::Gp& base, int i) {
     return x86::byte_ptr(base, i * sizeof(StackValue) + offsetof(TValue, tt_));
 }
+#endif
+
+#ifdef JIT_ARCH_A64
+static a64::Mem ptr_ivalue(a64::Gp& base, int i) {
+    return a64::ptr(base, i * sizeof(StackValue) + offsetof(TValue, value_));
+}
+
+static a64::Mem ptr_tt(a64::Gp& base, int i) {
+    return a64::ptr(base, i * sizeof(StackValue) + offsetof(TValue, tt_));
+}
+#endif
 
 // 64-bit instruction decoding macros
 #define SIZE_OP_64		9
@@ -399,3 +411,18 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
 extern "C" void jit_free(Proto *p) {
     p->jit_code = NULL;
 }
+
+#else
+
+extern "C" void jit_init(void) {
+}
+
+extern "C" int jit_compile(lua_State *L, Proto *p) {
+    return 0;
+}
+
+extern "C" void jit_free(Proto *p) {
+    p->jit_code = NULL;
+}
+
+#endif

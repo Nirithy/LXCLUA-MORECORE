@@ -17,6 +17,7 @@
 | Ubuntu | ✅ 通过 | ✅ |
 | Android (Termux) | ✅ 通过 | ✅ |
 | Android (LXCLUA JNI) | ✅ 通过 | ✅ |
+| WebAssembly | ✅ 通过 | ✅ |
 
 ## 特性
 
@@ -75,6 +76,9 @@ make linux
 
 # Android (Termux)
 make termux
+
+# WebAssembly
+make wasm
 ```
 
 ### 验证安装
@@ -96,6 +100,8 @@ make clean
 | `liblua.a` / `lua55.dll` | Lua 静态库 / 动态库 |
 | `lua` / `lua.exe` | Lua 解释器 |
 | `luac` / `luac.exe` | Lua 字节码编译器 |
+| `lxclua.js` / `.wasm` | Lua 解释器 (WebAssembly) |
+| `luac.js` / `.wasm` | Lua 字节码编译器 (WebAssembly) |
 
 ## 使用示例
 
