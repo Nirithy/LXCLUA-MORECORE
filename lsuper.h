@@ -8,5 +8,6 @@ LUAI_FUNC void luaS_setsuperstruct (lua_State *L, SuperStruct *ss, TValue *key, 
 LUAI_FUNC const TValue *luaS_getsuperstruct (SuperStruct *ss, TValue *key);
 LUAI_FUNC const TValue *luaS_getsuperstruct_str (SuperStruct *ss, TString *key);
 LUAI_FUNC void luaS_freesuperstruct (lua_State *L, SuperStruct *ss);
+LUAI_FUNC int luaS_next (lua_State *L, SuperStruct *ss, StkId key);
 
 #endif

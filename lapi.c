@@ -28,6 +28,7 @@
 #include "ltm.h"
 #include "lundump.h"
 #include "lvm.h"
+#include "lsuper.h"
 #include "lobfuscate.h"
 #include "lthread.h"
 
@@ -2062,12 +2063,19 @@ LUA_API int lua_error (lua_State *L) {
  * @return 1 if next element exists, 0 otherwise.
  */
 LUA_API int lua_next (lua_State *L, int idx) {
-  Table *t;
+  TValue *t;
   int more;
   lua_lock(L);
   api_checknelems(L, 1);
-  t = gettable(L, idx);
-  more = luaH_next(L, t, L->top.p - 1);
+  t = index2value(L, idx);
+  if (ttistable(t)) {
+    more = luaH_next(L, hvalue(t), L->top.p - 1);
+  } else if (ttissuperstruct(t)) {
+    more = luaS_next(L, superstructvalue(t), L->top.p - 1);
+  } else {
+    api_check(L, 0, "table or superstruct expected");
+    more = 0;
+  }
   if (more) {
     api_incr_top(L);
   }
