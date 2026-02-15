@@ -409,4 +409,4 @@ setup_asmjit:
 	fi
 
 jit_backend.o: setup_asmjit
-	g++ -std=c++17 -O3 -fomit-frame-pointer -g0 -DNDEBUG -D_GNU_SOURCE -I./asmjit -c jit_backend.cpp
+	g++ -std=c++17 -O3 -fomit-frame-pointer -g0 -DNDEBUG -D_GNU_SOURCE -DASMJIT_STATIC -I./asmjit -c jit_backend.cpp
