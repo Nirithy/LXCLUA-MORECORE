@@ -928,6 +928,7 @@ typedef struct SuperStruct {
   CommonHeader;
   TString *name;
   unsigned int nsize;
+  unsigned int ncapacity;
   TValue *data;
 } SuperStruct;
 

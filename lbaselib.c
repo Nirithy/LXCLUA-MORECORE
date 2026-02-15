@@ -532,7 +532,8 @@ static int luaB_type (lua_State *L) {
 
 
 int luaB_next (lua_State *L) {
-  luaL_checktype(L, 1, LUA_TTABLE);
+  int t = lua_type(L, 1);
+  luaL_argcheck(L, t == LUA_TTABLE || t == LUA_TSUPERSTRUCT, 1, "table or superstruct expected");
   lua_settop(L, 2);  /* create a 2nd argument if there isn't one */
   if (lua_next(L, 1))
     return 2;
