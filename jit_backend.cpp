@@ -174,21 +174,15 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                 int c = GETARG_C(i);
 
                 // Guard: check if inputs are integers
-                x86::Gp tag_b = cc.new_gp32();
-                cc.movzx(tag_b, ptr_tt(base, b));
-                cc.cmp(tag_b, LUA_VNUMINT);
+                cc.cmp(ptr_tt(base, b), LUA_VNUMINT);
                 EMIT_BAILOUT(cc.je, pc);
 
-                x86::Gp tag_c = cc.new_gp32();
-                cc.movzx(tag_c, ptr_tt(base, c));
-                cc.cmp(tag_c, LUA_VNUMINT);
+                cc.cmp(ptr_tt(base, c), LUA_VNUMINT);
                 EMIT_BAILOUT(cc.je, pc);
 
                 x86::Gp vb = cc.new_gp64();
-                x86::Gp vc = cc.new_gp64();
                 cc.mov(vb, ptr_ivalue(base, b));
-                cc.mov(vc, ptr_ivalue(base, c));
-                cc.add(vb, vc);
+                cc.add(vb, ptr_ivalue(base, c));
                 cc.mov(ptr_ivalue(base, a), vb);
                 cc.mov(ptr_tt(base, a), LUA_VNUMINT);
                 cc.jmp(labels[pc + 2]);
@@ -198,21 +192,15 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                 int b = GETARG_B(i);
                 int c = GETARG_C(i);
 
-                x86::Gp tag_b = cc.new_gp32();
-                cc.movzx(tag_b, ptr_tt(base, b));
-                cc.cmp(tag_b, LUA_VNUMINT);
+                cc.cmp(ptr_tt(base, b), LUA_VNUMINT);
                 EMIT_BAILOUT(cc.je, pc);
 
-                x86::Gp tag_c = cc.new_gp32();
-                cc.movzx(tag_c, ptr_tt(base, c));
-                cc.cmp(tag_c, LUA_VNUMINT);
+                cc.cmp(ptr_tt(base, c), LUA_VNUMINT);
                 EMIT_BAILOUT(cc.je, pc);
 
                 x86::Gp vb = cc.new_gp64();
-                x86::Gp vc = cc.new_gp64();
                 cc.mov(vb, ptr_ivalue(base, b));
-                cc.mov(vc, ptr_ivalue(base, c));
-                cc.sub(vb, vc);
+                cc.sub(vb, ptr_ivalue(base, c));
                 cc.mov(ptr_ivalue(base, a), vb);
                 cc.mov(ptr_tt(base, a), LUA_VNUMINT);
                 cc.jmp(labels[pc + 2]);
@@ -222,21 +210,15 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                 int b = GETARG_B(i);
                 int c = GETARG_C(i);
 
-                x86::Gp tag_b = cc.new_gp32();
-                cc.movzx(tag_b, ptr_tt(base, b));
-                cc.cmp(tag_b, LUA_VNUMINT);
+                cc.cmp(ptr_tt(base, b), LUA_VNUMINT);
                 EMIT_BAILOUT(cc.je, pc);
 
-                x86::Gp tag_c = cc.new_gp32();
-                cc.movzx(tag_c, ptr_tt(base, c));
-                cc.cmp(tag_c, LUA_VNUMINT);
+                cc.cmp(ptr_tt(base, c), LUA_VNUMINT);
                 EMIT_BAILOUT(cc.je, pc);
 
                 x86::Gp vb = cc.new_gp64();
-                x86::Gp vc = cc.new_gp64();
                 cc.mov(vb, ptr_ivalue(base, b));
-                cc.mov(vc, ptr_ivalue(base, c));
-                cc.imul(vb, vc);
+                cc.imul(vb, ptr_ivalue(base, c));
                 cc.mov(ptr_ivalue(base, a), vb);
                 cc.mov(ptr_tt(base, a), LUA_VNUMINT);
                 cc.jmp(labels[pc + 2]);
@@ -619,32 +601,23 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                 long long bx = GETARG_Bx_64(i);
                 long long jump_skip = pc + bx + 1;
                 x86::Gp init = cc.new_gp64();
-                x86::Gp limit = cc.new_gp64();
-                x86::Gp step = cc.new_gp64();
                 x86::Gp count = cc.new_gp64();
 
                 // Basic guard: check integer types
-                x86::Gp t1 = cc.new_gp32();
-                cc.movzx(t1, ptr_tt(base, a));
-                cc.cmp(t1, LUA_VNUMINT);
+                cc.cmp(ptr_tt(base, a), LUA_VNUMINT);
                 EMIT_BAILOUT(cc.je, pc);
 
-                x86::Gp t2 = cc.new_gp32();
-                cc.movzx(t2, ptr_tt(base, a + 1));
-                cc.cmp(t2, LUA_VNUMINT);
+                cc.cmp(ptr_tt(base, a + 1), LUA_VNUMINT);
                 EMIT_BAILOUT(cc.je, pc);
 
-                x86::Gp t3 = cc.new_gp32();
-                cc.movzx(t3, ptr_tt(base, a + 2));
-                cc.cmp(t3, LUA_VNUMINT);
+                cc.cmp(ptr_tt(base, a + 2), LUA_VNUMINT);
                 EMIT_BAILOUT(cc.je, pc);
 
                 cc.mov(init, ptr_ivalue(base, a));
-                cc.mov(limit, ptr_ivalue(base, a + 1));
-                cc.mov(step, ptr_ivalue(base, a + 2));
                 cc.mov(ptr_ivalue(base, a + 3), init);
                 cc.mov(ptr_tt(base, a + 3), LUA_VNUMINT);
-                cc.mov(count, limit);
+
+                cc.mov(count, ptr_ivalue(base, a + 1));
                 cc.sub(count, init);
                 cc.cmp(count, 0);
                 cc.jl(labels[jump_skip]);
@@ -654,21 +627,23 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
             case OP_FORLOOP: {
                 long long bx = GETARG_Bx_64(i);
                 long long jump_loop = pc - bx;
-                x86::Gp count = cc.new_gp64();
-                cc.mov(count, ptr_ivalue(base, a + 1));
+
+                // Optimized count handling
+                x86::Mem count_mem = ptr_ivalue(base, a + 1);
                 Label exit_loop = cc.new_label();
-                cc.cmp(count, 0);
+
+                cc.cmp(count_mem, 0);
                 cc.jle(exit_loop);
-                cc.dec(count);
-                cc.mov(ptr_ivalue(base, a + 1), count);
+                cc.dec(count_mem);
+
+                // Optimized idx handling
                 x86::Gp idx = cc.new_gp64();
-                x86::Gp step = cc.new_gp64();
                 cc.mov(idx, ptr_ivalue(base, a));
-                cc.mov(step, ptr_ivalue(base, a + 2));
-                cc.add(idx, step);
+                cc.add(idx, ptr_ivalue(base, a + 2));
                 cc.mov(ptr_ivalue(base, a), idx);
                 cc.mov(ptr_ivalue(base, a + 3), idx);
                 cc.mov(ptr_tt(base, a + 3), LUA_VNUMINT);
+
                 cc.jmp(labels[jump_loop]);
                 cc.bind(exit_loop);
                 break;
