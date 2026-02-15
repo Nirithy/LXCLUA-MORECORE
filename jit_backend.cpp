@@ -169,6 +169,34 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                 cc.mov(ptr_tt(base, a), tt.r8());
                 break;
             }
+            case OP_GETUPVAL: {
+                int b = GETARG_B(i);
+                x86::Gp func_ptr = cc.new_gp64();
+                cc.mov(func_ptr, x86::ptr(ci, offsetof(CallInfo, func)));
+
+                x86::Gp closure = cc.new_gp64();
+                cc.mov(closure, x86::ptr(func_ptr, offsetof(TValue, value_)));
+
+                // closure points to LClosure*
+                x86::Gp upval_ptr = cc.new_gp64();
+                // Access upvals[B]
+                cc.mov(upval_ptr, x86::ptr(closure, offsetof(LClosure, upvals) + b * sizeof(UpVal*)));
+
+                // upval_ptr points to UpVal*
+                x86::Gp val_ptr = cc.new_gp64();
+                // Access upval->v.p
+                cc.mov(val_ptr, x86::ptr(upval_ptr, offsetof(UpVal, v)));
+
+                // val_ptr points to TValue
+                x86::Gp tmp1 = cc.new_gp64();
+                x86::Gp tmp2 = cc.new_gp64();
+                cc.mov(tmp1, x86::ptr(val_ptr, 0));
+                cc.mov(tmp2, x86::ptr(val_ptr, 8));
+
+                cc.mov(x86::ptr(base, a * sizeof(StackValue)), tmp1);
+                cc.mov(x86::ptr(base, a * sizeof(StackValue) + 8), tmp2);
+                break;
+            }
             case OP_ADD: {
                 int b = GETARG_B(i);
                 int c = GETARG_C(i);
@@ -777,6 +805,29 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                 a64::Gp tt = cc.new_gp32();
                 cc.ldrb(tt, a64::ptr(k_addr, offsetof(TValue, tt_)));
                 cc.strb(tt, ptr_tt(base, a));
+                break;
+            }
+            case OP_GETUPVAL: {
+                int b = GETARG_B(i);
+                a64::Gp func_ptr = cc.new_gp64();
+                cc.ldr(func_ptr, a64::ptr(ci, offsetof(CallInfo, func)));
+
+                a64::Gp closure = cc.new_gp64();
+                cc.ldr(closure, a64::ptr(func_ptr, offsetof(TValue, value_)));
+
+                a64::Gp upval_ptr = cc.new_gp64();
+                cc.ldr(upval_ptr, a64::ptr(closure, offsetof(LClosure, upvals) + b * sizeof(UpVal*)));
+
+                a64::Gp val_ptr = cc.new_gp64();
+                cc.ldr(val_ptr, a64::ptr(upval_ptr, offsetof(UpVal, v)));
+
+                a64::Gp tmp1 = cc.new_gp64();
+                a64::Gp tmp2 = cc.new_gp64();
+                cc.ldr(tmp1, a64::ptr(val_ptr, 0));
+                cc.ldr(tmp2, a64::ptr(val_ptr, 8));
+
+                cc.str(tmp1, a64::ptr(base, a * sizeof(StackValue)));
+                cc.str(tmp2, a64::ptr(base, a * sizeof(StackValue) + 8));
                 break;
             }
             case OP_ADD: {
