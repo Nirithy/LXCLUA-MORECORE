@@ -84,6 +84,7 @@ static a64::Mem ptr_tt(a64::Gp& base, int i) {
 #define GETARG_sBx_64(i) ((long long)(GETARG_Bx_64(i) - OFFSET_sBx_64))
 
 extern "C" int jit_compile(lua_State *L, Proto *p) {
+    if (p->jit_code) return 1;
     jit_init();
 
     CodeHolder code;

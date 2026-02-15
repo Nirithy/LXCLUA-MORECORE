@@ -2009,7 +2009,7 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
                  }
               }
           } else {
-              cl->p->jit_counter = -100000;
+              cl->p->jit_counter = -1000000000;
           }
       }
   }
@@ -2922,7 +2922,7 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
              cl->p->jit_counter++;
              if (cl->p->jit_counter > 200) {
                   if (!jit_compile(L, cl->p)) {
-                      cl->p->jit_counter = -100000; // Backoff for a while
+                      cl->p->jit_counter = -1000000000; // Backoff for a while
                   }
              }
         }
@@ -2949,7 +2949,7 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
             cl->p->jit_counter++;
             if (cl->p->jit_counter > 200) {
                  if (!jit_compile(L, cl->p)) {
-                     cl->p->jit_counter = -100000; // Backoff for a while
+                     cl->p->jit_counter = -1000000000; // Backoff for a while
                  }
             }
         }
