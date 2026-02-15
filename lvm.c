@@ -3017,8 +3017,26 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
       vmcase(OP_VARARG) {
         StkId ra = RA(i);
         int n = GETARG_C(i) - 1;  /* required results (-1 means all) */
-        int vatab = GETARG_k(i) ? GETARG_B(i) : -1;
-        Protect(luaT_getvarargs(L, ci, ra, n));
+        int nextra = ci->u.l.nextraargs;
+        if (n < 0) {
+          n = nextra;  /* get all extra arguments available */
+          if (l_unlikely(L->stack_last.p - L->top.p <= n)) {
+             savestate(L, ci);
+             luaD_growstack(L, n, 1);
+             updatebase(ci);
+             ra = RA(i);
+             updatetrap(ci);
+          }
+          L->top.p = ra + n;  /* next instruction will need top */
+          checkGC(L, ra + n);
+        }
+        for (int j = 0; j < n; j++) {
+          if (j < nextra) {
+             setobjs2s(L, ra + j, ci->func.p - nextra + j);
+          } else {
+             setnilvalue(s2v(ra + j));
+          }
+        }
         vmbreak;
       }
       vmcase(OP_GETVARG) {
