@@ -1653,7 +1653,7 @@ static void inopr (lua_State *L, StkId ra, TValue *a, TValue *b) {
   StkId ra = RA(i); \
   TValue *v1 = vRB(i);  \
   int imm = GETARG_sC(i);  \
-  if (ttisinteger(v1)) {  \
+  if (l_likely(ttisinteger(v1))) {  \
     lua_Integer iv1 = ivalue(v1);  \
     pc++; setivalue(s2v(ra), iop(L, iv1, imm));  \
   }  \
@@ -1665,10 +1665,10 @@ static void inopr (lua_State *L, StkId ra, TValue *a, TValue *b) {
 
 #define op_arith_overflow_aux(L,v1,v2,tryop,fop,bigop) {  \
   StkId ra = RA(i); \
-  if (ttisinteger(v1) && ttisinteger(v2)) {  \
+  if (l_likely(ttisinteger(v1) && ttisinteger(v2))) {  \
     lua_Integer i1 = ivalue(v1); lua_Integer i2 = ivalue(v2); \
     lua_Integer r; \
-    if (tryop(i1, i2, &r)) { \
+    if (l_likely(tryop(i1, i2, &r))) { \
        pc++; setivalue(s2v(ra), r); \
     } else { \
        bigop(L, v1, v2, s2v(ra)); \
@@ -1695,10 +1695,10 @@ static void inopr (lua_State *L, StkId ra, TValue *a, TValue *b) {
   StkId ra = RA(i); \
   TValue *v1 = vRB(i);  \
   int imm = GETARG_sC(i);  \
-  if (ttisinteger(v1)) {  \
+  if (l_likely(ttisinteger(v1))) {  \
     lua_Integer iv1 = ivalue(v1);  \
     lua_Integer r; \
-    if (tryop(iv1, imm, &r)) { \
+    if (l_likely(tryop(iv1, imm, &r))) { \
        pc++; setivalue(s2v(ra), r); \
     } else { \
        TValue vimm; setivalue(&vimm, imm); \
@@ -1815,7 +1815,7 @@ static void inopr (lua_State *L, StkId ra, TValue *a, TValue *b) {
   StkId ra = RA(i); \
   int cond;  \
   TValue *rb = vRB(i);  \
-  if (ttisinteger(s2v(ra)) && ttisinteger(rb)) {  \
+  if (l_likely(ttisinteger(s2v(ra)) && ttisinteger(rb))) {  \
     lua_Integer ia = ivalue(s2v(ra));  \
     lua_Integer ib = ivalue(rb);  \
     cond = opi(ia, ib);  \
@@ -1824,7 +1824,14 @@ static void inopr (lua_State *L, StkId ra, TValue *a, TValue *b) {
     cond = opn(s2v(ra), rb);  \
   else  \
     Protect(cond = other(L, s2v(ra), rb));  \
-  docondjump(); }
+  if (cond != GETARG_k(i)) { \
+     pc++; \
+  } else { \
+     Instruction ni = *pc; \
+     pc += GETARG_sJ(ni) + 1; \
+     updatetrap(ci); \
+  } \
+}
 
 
 /**
@@ -2236,7 +2243,7 @@ static const void *const dispatch_table[NUM_OPCODES] = {
         TValue *upval = cl->upvals[GETARG_B(i)]->v.p;
         TValue *rc = KC(i);
         TString *key = tsvalue(rc);  /* key must be a short string */
-        if (ttistable(upval)) {
+        if (l_likely(ttistable(upval))) {
            Table *h = hvalue(upval);
            l_rwlock_rdlock(&h->lock);
            const TValue *res = luaH_getshortstr(h, key);
@@ -2256,7 +2263,7 @@ static const void *const dispatch_table[NUM_OPCODES] = {
         StkId ra = RA(i);
         TValue *rb = vRB(i);
         TValue *rc = vRC(i);
-        if (ttistable(rb)) {
+        if (l_likely(ttistable(rb))) {
            Table *h = hvalue(rb);
            l_rwlock_rdlock(&h->lock);
            const TValue *res = luaH_get_optimized(h, rc);
@@ -2276,7 +2283,7 @@ static const void *const dispatch_table[NUM_OPCODES] = {
         StkId ra = RA(i);
         TValue *rb = vRB(i);
         int c = GETARG_C(i);
-        if (ttistable(rb)) {
+        if (l_likely(ttistable(rb))) {
            Table *h = hvalue(rb);
            l_rwlock_rdlock(&h->lock);
            const TValue *res = luaH_getint(h, c);
@@ -2341,7 +2348,7 @@ static const void *const dispatch_table[NUM_OPCODES] = {
         TValue *rb = KB(i);
         TValue *rc = RKC(i);
         TString *key = tsvalue(rb);  /* key must be a short string */
-        if (ttistable(upval)) {
+        if (l_likely(ttistable(upval))) {
            Table *h = hvalue(upval);
            l_rwlock_wrlock(&h->lock);
            const TValue *res = luaH_getshortstr(h, key);
@@ -2362,7 +2369,7 @@ static const void *const dispatch_table[NUM_OPCODES] = {
         StkId ra = RA(i);
         TValue *rb = vRB(i);  /* key (table is in 'ra') */
         TValue *rc = RKC(i);  /* value */
-        if (ttistable(s2v(ra))) {
+        if (l_likely(ttistable(s2v(ra)))) {
            Table *h = hvalue(s2v(ra));
            l_rwlock_wrlock(&h->lock);
            const TValue *res = luaH_get_optimized(h, rb);
@@ -2389,7 +2396,7 @@ static const void *const dispatch_table[NUM_OPCODES] = {
         StkId ra = RA(i);
         int c = GETARG_B(i);
         TValue *rc = RKC(i);
-        if (ttistable(s2v(ra))) {
+        if (l_likely(ttistable(s2v(ra)))) {
            Table *h = hvalue(s2v(ra));
            l_rwlock_wrlock(&h->lock);
            const TValue *res = luaH_getint(h, c);
@@ -2606,20 +2613,20 @@ static const void *const dispatch_table[NUM_OPCODES] = {
       vmcase(OP_ADD) {
         TValue *v1 = vRB(i);
         TValue *v2 = vRC(i);
-        if (ttisinteger(v1) && ttisinteger(v2)) {
+        if (l_likely(ttisinteger(v1) && ttisinteger(v2))) {
           lua_Integer i1 = ivalue(v1); lua_Integer i2 = ivalue(v2);
           lua_Integer r;
-          if (try_add(i1, i2, &r)) {
+          if (l_likely(try_add(i1, i2, &r))) {
             StkId ra = RA(i);
             pc++; setivalue(s2v(ra), r);
             vmbreak;
           }
         }
-        if (ttispointer(v1) && ttisinteger(v2)) {
+        if (l_unlikely(ttispointer(v1) && ttisinteger(v2))) {
           StkId ra = RA(i);
           setptrvalue(s2v(ra), (char *)ptrvalue(v1) + ivalue(v2));
           pc++;
-        } else if (ttisinteger(v1) && ttispointer(v2)) {
+        } else if (l_unlikely(ttisinteger(v1) && ttispointer(v2))) {
           StkId ra = RA(i);
           setptrvalue(s2v(ra), (char *)ptrvalue(v2) + ivalue(v1));
           pc++;
@@ -2631,20 +2638,20 @@ static const void *const dispatch_table[NUM_OPCODES] = {
       vmcase(OP_SUB) {
         TValue *v1 = vRB(i);
         TValue *v2 = vRC(i);
-        if (ttisinteger(v1) && ttisinteger(v2)) {
-          lua_Integer i1 = ivalue(v1); lua_Integer i2 = ivalue(v2);
+        if (l_likely(ttisinteger(v1) && ttisinteger(v2))) {
+          lua_Integer i1 =ivalue(v1); lua_Integer i2 = ivalue(v2);
           lua_Integer r;
-          if (try_sub(i1, i2, &r)) {
+          if (l_likely(try_sub(i1, i2, &r))) {
             StkId ra = RA(i);
             pc++; setivalue(s2v(ra), r);
             vmbreak;
           }
         }
-        if (ttispointer(v1) && ttisinteger(v2)) {
+        if (l_unlikely(ttispointer(v1) && ttisinteger(v2))) {
           StkId ra = RA(i);
           setptrvalue(s2v(ra), (char *)ptrvalue(v1) - ivalue(v2));
           pc++;
-        } else if (ttispointer(v1) && ttispointer(v2)) {
+        } else if (l_unlikely(ttispointer(v1) && ttispointer(v2))) {
           StkId ra = RA(i);
           setivalue(s2v(ra), (char *)ptrvalue(v1) - (char *)ptrvalue(v2));
           pc++;
@@ -2839,7 +2846,7 @@ static const void *const dispatch_table[NUM_OPCODES] = {
         StkId ra = RA(i);
         int cond;
         TValue *rb = vRB(i);
-        if (ttisinteger(s2v(ra)) && ttisinteger(rb)) {
+        if (l_likely(ttisinteger(s2v(ra)) && ttisinteger(rb))) {
            cond = (ivalue(s2v(ra)) == ivalue(rb));
         } else if (ttisfloat(s2v(ra)) && ttisfloat(rb)) {
            cond = luai_numeq(fltvalue(s2v(ra)), fltvalue(rb));
@@ -2848,7 +2855,13 @@ static const void *const dispatch_table[NUM_OPCODES] = {
         } else {
            Protect(cond = luaV_equalobj(L, s2v(ra), rb));
         }
-        docondjump();
+        if (cond != GETARG_k(i)) {
+           pc++;
+        } else {
+           Instruction ni = *pc;
+           pc += GETARG_sJ(ni) + 1;
+           updatetrap(ci);
+        }
         vmbreak;
       }
       vmcase(OP_LT) {
@@ -3046,7 +3059,7 @@ static const void *const dispatch_table[NUM_OPCODES] = {
       }
       vmcase(OP_FORLOOP) {
         StkId ra = RA(i);
-        if (ttisinteger(s2v(ra + 2))) {  /* integer loop? */
+        if (l_likely(ttisinteger(s2v(ra + 2)))) {  /* integer loop? */
           lua_Unsigned count = l_castS2U(ivalue(s2v(ra + 1)));
           if (count > 0) {  /* still more iterations? */
             lua_Integer step = ivalue(s2v(ra + 2));
