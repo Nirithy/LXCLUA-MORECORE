@@ -1036,6 +1036,27 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
     std::vector<Label> labels(p->sizecode);
     for (int i = 0; i < p->sizecode; i++) labels[i] = cc.new_label();
     bool unsupported = false;
+
+    // Helper macro for inline bailout
+    #define EMIT_BAILOUT(cond_op, target_pc) do { \
+        Label bailout = cc.new_label(); \
+        Label skip = cc.new_label(); \
+        cond_op(bailout); \
+        cc.b(skip); \
+        cc.bind(bailout); \
+        a64::Gp code_ptr = cc.new_gp64(); \
+        cc.ldr(code_ptr, a64::ptr(func_ptr, offsetof(Proto, code))); \
+        a64::Gp pc_addr = cc.new_gp64(); \
+        a64::Gp offset_reg = cc.new_gp64(); \
+        cc.mov(offset_reg, target_pc * sizeof(Instruction)); \
+        cc.add(pc_addr, code_ptr, offset_reg); \
+        cc.str(pc_addr, a64::ptr(ci, offsetof(CallInfo, u))); \
+        a64::Gp ret_reg = cc.new_gp32(); \
+        cc.mov(ret_reg, 0); \
+        cc.ret(ret_reg); \
+        cc.bind(skip); \
+    } while(0)
+
     for (int pc = 0; pc < p->sizecode; pc++) {
         cc.bind(labels[pc]);
         Instruction i = p->code[pc];
