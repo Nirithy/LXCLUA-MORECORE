@@ -74,10 +74,10 @@ $(LUA_A): $(BASE_O)
 	$(RANLIB) $@
 
 $(LUA_T): $(LUA_O) $(LUA_A)
-	g++ -o $@ $(LDFLAGS) $(LUA_O) $(LUA_A) $(LIBS)
+	$(CXX) -o $@ $(LDFLAGS) $(LUA_O) $(LUA_A) $(LIBS)
 
 $(LUAC_T): $(LUAC_O) $(LUA_A)
-	g++ -o $@ $(LDFLAGS) $(LUAC_O) $(LUA_A) $(LIBS)
+	$(CXX) -o $@ $(LDFLAGS) $(LUAC_O) $(LUA_A) $(LIBS)
 
 $(LBCDUMP_T): $(LBCDUMP_O)
 	$(CC) -o $@ $(LDFLAGS) $(LBCDUMP_O)
@@ -184,11 +184,11 @@ SunOS solaris:
 # 需要先安装 Emscripten SDK: https://emscripten.org/docs/getting_started/downloads.html
 # 使用方法: make wasm
 # Emscripten 3.0.0+ 支持 C23 (底层 Clang 18+)
-# Emscripten SDK 路径配置（Windows需要.bat扩展名）
-EMSDK_PATH= E:/Soft/Proje/LXCLUA-NCore/emsdk/upstream/emscripten
-EMCC= $(EMSDK_PATH)/emcc.bat
-EMAR= $(EMSDK_PATH)/emar.bat
-EMRANLIB= $(EMSDK_PATH)/emranlib.bat
+# Emscripten SDK configuration
+# Use environment variables or rely on PATH
+EMCC ?= emcc
+EMAR ?= emar
+EMRANLIB ?= emranlib
 
 wasm:
 	$(MAKE) $(ALL) PLAT=wasm CC="$(EMCC) -std=c23" \
