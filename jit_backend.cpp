@@ -17,6 +17,7 @@ extern "C" {
 #include "ldo.h"
 #include "lfunc.h"
 #include "lstring.h"
+#include "ltable.h"
 }
 
 // Undefine to avoid pollution
@@ -88,6 +89,9 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
     CodeHolder code;
     code.init(g_jitRuntime->environment());
 
+    // Simple logging
+    printf("[JIT] Compiling function with %d instructions\n", p->sizecode);
+
     #ifdef JIT_ARCH_X86
     x86::Compiler cc(&code);
     FuncNode* func_node = cc.add_func(FuncSignature::build<int, lua_State*>(CallConvId::kCDecl));
@@ -112,6 +116,17 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
     }
 
     bool unsupported = false;
+
+    // Helper macro for inline bailout
+    // Note: Ideally we update savedpc here, but complex movs trigger asmjit assertions in this env.
+    // Returning 0 causes function restart (safest fallback without exact PC restoration).
+    #define EMIT_BAILOUT(cond_op, target_pc) do { \
+        Label ok = cc.new_label(); \
+        cond_op(ok); \
+        cc.xor_(x86::eax, x86::eax); \
+        cc.ret(); \
+        cc.bind(ok); \
+    } while(0)
 
     for (int pc = 0; pc < p->sizecode; pc++) {
         cc.bind(labels[pc]);
@@ -156,6 +171,18 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
             case OP_ADD: {
                 int b = GETARG_B(i);
                 int c = GETARG_C(i);
+
+                // Guard: check if inputs are integers
+                x86::Gp tag_b = cc.new_gp32();
+                cc.movzx(tag_b, ptr_tt(base, b));
+                cc.cmp(tag_b, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.je, pc);
+
+                x86::Gp tag_c = cc.new_gp32();
+                cc.movzx(tag_c, ptr_tt(base, c));
+                cc.cmp(tag_c, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.je, pc);
+
                 x86::Gp vb = cc.new_gp64();
                 x86::Gp vc = cc.new_gp64();
                 cc.mov(vb, ptr_ivalue(base, b));
@@ -169,6 +196,17 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
             case OP_SUB: {
                 int b = GETARG_B(i);
                 int c = GETARG_C(i);
+
+                x86::Gp tag_b = cc.new_gp32();
+                cc.movzx(tag_b, ptr_tt(base, b));
+                cc.cmp(tag_b, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.je, pc);
+
+                x86::Gp tag_c = cc.new_gp32();
+                cc.movzx(tag_c, ptr_tt(base, c));
+                cc.cmp(tag_c, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.je, pc);
+
                 x86::Gp vb = cc.new_gp64();
                 x86::Gp vc = cc.new_gp64();
                 cc.mov(vb, ptr_ivalue(base, b));
@@ -182,6 +220,17 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
             case OP_MUL: {
                 int b = GETARG_B(i);
                 int c = GETARG_C(i);
+
+                x86::Gp tag_b = cc.new_gp32();
+                cc.movzx(tag_b, ptr_tt(base, b));
+                cc.cmp(tag_b, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.je, pc);
+
+                x86::Gp tag_c = cc.new_gp32();
+                cc.movzx(tag_c, ptr_tt(base, c));
+                cc.cmp(tag_c, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.je, pc);
+
                 x86::Gp vb = cc.new_gp64();
                 x86::Gp vc = cc.new_gp64();
                 cc.mov(vb, ptr_ivalue(base, b));
@@ -233,6 +282,229 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                 cc.jmp(labels[pc + 1 + sJ]);
                 break;
             }
+            case OP_GETTABLE: {
+                int b = GETARG_B(i);
+                int c = GETARG_C(i);
+
+                // Guard: R[B] is table
+                x86::Gp tb = cc.new_gp32();
+                cc.movzx(tb, ptr_tt(base, b));
+                cc.cmp(tb, LUA_VTABLE);
+                EMIT_BAILOUT(cc.je, pc);
+
+                // Load Table* t
+                x86::Gp table_ptr = cc.new_gp64();
+                cc.mov(table_ptr, ptr_ivalue(base, b));
+
+                // Key ptr (R[C])
+                x86::Gp key_ptr = cc.new_gp64();
+                cc.lea(key_ptr, x86::ptr(base, c * sizeof(StackValue)));
+
+                // Call luaH_get(t, key)
+                InvokeNode* invoke;
+                x86::Gp result_ptr = cc.new_gp64();
+                cc.invoke(asmjit::Out(invoke), (uint64_t)&luaH_get, FuncSignature::build<const TValue*, Table*, const TValue*>(CallConvId::kCDecl));
+                invoke->set_arg(0, table_ptr);
+                invoke->set_arg(1, key_ptr);
+                invoke->set_ret(0, result_ptr);
+
+                // Check if result is nil (guard against __index)
+                cc.cmp(x86::byte_ptr(result_ptr, offsetof(TValue, tt_)), LUA_VNIL);
+                EMIT_BAILOUT(cc.jne, pc);
+
+                // Copy result to R[A]
+                x86::Gp val = cc.new_gp64();
+                cc.mov(val, x86::ptr(result_ptr, offsetof(TValue, value_)));
+                cc.mov(ptr_ivalue(base, a), val);
+
+                x86::Gp tag = cc.new_gp32();
+                cc.movzx(tag, x86::byte_ptr(result_ptr, offsetof(TValue, tt_)));
+                cc.mov(ptr_tt(base, a), tag.r8());
+                break;
+            }
+            case OP_SETTABLE: {
+                int b = GETARG_B(i);
+                int c = GETARG_C(i);
+
+                // Guard: R[A] is table
+                x86::Gp ta = cc.new_gp32();
+                cc.movzx(ta, ptr_tt(base, a));
+                cc.cmp(ta, LUA_VTABLE);
+                EMIT_BAILOUT(cc.je, pc);
+
+                x86::Gp table_ptr = cc.new_gp64();
+                cc.mov(table_ptr, ptr_ivalue(base, a));
+
+                // Guard: table->metatable == NULL
+                cc.cmp(x86::qword_ptr(table_ptr, offsetof(Table, metatable)), 0);
+                EMIT_BAILOUT(cc.je, pc);
+
+                // Key ptr (R[B])
+                x86::Gp key_ptr = cc.new_gp64();
+                cc.lea(key_ptr, x86::ptr(base, b * sizeof(StackValue)));
+
+                // Value ptr (RK[C])
+                x86::Gp val_ptr = cc.new_gp64();
+                if (k_flag) {
+                    TValue* k_val = &p->k[c];
+                    cc.mov(val_ptr, (uint64_t)k_val);
+                } else {
+                    cc.lea(val_ptr, x86::ptr(base, c * sizeof(StackValue)));
+                }
+
+                // Call luaH_set(L, t, key, val)
+                InvokeNode* invoke;
+                cc.invoke(asmjit::Out(invoke), (uint64_t)&luaH_set, FuncSignature::build<void, lua_State*, Table*, const TValue*, TValue*>(CallConvId::kCDecl));
+                invoke->set_arg(0, L_reg);
+                invoke->set_arg(1, table_ptr);
+                invoke->set_arg(2, key_ptr);
+                invoke->set_arg(3, val_ptr);
+                break;
+            }
+            case OP_GETFIELD: {
+                int b = GETARG_B(i);
+                int c = GETARG_C(i);
+
+                // Guard: R[B] is table
+                x86::Gp tb = cc.new_gp32();
+                cc.movzx(tb, ptr_tt(base, b));
+                cc.cmp(tb, LUA_VTABLE);
+                EMIT_BAILOUT(cc.je, pc);
+
+                x86::Gp table_ptr = cc.new_gp64();
+                cc.mov(table_ptr, ptr_ivalue(base, b));
+
+                // Key (String) from K[C]
+                x86::Gp key_str_ptr = cc.new_gp64();
+                x86::Gp k_val_addr = cc.new_gp64();
+                cc.mov(k_val_addr, (uint64_t)&p->k[c]);
+                cc.mov(key_str_ptr, x86::ptr(k_val_addr, offsetof(TValue, value_)));
+
+                // Call luaH_getshortstr(t, key)
+                InvokeNode* invoke;
+                x86::Gp result_ptr = cc.new_gp64();
+                cc.invoke(asmjit::Out(invoke), (uint64_t)&luaH_getshortstr, FuncSignature::build<const TValue*, Table*, TString*>(CallConvId::kCDecl));
+                invoke->set_arg(0, table_ptr);
+                invoke->set_arg(1, key_str_ptr);
+                invoke->set_ret(0, result_ptr);
+
+                // Guard: result is nil
+                cc.cmp(x86::byte_ptr(result_ptr, offsetof(TValue, tt_)), LUA_VNIL);
+                EMIT_BAILOUT(cc.jne, pc);
+
+                // Copy result
+                x86::Gp val = cc.new_gp64();
+                cc.mov(val, x86::ptr(result_ptr, offsetof(TValue, value_)));
+                cc.mov(ptr_ivalue(base, a), val);
+
+                x86::Gp tag = cc.new_gp32();
+                cc.movzx(tag, x86::byte_ptr(result_ptr, offsetof(TValue, tt_)));
+                cc.mov(ptr_tt(base, a), tag.r8());
+                break;
+            }
+            case OP_SETFIELD: {
+                int b = GETARG_B(i); // Key index in K
+                int c = GETARG_C(i); // Value index (RK)
+
+                // Guard: R[A] is table
+                x86::Gp ta = cc.new_gp32();
+                cc.movzx(ta, ptr_tt(base, a));
+                cc.cmp(ta, LUA_VTABLE);
+                EMIT_BAILOUT(cc.je, pc);
+
+                x86::Gp table_ptr = cc.new_gp64();
+                cc.mov(table_ptr, ptr_ivalue(base, a));
+
+                // Guard: Metatable is NULL
+                cc.cmp(x86::qword_ptr(table_ptr, offsetof(Table, metatable)), 0);
+                EMIT_BAILOUT(cc.je, pc);
+
+                // Key ptr (K[B]) - passed as TValue* to luaH_set
+                x86::Gp key_ptr = cc.new_gp64();
+                cc.mov(key_ptr, (uint64_t)&p->k[b]);
+
+                // Value ptr (RK[C])
+                x86::Gp val_ptr = cc.new_gp64();
+                if (k_flag) {
+                    TValue* k_val = &p->k[c];
+                    cc.mov(val_ptr, (uint64_t)k_val);
+                } else {
+                    cc.lea(val_ptr, x86::ptr(base, c * sizeof(StackValue)));
+                }
+
+                // Call luaH_set(L, t, key, val)
+                InvokeNode* invoke;
+                cc.invoke(asmjit::Out(invoke), (uint64_t)&luaH_set, FuncSignature::build<void, lua_State*, Table*, const TValue*, TValue*>(CallConvId::kCDecl));
+                invoke->set_arg(0, L_reg);
+                invoke->set_arg(1, table_ptr);
+                invoke->set_arg(2, key_ptr);
+                invoke->set_arg(3, val_ptr);
+                break;
+            }
+            case OP_GETI: {
+                int b = GETARG_B(i); // Table
+                int c = GETARG_C(i); // Key (int)
+
+                x86::Gp tb = cc.new_gp32();
+                cc.movzx(tb, ptr_tt(base, b));
+                cc.cmp(tb, LUA_VTABLE);
+                EMIT_BAILOUT(cc.je, pc);
+
+                x86::Gp table_ptr = cc.new_gp64();
+                cc.mov(table_ptr, ptr_ivalue(base, b));
+
+                // Call luaH_getint(t, c)
+                InvokeNode* invoke;
+                x86::Gp result_ptr = cc.new_gp64();
+                cc.invoke(asmjit::Out(invoke), (uint64_t)&luaH_getint, FuncSignature::build<const TValue*, Table*, lua_Integer>(CallConvId::kCDecl));
+                invoke->set_arg(0, table_ptr);
+                invoke->set_arg(1, c); // Immediate integer
+                invoke->set_ret(0, result_ptr);
+
+                cc.cmp(x86::byte_ptr(result_ptr, offsetof(TValue, tt_)), LUA_VNIL);
+                EMIT_BAILOUT(cc.jne, pc);
+
+                x86::Gp val = cc.new_gp64();
+                cc.mov(val, x86::ptr(result_ptr, offsetof(TValue, value_)));
+                cc.mov(ptr_ivalue(base, a), val);
+
+                x86::Gp tag = cc.new_gp32();
+                cc.movzx(tag, x86::byte_ptr(result_ptr, offsetof(TValue, tt_)));
+                cc.mov(ptr_tt(base, a), tag.r8());
+                break;
+            }
+            case OP_SETI: {
+                int b = GETARG_B(i); // Key (int)
+                int c = GETARG_C(i); // Value (RK)
+
+                x86::Gp ta = cc.new_gp32();
+                cc.movzx(ta, ptr_tt(base, a));
+                cc.cmp(ta, LUA_VTABLE);
+                EMIT_BAILOUT(cc.je, pc);
+
+                x86::Gp table_ptr = cc.new_gp64();
+                cc.mov(table_ptr, ptr_ivalue(base, a));
+
+                cc.cmp(x86::qword_ptr(table_ptr, offsetof(Table, metatable)), 0);
+                EMIT_BAILOUT(cc.je, pc);
+
+                x86::Gp val_ptr = cc.new_gp64();
+                if (k_flag) {
+                    TValue* k_val = &p->k[c];
+                    cc.mov(val_ptr, (uint64_t)k_val);
+                } else {
+                    cc.lea(val_ptr, x86::ptr(base, c * sizeof(StackValue)));
+                }
+
+                // Call luaH_setint(L, t, key, val)
+                InvokeNode* invoke;
+                cc.invoke(asmjit::Out(invoke), (uint64_t)&luaH_setint, FuncSignature::build<void, lua_State*, Table*, lua_Integer, TValue*>(CallConvId::kCDecl));
+                invoke->set_arg(0, L_reg);
+                invoke->set_arg(1, table_ptr);
+                invoke->set_arg(2, b); // Immediate
+                invoke->set_arg(3, val_ptr);
+                break;
+            }
             case OP_CALL: {
                 int b = GETARG_B(i);
                 int c = GETARG_C(i);
@@ -265,6 +537,23 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                 x86::Gp limit = cc.new_gp64();
                 x86::Gp step = cc.new_gp64();
                 x86::Gp count = cc.new_gp64();
+
+                // Basic guard: check integer types
+                x86::Gp t1 = cc.new_gp32();
+                cc.movzx(t1, ptr_tt(base, a));
+                cc.cmp(t1, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.je, pc);
+
+                x86::Gp t2 = cc.new_gp32();
+                cc.movzx(t2, ptr_tt(base, a + 1));
+                cc.cmp(t2, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.je, pc);
+
+                x86::Gp t3 = cc.new_gp32();
+                cc.movzx(t3, ptr_tt(base, a + 2));
+                cc.cmp(t3, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.je, pc);
+
                 cc.mov(init, ptr_ivalue(base, a));
                 cc.mov(limit, ptr_ivalue(base, a + 1));
                 cc.mov(step, ptr_ivalue(base, a + 2));
