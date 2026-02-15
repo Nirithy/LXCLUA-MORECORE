@@ -168,6 +168,22 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                 cc.mov(ptr_tt(base, a), tt.r8());
                 break;
             }
+            case OP_GETUPVAL: {
+                int b = GETARG_B(i);
+                x86::Gp cl_ptr = cc.new_gp64();
+                cc.mov(cl_ptr, x86::ptr(func_ptr, offsetof(TValue, value_)));
+                x86::Gp uv_ptr = cc.new_gp64();
+                cc.mov(uv_ptr, x86::ptr(cl_ptr, offsetof(LClosure, upvals) + b * sizeof(UpVal*)));
+                x86::Gp val_ptr = cc.new_gp64();
+                cc.mov(val_ptr, x86::ptr(uv_ptr, offsetof(UpVal, v)));
+                x86::Gp tmp1 = cc.new_gp64();
+                x86::Gp tmp2 = cc.new_gp64();
+                cc.mov(tmp1, x86::ptr(val_ptr, 0));
+                cc.mov(tmp2, x86::ptr(val_ptr, 8));
+                cc.mov(x86::ptr(base, a * sizeof(StackValue)), tmp1);
+                cc.mov(x86::ptr(base, a * sizeof(StackValue) + 8), tmp2);
+                break;
+            }
             case OP_ADD: {
                 int b = GETARG_B(i);
                 int c = GETARG_C(i);
@@ -188,6 +204,23 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                 cc.mov(vb, ptr_ivalue(base, b));
                 cc.mov(vc, ptr_ivalue(base, c));
                 cc.add(vb, vc);
+                cc.mov(ptr_ivalue(base, a), vb);
+                cc.mov(ptr_tt(base, a), LUA_VNUMINT);
+                cc.jmp(labels[pc + 2]);
+                break;
+            }
+            case OP_ADDI: {
+                int b = GETARG_B(i);
+                int sc = GETARG_sC(i);
+
+                x86::Gp tag_b = cc.new_gp32();
+                cc.movzx(tag_b, ptr_tt(base, b));
+                cc.cmp(tag_b, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.je, pc);
+
+                x86::Gp vb = cc.new_gp64();
+                cc.mov(vb, ptr_ivalue(base, b));
+                cc.add(vb, sc);
                 cc.mov(ptr_ivalue(base, a), vb);
                 cc.mov(ptr_tt(base, a), LUA_VNUMINT);
                 cc.jmp(labels[pc + 2]);
@@ -263,6 +296,23 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                 Label dest_false = labels[pc + 2];
                 if (k_flag) cc.jge(dest_false);
                 else cc.jl(dest_false);
+                break;
+            }
+            case OP_LTI: {
+                int sb = GETARG_sB(i);
+
+                x86::Gp tag_a = cc.new_gp32();
+                cc.movzx(tag_a, ptr_tt(base, a));
+                cc.cmp(tag_a, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.je, pc);
+
+                x86::Gp va = cc.new_gp64();
+                cc.mov(va, ptr_ivalue(base, a));
+                cc.cmp(va, sb);
+
+                Label dest_skip = labels[pc + 2];
+                if (k_flag) cc.jge(dest_skip);
+                else cc.jl(dest_skip);
                 break;
             }
             case OP_LE: {
@@ -509,6 +559,12 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                 int b = GETARG_B(i);
                 int c = GETARG_C(i);
                 if (b == 0) { unsupported = true; break; }
+
+                // Update L->top = base + a + b
+                x86::Gp top_ptr = cc.new_gp64();
+                cc.lea(top_ptr, x86::ptr(base, (a + b) * sizeof(StackValue)));
+                cc.mov(x86::ptr(L_reg, offsetof(lua_State, top)), top_ptr);
+
                 x86::Gp func_arg = cc.new_gp64();
                 cc.lea(func_arg, x86::ptr(base, a * sizeof(StackValue)));
                 x86::Gp call_addr = cc.new_gp64();
@@ -677,6 +733,16 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
     std::vector<Label> labels(p->sizecode);
     for (int i = 0; i < p->sizecode; i++) labels[i] = cc.new_label();
     bool unsupported = false;
+
+    #define EMIT_BAILOUT(cond_op, target_pc) do { \
+        Label ok = cc.new_label(); \
+        cond_op(ok); \
+        a64::Gp ret_reg = cc.new_gp32(); \
+        cc.mov(ret_reg, 0); \
+        cc.ret(ret_reg); \
+        cc.bind(ok); \
+    } while(0)
+
     for (int pc = 0; pc < p->sizecode; pc++) {
         cc.bind(labels[pc]);
         Instruction i = p->code[pc];
@@ -719,9 +785,55 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                 cc.strb(tt, ptr_tt(base, a));
                 break;
             }
+            case OP_GETUPVAL: {
+                int b = GETARG_B(i);
+                a64::Gp cl_ptr = cc.new_gp64();
+                cc.ldr(cl_ptr, a64::ptr(func_ptr, offsetof(TValue, value_)));
+                a64::Gp uv_ptr = cc.new_gp64();
+                cc.ldr(uv_ptr, a64::ptr(cl_ptr, offsetof(LClosure, upvals) + b * sizeof(UpVal*)));
+                a64::Gp val_ptr = cc.new_gp64();
+                cc.ldr(val_ptr, a64::ptr(uv_ptr, offsetof(UpVal, v)));
+                a64::Gp tmp1 = cc.new_gp64();
+                a64::Gp tmp2 = cc.new_gp64();
+                cc.ldr(tmp1, a64::ptr(val_ptr, 0));
+                cc.ldr(tmp2, a64::ptr(val_ptr, 8));
+                cc.str(tmp1, a64::ptr(base, a * sizeof(StackValue)));
+                cc.str(tmp2, a64::ptr(base, a * sizeof(StackValue) + 8));
+                break;
+            }
+            case OP_ADDI: {
+                int b = GETARG_B(i);
+                int sc = GETARG_sC(i);
+
+                a64::Gp tag_b = cc.new_gp32();
+                cc.ldrb(tag_b, ptr_tt(base, b));
+                cc.cmp(tag_b, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.b_eq, pc);
+
+                a64::Gp vb = cc.new_gp64();
+                cc.ldr(vb, ptr_ivalue(base, b));
+                cc.add(vb, vb, sc);
+                cc.str(vb, ptr_ivalue(base, a));
+                a64::Gp tt = cc.new_gp32();
+                cc.mov(tt, LUA_VNUMINT);
+                cc.strb(tt, ptr_tt(base, a));
+                cc.b(labels[pc + 2]);
+                break;
+            }
             case OP_ADD: {
                 int b = GETARG_B(i);
                 int c = GETARG_C(i);
+
+                a64::Gp tag_b = cc.new_gp32();
+                cc.ldrb(tag_b, ptr_tt(base, b));
+                cc.cmp(tag_b, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.b_eq, pc);
+
+                a64::Gp tag_c = cc.new_gp32();
+                cc.ldrb(tag_c, ptr_tt(base, c));
+                cc.cmp(tag_c, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.b_eq, pc);
+
                 a64::Gp vb = cc.new_gp64();
                 a64::Gp vc = cc.new_gp64();
                 cc.ldr(vb, ptr_ivalue(base, b));
@@ -736,6 +848,17 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
             case OP_SUB: {
                 int b = GETARG_B(i);
                 int c = GETARG_C(i);
+
+                a64::Gp tag_b = cc.new_gp32();
+                cc.ldrb(tag_b, ptr_tt(base, b));
+                cc.cmp(tag_b, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.b_eq, pc);
+
+                a64::Gp tag_c = cc.new_gp32();
+                cc.ldrb(tag_c, ptr_tt(base, c));
+                cc.cmp(tag_c, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.b_eq, pc);
+
                 a64::Gp vb = cc.new_gp64();
                 a64::Gp vc = cc.new_gp64();
                 cc.ldr(vb, ptr_ivalue(base, b));
@@ -750,6 +873,17 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
             case OP_MUL: {
                 int b = GETARG_B(i);
                 int c = GETARG_C(i);
+
+                a64::Gp tag_b = cc.new_gp32();
+                cc.ldrb(tag_b, ptr_tt(base, b));
+                cc.cmp(tag_b, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.b_eq, pc);
+
+                a64::Gp tag_c = cc.new_gp32();
+                cc.ldrb(tag_c, ptr_tt(base, c));
+                cc.cmp(tag_c, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.b_eq, pc);
+
                 a64::Gp vb = cc.new_gp64();
                 a64::Gp vc = cc.new_gp64();
                 cc.ldr(vb, ptr_ivalue(base, b));
@@ -763,6 +897,17 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
             }
             case OP_EQ: {
                 int b = GETARG_B(i);
+
+                a64::Gp tag_a = cc.new_gp32();
+                cc.ldrb(tag_a, ptr_tt(base, a));
+                cc.cmp(tag_a, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.b_eq, pc);
+
+                a64::Gp tag_b = cc.new_gp32();
+                cc.ldrb(tag_b, ptr_tt(base, b));
+                cc.cmp(tag_b, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.b_eq, pc);
+
                 a64::Gp va = cc.new_gp64();
                 a64::Gp vb = cc.new_gp64();
                 cc.ldr(va, ptr_ivalue(base, a));
@@ -775,6 +920,17 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
             }
             case OP_LT: {
                 int b = GETARG_B(i);
+
+                a64::Gp tag_a = cc.new_gp32();
+                cc.ldrb(tag_a, ptr_tt(base, a));
+                cc.cmp(tag_a, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.b_eq, pc);
+
+                a64::Gp tag_b = cc.new_gp32();
+                cc.ldrb(tag_b, ptr_tt(base, b));
+                cc.cmp(tag_b, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.b_eq, pc);
+
                 a64::Gp va = cc.new_gp64();
                 a64::Gp vb = cc.new_gp64();
                 cc.ldr(va, ptr_ivalue(base, a));
@@ -785,8 +941,35 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                 else cc.b_lt(dest_false);
                 break;
             }
+            case OP_LTI: {
+                int sb = GETARG_sB(i);
+
+                a64::Gp tag_a = cc.new_gp32();
+                cc.ldrb(tag_a, ptr_tt(base, a));
+                cc.cmp(tag_a, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.b_eq, pc);
+
+                a64::Gp va = cc.new_gp64();
+                cc.ldr(va, ptr_ivalue(base, a));
+                cc.cmp(va, sb);
+                Label dest_skip = labels[pc + 2];
+                if (k_flag) cc.b_ge(dest_skip);
+                else cc.b_lt(dest_skip);
+                break;
+            }
             case OP_LE: {
                 int b = GETARG_B(i);
+
+                a64::Gp tag_a = cc.new_gp32();
+                cc.ldrb(tag_a, ptr_tt(base, a));
+                cc.cmp(tag_a, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.b_eq, pc);
+
+                a64::Gp tag_b = cc.new_gp32();
+                cc.ldrb(tag_b, ptr_tt(base, b));
+                cc.cmp(tag_b, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.b_eq, pc);
+
                 a64::Gp va = cc.new_gp64();
                 a64::Gp vb = cc.new_gp64();
                 cc.ldr(va, ptr_ivalue(base, a));
@@ -806,6 +989,12 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                 int b = GETARG_B(i);
                 int c = GETARG_C(i);
                 if (b == 0) { unsupported = true; break; }
+
+                // Update L->top = base + a + b
+                a64::Gp top_ptr = cc.new_gp64();
+                cc.add(top_ptr, base, (a + b) * sizeof(StackValue));
+                cc.str(top_ptr, a64::ptr(L_reg, offsetof(lua_State, top)));
+
                 a64::Gp func_arg = cc.new_gp64();
                 cc.add(func_arg, base, a * sizeof(StackValue));
                 a64::Gp call_addr = cc.new_gp64();
@@ -834,6 +1023,22 @@ extern "C" int jit_compile(lua_State *L, Proto *p) {
                 a64::Gp limit = cc.new_gp64();
                 a64::Gp step = cc.new_gp64();
                 a64::Gp count = cc.new_gp64();
+
+                a64::Gp t1 = cc.new_gp32();
+                cc.ldrb(t1, ptr_tt(base, a));
+                cc.cmp(t1, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.b_eq, pc);
+
+                a64::Gp t2 = cc.new_gp32();
+                cc.ldrb(t2, ptr_tt(base, a + 1));
+                cc.cmp(t2, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.b_eq, pc);
+
+                a64::Gp t3 = cc.new_gp32();
+                cc.ldrb(t3, ptr_tt(base, a + 2));
+                cc.cmp(t3, LUA_VNUMINT);
+                EMIT_BAILOUT(cc.b_eq, pc);
+
                 cc.ldr(init, ptr_ivalue(base, a));
                 cc.ldr(limit, ptr_ivalue(base, a + 1));
                 cc.ldr(step, ptr_ivalue(base, a + 2));
