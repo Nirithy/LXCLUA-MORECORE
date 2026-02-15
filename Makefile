@@ -391,8 +391,9 @@ lzio.o: lzio.c lprefix.h lua.h luaconf.h lapi.h llimits.h lstate.h \
 # (end of Makefile)
 
 setup_asmjit:
-	@if [ ! -d "asmjit" ]; then \
+	@if [ ! -f "asmjit/CMakeLists.txt" ]; then \
 		echo "Cloning asmjit..."; \
+		rm -rf asmjit; \
 		git clone https://github.com/asmjit/asmjit.git; \
 	fi
 	@if [ ! -d "asmjit/build" ]; then \
