@@ -1995,6 +1995,23 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
             goto returning;
          }
       }
+  } else {
+      cl->p->jit_counter++;
+      if (cl->p->jit_counter > 200) {
+          if (jit_compile(L, cl->p)) {
+              JitFunction jf = (JitFunction)cl->p->jit_code;
+              if (jf(L)) {
+                 if (ci->callstatus & CIST_FRESH)
+                    return;
+                 else {
+                    ci = ci->previous;
+                    goto returning;
+                 }
+              }
+          } else {
+              cl->p->jit_counter = -100000;
+          }
+      }
   }
 
   /** VM protection detection: If the function enables VM protection, use a custom VM interpreter */
