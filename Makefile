@@ -398,7 +398,7 @@ setup_asmjit:
 	@if [ ! -d "asmjit/build" ]; then \
 		echo "Building asmjit..."; \
 		mkdir -p asmjit/build; \
-		cd asmjit/build && cmake .. -DASMJIT_STATIC=ON -DASMJIT_TEST=OFF && make -j4; \
+		cd asmjit/build && cmake -G "MinGW Makefiles" .. -DASMJIT_STATIC=ON -DASMJIT_TEST=OFF && make -j4; \
 	fi
 
 jit_backend.o: setup_asmjit
