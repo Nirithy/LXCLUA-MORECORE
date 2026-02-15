@@ -202,7 +202,7 @@ wasm:
 	"LUAC_T=luac.js" \
 	"LBCDUMP_T=lbcdump.js" \
 	"LIBS=-lm" \
-	"LDFLAGS=-sWASM=1 -sSINGLE_FILE=1 -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,callMain,FS -sMODULARIZE=1 -sEXPORT_NAME=LuaModule -sALLOW_MEMORY_GROWTH=1 -sFILESYSTEM=1 -sINVOKE_RUN=0 --closure 1"
+	"LDFLAGS=-sWASM=1 -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,callMain,FS -sMODULARIZE=1 -sEXPORT_NAME=LuaModule -sALLOW_MEMORY_GROWTH=1 -sFILESYSTEM=1 -sINVOKE_RUN=0 --closure 1"
 
 # WASM 最小化版本（无文件系统，更小体积）
 wasm-minimal:
@@ -291,6 +291,7 @@ wasm-release: wasm
 	@echo "Signed by: $(SIGNER)" >> $(RELEASE_DIR)/BUILD_INFO.txt
 	@echo "Platform: WebAssembly" >> $(RELEASE_DIR)/BUILD_INFO.txt
 	@cp lxclua.js luac.js lbcdump.js $(RELEASE_DIR)/
+	@cp *.wasm $(RELEASE_DIR)/
 	@cp LICENSE README.md README_EN.md $(RELEASE_DIR)/
 	@tar -caf $(RELEASE_NAME)-wasm-$(RELEASE_VERSION).zip -C $(RELEASE_DIR) .
 	@rm -rf $(RELEASE_DIR)
