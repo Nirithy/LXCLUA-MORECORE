@@ -723,8 +723,8 @@ int luaY_nvarstack (FuncState *fs) {
 */
 static LocVar *localdebuginfo (FuncState *fs, int vidx) {
   Vardesc *vd = getlocalvardesc(fs,  vidx);
-  if (vd->vd.kind == RDKCTC)
-    return NULL;  /* no debug info. for constants */
+  if (vd->vd.kind == RDKCTC || vd->vd.kind == GDKREG || vd->vd.kind == GDKCONST)
+    return NULL;  /* no debug info. for constants or globals */
   else {
     int idx = vd->vd.pidx;
     lua_assert(idx < fs->ndebugvars);
@@ -920,6 +920,18 @@ static void singlevaraux (FuncState *fs, TString *n, expdesc *var, int base) {
   else {
     int v = searchvar(fs, n, var);  /* look up locals at current level */
     if (v >= 0) {  /* found? */
+      Vardesc *vd = getlocalvardesc(fs, var->u.var.vidx);
+      if (vd->vd.kind == GDKREG || vd->vd.kind == GDKCONST) {
+        expdesc key;
+        singlevaraux(fs, fs->ls->envn, var, 1);  /* get environment variable */
+        lua_assert(var->k != VVOID);  /* this one must exist */
+        codestring(&key, n);  /* key is variable name */
+        luaK_indexed(fs, var, &key);  /* env[varname] */
+        if (vd->vd.kind == GDKCONST) {
+           var->u.ind.ro = 1;
+        }
+        return;
+      }
       if (v == VLOCAL && !base)
         markupval(fs, var->u.var.vidx);  /* local will be used as an upval */
     }
@@ -929,6 +941,23 @@ static void singlevaraux (FuncState *fs, TString *n, expdesc *var, int base) {
         singlevaraux(fs->prev, n, var, 0);  /* try upper levels */
         if (var->k == VLOCAL || var->k == VUPVAL)  /* local or upvalue? */
           idx  = newupvalue(fs, n, var);  /* will be a new upvalue */
+        else if (var->k == VINDEXED || var->k == VINDEXUP) {
+          /* global variable found in outer scope (resolved to _ENV.x) */
+          /* capture _ENV from outer scope */
+          idx = searchupvalue(fs, fs->ls->envn);
+          if (idx < 0) {
+             expdesc env;
+             singlevaraux(fs->prev, fs->ls->envn, &env, 1);
+             idx = newupvalue(fs, fs->ls->envn, &env);
+          }
+          var->k = VINDEXUP;  /* now indexed via upvalue */
+          var->u.ind.t = idx;
+          /* var->u.ind.idx and keystr are preserved */
+          /* We must re-internalize the key string in the current function's constants */
+          int k = luaK_stringK(fs, n);
+          var->u.ind.idx = k;
+          var->u.ind.keystr = k;
+        }
         else  /* it is a global or a constant */
           return;  /* don't need to do anything at this level */
       }
@@ -3613,6 +3642,11 @@ static void simpleexp (LexState *ls, expdesc *v) {
                 expdesc var_exp;
                 
                 int varkind = searchvar(fs, varname, &var_exp);
+                if (varkind >= 0) {
+                   Vardesc *vd = getlocalvardesc(fs, var_exp.u.var.vidx);
+                   if (vd->vd.kind == GDKREG || vd->vd.kind == GDKCONST)
+                      varkind = -1;
+                }
                 if (varkind < 0) {
                   singlevaraux(fs, varname, &var_exp, 1);
                   /* 处理全局变量 */
@@ -3719,6 +3753,11 @@ static void simpleexp (LexState *ls, expdesc *v) {
                     
                     /* 检查是否是局部变量或上值 */
                     int varkind = searchvar(fs, varname, &var_test);
+                    if (varkind >= 0) {
+                      Vardesc *vd = getlocalvardesc(fs, var_test.u.var.vidx);
+                      if (vd->vd.kind == GDKREG || vd->vd.kind == GDKCONST)
+                         varkind = -1;
+                    }
                     if (varkind >= 0) {
                       /* 是局部变量，记录下来 */
                       int already_added = 0;
@@ -3846,6 +3885,11 @@ static void simpleexp (LexState *ls, expdesc *v) {
                 expdesc var_exp;
                 
                 int varkind = searchvar(fs, varname, &var_exp);
+                if (varkind >= 0) {
+                   Vardesc *vd = getlocalvardesc(fs, var_exp.u.var.vidx);
+                   if (vd->vd.kind == GDKREG || vd->vd.kind == GDKCONST)
+                      varkind = -1;
+                }
                 if (varkind < 0) {
                   singlevaraux(fs, varname, &var_exp, 1);
                   /* 处理全局变量: 当 singlevaraux 返回 VVOID 时，需要通过 _ENV 访问 */
