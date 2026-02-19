@@ -66,6 +66,12 @@ LXCLUA-NCore 引入了大量现代语言特性和语法糖，极大地扩展了 
 - **复合赋值**: `+=`, `-=`, `*=`, `/=`, `//=`, `%=`, `&=`, `|=`, `~=`, `>>=`, `<<=`, `..=`
 - **自增**: `++` (e.g. `i++` 后缀自增)
 - **比较**: `!=` (等价于 `~=`), `<=>` (三路比较)
+
+```lua
+local a = 10
+a += 5  -- a = 15
+a++     -- a = 16
+```
 - **管道操作**:
     - `|>`: 前向管道 (e.g. `x |> f` 等价于 `f(x)`)
     - `<|`: 反向管道 (e.g. `f <| x` 等价于 `f(x)`)
@@ -87,6 +93,17 @@ LXCLUA-NCore 引入了大量现代语言特性和语法糖，极大地扩展了 
     - 示例: `map(list, (x) => x * 2)`
     - 语句形式: `-> { ... }` (等价于 `function() ... end`)
 - **Lambda 表达式**: `lambda(args) expr` 或 `lambda(args) => stat`
+
+```lua
+-- 箭头函数
+local f = (x) => x * 2
+print(f(10)) -- 20
+
+-- Lambda 表达式
+local l = lambda(x, y): x + y
+print(l(10, 20)) -- 30
+```
+
 - **泛型函数**: `function<T>(...)` 或 `function(...) requires expr`
 - **Async/Await**: `async function foo() ... end`, `await task`
 - **C 风格定义**: `int add(int a, int b) { return a + b; }`
@@ -101,11 +118,45 @@ LXCLUA-NCore 引入了大量现代语言特性和语法糖，极大地扩展了 
 - **实例化**: `new Class(...)` 或 `onew Class(...)`
 - **父类访问**: `super.method(...)` 或 `osuper:method(...)`
 
+```lua
+class Point
+    public x = 0
+    public y = 0
+
+    function __init__(x, y)
+        self.x = x
+        self.y = y
+    end
+
+    function move(dx, dy)
+        self.x += dx
+        self.y += dy
+    end
+end
+
+local p = new Point(10, 20)
+p:move(5, 5)
+print(p.x, p.y) -- 15, 25
+```
+
 ### 5. 结构体与类型 (Structs & Types)
 
 - **结构体**: `struct Name { Type field; ... }`
 - **泛型结构体**: `struct Box(T) { T value; }`
 - **超级结构体**: `superstruct Name [ key: value, ... ]` (元数据/原型)
+
+```lua
+struct Vector3 {
+    float x;
+    float y;
+    float z;
+}
+
+local v = Vector3()
+v.x = 1.0
+v.y = 2.0
+v.z = 3.0
+```
 - **枚举**: `enum Color { Red, Green, Blue }`
 - **类型标注**: 支持 `int`, `float`, `bool`, `string`, `void`, `char`, `long` 等。
 
@@ -113,9 +164,41 @@ LXCLUA-NCore 引入了大量现代语言特性和语法糖，极大地扩展了 
 
 - **Switch**: `switch (exp) { case v: ... }` 或 `switch (exp) do case ... end`
     - 支持作为表达式: `local x = switch(v) case 1: 10 case 2: 20 end`
+
+```lua
+switch(val) do
+    case 1:
+        print("Case 1")
+    default:
+        print("Default")
+end
+
+-- 表达式形式 (需要显式 return)
+local res = switch(val) do
+    case 1: return "One"
+    case 2: return "Two"
+end
+```
+
 - **Try-Catch**: `try ... catch(e) ... finally ... end`
 - **Defer**: `defer statement` 或 `defer do ... end` (作用域结束时执行)
+
+```lua
+do
+    defer print("Cleanup")
+    print("Working...")
+end
+-- Output: Working... Cleanup
+```
+
 - **Namespace**: `namespace Name { ... }`, `using namespace Name;`
+
+```lua
+namespace MyLib {
+    int value = 42;
+}
+print(MyLib.value)
+```
 - **Using**: `using Name::Member;`
 - **Continue**: `continue` 关键字
 - **When**: `when cond then ... case cond2 then ... else ... end`
