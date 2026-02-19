@@ -236,8 +236,8 @@ static SoftKWDef soft_keywords[] = {
   {"interface",  SKW_INTERFACE,  SOFTKW_CTX_STMT_BEGIN,    {TK_NAME, 0}, {'=', 0}, 0},
   /* new - 表达式中，后面必须跟类名 */
   {"new",        SKW_NEW,        SOFTKW_CTX_EXPR,          {TK_NAME, 0}, {'=', 0}, 0},
-  /* super - 表达式中，后面必须跟.或: */
-  {"super",      SKW_SUPER,      SOFTKW_CTX_EXPR,          {'.', ':', 0}, {'=', 0}, 0},
+  /* super - 表达式中，后面必须跟.或:或( */
+  {"super",      SKW_SUPER,      SOFTKW_CTX_EXPR,          {'.', ':', '(', 0}, {'=', 0}, 0},
   /* private - 类体内，后面跟function或标识符名 */
   {"private",    SKW_PRIVATE,    SOFTKW_CTX_CLASS_BODY,    {TK_FUNCTION, TK_NAME, 0}, {'=', 0}, 0},
   /* protected - 类体内，后面跟function或标识符名 */
@@ -10593,6 +10593,52 @@ static void superexpr(LexState *ls, expdesc *v) {
     luaX_syntaxerror(ls, "super 只能在类方法中使用");
   }
   
+  /* 检查是否是 super(...) 调用构造函数 */
+  if (ls->t.token == '(') {
+    /* super(args) -> super:__init(args) */
+    luaK_exp2anyreg(fs, &self_exp);
+    int self_reg = self_exp.u.info;
+
+    /* 分配连续寄存器用于调用: [method, self, arg1, arg2, ...] */
+    int base_reg = fs->freereg;
+    luaK_reserveregs(fs, 2);  /* 为 method 和 self 预留 */
+
+    /* 生成 GETSUPER: base_reg = 父类 __init__ 方法 */
+    TString *init_name = luaS_newliteral(ls->L, "__init__");
+    int method_k = luaK_stringK(fs, init_name);
+    luaK_codeABC(fs, OP_GETSUPER, base_reg, self_reg, method_k);
+
+    /* base_reg + 1 = self */
+    luaK_codeABC(fs, OP_MOVE, base_reg + 1, self_reg, 0);
+
+    /* 处理参数列表 */
+    expdesc args;
+    int nparams;
+    luaX_next(ls);  /* 跳过 '(' */
+    if (ls->t.token == ')') {
+      args.k = VVOID;
+    } else {
+      explist(ls, &args);
+      if (hasmultret(args.k))
+        luaK_setmultret(fs, &args);
+    }
+    check_match(ls, ')', '(', line);
+
+    if (hasmultret(args.k))
+      nparams = LUA_MULTRET;
+    else {
+      if (args.k != VVOID)
+        luaK_exp2nextreg(fs, &args);
+      nparams = fs->freereg - (base_reg + 1);  /* self 也是参数 */
+    }
+
+    /* 生成 CALL 指令 */
+    init_exp(v, VCALL, luaK_codeABC(fs, OP_CALL, base_reg, nparams + 1, 2));
+    luaK_fixline(fs, line);
+    fs->freereg = base_reg + 1;  /* 调用后只留一个返回值 */
+    return;
+  }
+
   int is_method_call = 0;
   if (ls->t.token == ':') {
     is_method_call = 1;
@@ -10602,7 +10648,7 @@ static void superexpr(LexState *ls, expdesc *v) {
     luaX_next(ls);  /* 跳过 '.' */
   }
   else {
-    luaX_syntaxerror(ls, "super 后期望 '.' 或 ':'");
+    luaX_syntaxerror(ls, "super 后期望 '.', ':' 或 '('");
   }
   
   /* 获取方法名 */

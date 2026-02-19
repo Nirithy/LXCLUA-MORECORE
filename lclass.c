@@ -2325,7 +2325,7 @@ int luaC_verify_abstracts(lua_State *L, int class_idx) {
     }
     
     /* 验证参数数量是否匹配 */
-    if (expected_params >= 0 && actual_params != expected_params) {
+    if (expected_params >= 0 && actual_params != expected_params && actual_params != expected_params + 1) {
       const char *classname = get_class_name_str(L, class_idx);
       const char *methodname = lua_tostring(L, -1);
       luaL_error(L, "类 '%s' 的方法 '%s' 参数数量不匹配: 期望 %d 个参数，实际 %d 个参数", 
@@ -2454,7 +2454,7 @@ int luaC_verify_interfaces(lua_State *L, int class_idx) {
         }
         
         /* 验证参数数量是否匹配 */
-        if (expected_params >= 0 && actual_params != expected_params) {
+        if (expected_params >= 0 && actual_params != expected_params && actual_params != expected_params + 1) {
           const char *classname = get_class_name_str(L, class_idx);
           const char *methodname = lua_tostring(L, -1);
           luaL_error(L, "类 '%s' 实现接口 '%s' 的方法 '%s' 参数数量不匹配: 期望 %d 个参数，实际 %d 个参数", 
