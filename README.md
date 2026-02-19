@@ -131,9 +131,7 @@ local add = (a, b) => a + b
 print(add(10, 20))  -- 30
 
 -- 箭头函数 (语句块形式)
-local log = (msg) => {
-    print("[LOG]: " .. msg)
-}
+local log = (msg) => print("[LOG]: " .. msg)
 
 -- Lambda 表达式
 local sq = lambda(x) => x * x
@@ -339,10 +337,10 @@ $end
 
 ```lua
 asm(
-    LOADI 0 100   ; R[0] = 100
-    LOADI 1 200   ; R[1] = 200
-    ADD 2 0 1     ; R[2] = R[0] + R[1]
-    _print "Result: " 2 ; 打印 R[2] 的值
+    LOADI 0 100
+    LOADI 1 200
+    ADD 2 0 1
+    _print "Result: " 2
 )
 ```
 
