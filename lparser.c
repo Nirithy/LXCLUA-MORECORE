@@ -1407,6 +1407,9 @@ static int block_follow (LexState *ls, int withuntil) {
              return 1;
           }
        }
+       else if (la == TK_ELSE || la == TK_ELSEIF || la == TK_END) {
+          return 1;
+       }
        return 0;
     }
     case TK_UNTIL: return withuntil;
@@ -11188,7 +11191,8 @@ static int eval_const_condition(LexState *ls) {
 static void constexprdefinestat (LexState *ls) {
   luaX_next(ls); /* skip 'define' */
   TString *name = str_checkname(ls);
-  checknext(ls, '=');
+  if (ls->t.token == '=')
+    luaX_next(ls);
 
   expdesc e;
   expr(ls, &e);
@@ -12067,6 +12071,7 @@ LClosure *luaY_parser (lua_State *L, ZIO *z, Mbuffer *buff,
   sethvalue2s(L, L->top.p, lexstate.declared_globals); /* anchor it */
   luaD_inctop(L);
   lexstate.all_type_hints = NULL;
+  lexstate.defines = NULL;
   funcstate.f = cl->p = luaF_newproto(L);
   luaC_objbarrier(L, cl, cl->p);
   funcstate.f->source = luaS_new(L, name);  /* create and anchor TString */
@@ -12082,6 +12087,9 @@ LClosure *luaY_parser (lua_State *L, ZIO *z, Mbuffer *buff,
   /* all scopes should be correctly finished */
   lua_assert(dyd->actvar.n == 0 && dyd->gt.n == 0 && dyd->label.n == 0);
   typehint_free(&lexstate);
+  if (lexstate.defines) {
+     L->top.p--; /* remove defines table */
+  }
   L->top.p--;  /* remove declared globals table */
   L->top.p--;  /* remove named types table */
   L->top.p--;  /* remove scanner's table */
