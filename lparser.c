@@ -2888,8 +2888,15 @@ static void primaryexp (LexState *ls, expdesc *v) {
       /* 使用软关键字系统检查 osuper（需要前瞻 . 或 :） */
       if (softkw_test(ls, SKW_SUPER, SOFTKW_CTX_EXPR)) {
         /* osuper.method 或 osuper:method - 调用父类方法 */
-        superexpr(ls, v);
-        return;
+        /* Check if 'self' exists in scope before treating as keyword */
+        expdesc self_exp;
+        TString *self_name = luaS_newliteral(ls->L, "self");
+        singlevaraux(ls->fs, self_name, &self_exp, 1);
+
+        if (self_exp.k != VVOID) {
+           superexpr(ls, v);
+           return;
+        }
       }
       /* 普通标识符 */
       singlevar(ls, v);
