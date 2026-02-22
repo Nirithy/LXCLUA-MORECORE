@@ -153,7 +153,7 @@ int sum(int a, int b) {
 }
 
 -- 泛型函数
-function<T> identity(x)
+function(T)(x)
     return x
 end
 
@@ -292,8 +292,10 @@ print(x, y)  -- 1, 2
 switch (val) do
     case 1:
         print("One")
+        break
     case "test":
         print("Test string")
+        break
     default:
         print("Other")
 end
