@@ -66,6 +66,7 @@ LXCLUA-NCore 引入了大量现代语言特性和语法糖，极大地扩展了 
 - **复合赋值**: `+=`, `-=`, `*=`, `/=`, `//=`, `%=`, `&=`, `|=`, `~=`, `>>=`, `<<=`, `..=`
 - **自增/自减**: `++` (e.g. `i++` 后缀自增), `--` (e.g. `i--` 后缀自减)
 - **比较**: `!=` (等价于 `~=`), `<=>` (三路比较)
+- **类型检查**: `is` (检查对象是否为类的实例)
 - **空值处理**: `??` (空值合并), `?.` (可选链)
 - **管道操作**: `|>` (正向), `<|` (反向), `|?>` (安全正向)
 - **赋值表达式**: `:=` (Walrus Operator) 允许在表达式中进行赋值
@@ -152,9 +153,14 @@ int sum(int a, int b) {
     return a + b;
 }
 
--- 泛型函数
-function(T)(x)
+-- 泛型函数 (带约束)
+function(T)(x) requires type(x) == "number"
     return x
+end
+
+-- 函数属性 (nodiscard: 忽略返回值时警告)
+function<nodiscard> important()
+    return "must use this"
 end
 
 -- 异步函数
@@ -233,7 +239,7 @@ end
 - **超结构体 (SuperStruct)**: `superstruct Name [ key: value, ... ]`
 - **泛型结构体**: `struct Box(T) { T value; }`
 - **枚举**: `enum Name { A, B=10 }`
-- **强类型变量**: `int`, `float`, `bool`, `string` 等
+- **强类型变量**: `int`, `float`, `bool`, `string`, `double`, `long`, `char` 等
 - **解构赋值**: `local take { ... } = expr`
 
 ```lua
@@ -377,6 +383,10 @@ end
 -- 预处理指令
 $define DEBUG 1
 $alias print_debug = print
+
+-- 类型别名与声明
+$type MyInt = int
+$declare external_var : MyInt <nodiscard>
 
 $if DEBUG
     print_debug("Debug mode on")
