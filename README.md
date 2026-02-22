@@ -140,6 +140,10 @@ print(add(10, 20))  -- 30
 -- 箭头函数 (语句块形式)
 local log = (msg) => print("[LOG]: " .. msg)
 
+-- 箭头函数 (-> 语法)
+local fast_add = ->(a, b) { return a + b }
+local simple_action = -> { print("Action") }
+
 -- Lambda 表达式
 local sq = lambda(x) => x * x
 
@@ -300,6 +304,15 @@ local res = switch(val) do
     case 2: return "B"
 end
 
+-- When 语句
+local x = 10
+when x == 1
+    print("x is 1")
+case x == 10
+    print("x is 10")
+else
+    print("other")
+
 -- Try-Catch 异常处理
 try
     error("Something went wrong")
@@ -361,9 +374,10 @@ end
 
 -- 预处理指令
 $define DEBUG 1
+$alias print_debug = print
 
 $if DEBUG
-    print("Debug mode on")
+    print_debug("Debug mode on")
 $else
     print("Debug mode off")
 $end
@@ -378,13 +392,15 @@ asm(
     LOADI 0 100
     LOADI 1 200
     ADD 2 0 1
-    _print "Result: " 2
+    _print "Result: " 2 ; 编译时打印
+    nop 5                ; 插入 5 个 NOP 指令
 )
 ```
 
 ### 9. 模块与作用域 (Modules & Scope)
 
 - **导出 (Export)**: `export` 关键字标记模块公开成员。
+- **全局 (Global)**: `global` 关键字用于在局部作用域中显式定义全局变量。
 
 ```lua
 export function myFunc()
@@ -392,6 +408,11 @@ export function myFunc()
 end
 
 export struct MyData { int id; }
+
+-- 局部作用域定义全局函数
+global function init()
+    print("Global init")
+end
 ```
 
 ## 系统要求
