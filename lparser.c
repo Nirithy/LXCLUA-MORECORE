@@ -3146,7 +3146,7 @@ static void suffixedexp (LexState *ls, expdesc *v) {
         
         /* 将表达式转换为寄存器 */
         luaK_dischargevars(fs, v);
-        reg = luaK_exp2anyreg(fs, v);
+        luaK_exp2nextreg(fs, v); reg = v->u.info;
         
         /* 生成 TESTNIL 指令：k=1 表示非nil时跳过下一条JMP */
         luaK_codeABCk(fs, OP_TESTNIL, reg, reg, 0, 1);
@@ -4534,7 +4534,7 @@ static void cond_suffixedexp (LexState *ls, expdesc *v) {
         int idx;
         
         luaK_dischargevars(fs, v);
-        reg = luaK_exp2anyreg(fs, v);
+        luaK_exp2nextreg(fs, v); reg = v->u.info;
         
         luaK_codeABCk(fs, OP_TESTNIL, reg, reg, 0, 1);
         jmp_skip = luaK_jump(fs);

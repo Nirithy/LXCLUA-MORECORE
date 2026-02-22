@@ -90,8 +90,8 @@ local port = config?.server?.port  -- 8080
 local timeout = config?.client?.timeout  -- nil (不会报错)
 
 -- 管道操作符 (Pipe Operator)
--- x |> f 等价于 f(x)
-local result = "hello" |> string.upper |> print  -- HELLO
+-- x |> f 等价于 f(x) 但返回 x (Tap 语义)
+local result = "hello" |> string.upper |> print  -- 打印 HELLO, result 为 "hello"
 
 -- 安全管道 (Safe Pipe)
 -- x |?> f 等价于 x and f(x)
@@ -145,7 +145,7 @@ local fast_add = ->(a, b) { return a + b }
 local simple_action = -> { print("Action") }
 
 -- Lambda 表达式
-local sq = lambda(x) => x * x
+local sq = lambda(x): x * x
 
 -- C 风格强类型函数
 int sum(int a, int b) {
@@ -416,6 +416,56 @@ global function init()
     print("Global init")
 end
 ```
+
+
+### 10. 扩展库示例 (Extended Libraries)
+
+#### 文件系统 (fs)
+```lua
+local fs = require "fs"
+
+-- 检查文件是否存在
+if fs.exists("README.md") then
+    local info = fs.stat("README.md")
+    print("Size: " .. info.size)
+end
+
+-- 列出当前目录
+local files = fs.ls(".")
+for k, v in pairs(files) do
+    print(v)
+end
+```
+
+#### HTTP 网络 (http)
+```lua
+local http = require "http"
+
+-- HTTP GET 请求
+-- local status, body = http.get("http://example.com")
+
+-- TCP Socket 客户端
+-- local client = http.client("127.0.0.1", 8080)
+-- if client then
+--     client:send("ping")
+--     client:close()
+-- end
+```
+
+#### 多线程 (thread)
+```lua
+local thread = require "thread"
+
+-- 创建并运行线程
+local t = thread.create(function(a, b)
+    return a + b
+end)
+
+-- 等待线程结束并获取结果
+local res = t:join(10, 20)
+print("Thread result: " .. tostring(res))  -- 30
+```
+
 
 ## 系统要求
 
