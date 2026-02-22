@@ -9516,7 +9516,7 @@ static void class_getter(LexState *ls, int class_reg, int access_level) {
   TString *prop_name = str_checkname(ls);
   
   /* 生成getter函数体 */
-  body(ls, &method_exp, 0, line);
+  body(ls, &method_exp, 1, line);
   
   /* 根据访问级别选择存储表 */
   const char *table_name;
@@ -9571,7 +9571,7 @@ static void class_setter(LexState *ls, int class_reg, int access_level) {
   TString *prop_name = str_checkname(ls);
   
   /* 生成setter函数体 */
-  body(ls, &method_exp, 0, line);
+  body(ls, &method_exp, 1, line);
   
   /* 根据访问级别选择存储表 */
   const char *table_name;
