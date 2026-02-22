@@ -427,8 +427,66 @@ global function init()
 end
 ```
 
+### 10. 高级特性 (Advanced Features)
 
-### 10. 扩展库示例 (Extended Libraries)
+#### 对象宏 (Object Macro)
+`$object` 宏可以快速创建键值与变量名一致的表。
+
+```lua
+local x = 10
+local y = "hello"
+local obj = $object(x, y)
+-- 等价于 { x = x, y = y }
+print(obj.x) -- 10
+```
+
+#### 运算符调用 (Operator Call)
+使用 `$$` 前缀可以直接调用已定义的运算符函数（需要先定义 `operator`）。
+
+```lua
+operator + (a, b)
+    return a + b
+end
+
+local res = $$+(10, 20) -- 调用 _OPERATORS["+"](10, 20)
+print(res) -- 30
+```
+
+#### Lambda 简写 (Lambda Shorthand)
+`lambda` 支持使用 `:` 作为 `return` 的简写。
+
+```lua
+local double = lambda(x): x * 2
+print(double(10)) -- 20
+```
+
+#### 概念表达式 (Concept Expression)
+`concept` 支持单行表达式定义。
+
+```lua
+concept IsPositive(x) = x > 0
+print(IsPositive(10)) -- true
+```
+
+#### 汇编扩展 (ASM Extensions)
+`asm` 块支持多种伪指令用于调试和底层操作。
+
+- `_print "msg" [val]`: 编译时打印消息和可选值
+- `_assert cond "msg"`: 编译时断言
+- `junk "str"` / `junk count`: 插入垃圾数据或 NOP
+- `rep count { ... }`: 重复生成指令
+- `db`, `dw`, `dd`: 插入数据字节/字/双字
+
+```lua
+asm(
+    _print "Generating ASM code..."
+    LOADI 0 42
+    _assert 1 == 1 "Math check"
+)
+```
+
+
+### 11. 扩展库示例 (Extended Libraries)
 
 #### 文件系统 (fs)
 ```lua
