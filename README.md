@@ -68,6 +68,7 @@ LXCLUA-NCore 引入了大量现代语言特性和语法糖，极大地扩展了 
 - **比较**: `!=` (等价于 `~=`), `<=>` (三路比较)
 - **空值处理**: `??` (空值合并), `?.` (可选链)
 - **管道操作**: `|>` (正向), `<|` (反向), `|?>` (安全正向)
+- **赋值表达式**: `:=` (Walrus Operator) 允许在表达式中进行赋值
 
 ```lua
 -- 复合赋值与自增
@@ -96,6 +97,12 @@ local result = "hello" |> string.upper |> print  -- HELLO
 -- x |?> f 等价于 x and f(x)
 local maybe_nil = nil
 maybe_nil |?> print  -- (什么都不打印)
+
+-- 赋值表达式 (Walrus Operator)
+local x
+if (x := 100) > 50 then
+    print(x) -- 100
+end
 ```
 
 ### 2. 字符串增强 (Enhanced Strings)
@@ -162,6 +169,7 @@ end
 - **属性访问器**: `get prop() ... end`, `set prop(v) ... end`
 - **实例化**: `new Class(...)` (或 `onew`)
 - **父类访问**: `super.method(...)` (或 `osuper`)
+- **概念 (Concept)**: `concept Name(args) ... end` 定义谓词或类型约束
 
 ```lua
 interface Drawable
@@ -208,11 +216,17 @@ local c = Circle.create(10)
 c.radius = 20
 print(c.radius)  -- 20
 c:draw()
+
+-- 概念定义
+concept IsPositive(x)
+    return x > 0
+end
 ```
 
 ### 5. 结构体与类型 (Structs & Types)
 
 - **结构体**: `struct Name { Type field; ... }`
+- **超结构体 (SuperStruct)**: `superstruct Name [ key: value, ... ]`
 - **泛型结构体**: `struct Box(T) { T value; }`
 - **枚举**: `enum Name { A, B=10 }`
 - **强类型变量**: `int`, `float`, `bool`, `string` 等
@@ -229,6 +243,16 @@ struct Point {
 local p = Point()
 p.x = 10
 p.y = 20
+
+-- 定义超结构体 (类似强化版 Table)
+superstruct MetaPoint [
+    x: 0,
+    y: 0,
+    ["move"]: function(self, dx, dy)
+        self.x = self.x + dx
+        self.y = self.y + dy
+    end
+]
 
 -- 定义枚举
 enum Color {
@@ -256,6 +280,8 @@ print(x, y)  -- 1, 2
 - **Defer**: `defer statement` 或 `defer do ... end`
 - **When**: 类似于 `if-elseif-else` 的语法糖
 - **Namespace**: `namespace Name { ... }`, `using namespace Name;`
+- **Continue**: `continue` 跳过循环当前迭代
+- **With**: `with (expr) { ... }` 临时进入对象作用域
 
 ```lua
 -- Switch 语句
@@ -299,6 +325,18 @@ MyLib::test()
 
 using namespace MyLib;
 print(version)  -- 1
+
+-- Continue
+for i = 1, 10 do
+    if i % 2 == 0 then continue end
+    print(i)
+end
+
+-- With 语句
+local obj = { x = 10, y = 20 }
+with (obj) {
+    print(x + y) -- 30 (直接访问 obj.x 和 obj.y)
+}
 ```
 
 ### 7. 元编程 (Metaprogramming)
@@ -342,6 +380,18 @@ asm(
     ADD 2 0 1
     _print "Result: " 2
 )
+```
+
+### 9. 模块与作用域 (Modules & Scope)
+
+- **导出 (Export)**: `export` 关键字标记模块公开成员。
+
+```lua
+export function myFunc()
+    return "exported"
+end
+
+export struct MyData { int id; }
 ```
 
 ## 系统要求
