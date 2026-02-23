@@ -6247,7 +6247,7 @@ static void checktypehint (LexState *ls, TypeHint *th) {
        tname = "function";
        luaX_next(ls);
     } else {
-       ts = str_checkname(ls);
+       ts = str_checkname_allow_types(ls);
        tname = getstr(ts);
     }
 
@@ -8195,6 +8195,15 @@ static void asmstat_ex (LexState *ls, int line, AsmContext *parent_ctx) {
             int c = (int)asm_trygetint_ex(ls, &ctx, 0, NULL, inner_pendingLabel ? NULL : &inner_pendingLabel, NULL);
             if (inner_pendingLabel && !inner_needsPatch) inner_needsPatch = 1;
             int k = (int)asm_trygetint(ls, 0);
+
+            if (inner_opcode == OP_GTI || inner_opcode == OP_GEI ||
+                inner_opcode == OP_LTI || inner_opcode == OP_LEI ||
+                inner_opcode == OP_EQI || inner_opcode == OP_MMBINI) {
+              b = int2sC(b);
+            }
+            else if (inner_opcode == OP_ADDI || inner_opcode == OP_SHLI || inner_opcode == OP_SHRI) {
+              c = int2sC(c);
+            }
             inner_inst = CREATE_ABCk(inner_opcode, a, b, c, k);
             break;
           }
@@ -8261,6 +8270,29 @@ static void asmstat_ex (LexState *ls, int line, AsmContext *parent_ctx) {
         
         luaK_code(fs, inner_inst);
         luaK_fixline(fs, line);
+
+        /* 自动生成 MMBIN 系列指令 */
+        if (inner_opcode >= OP_ADD && inner_opcode <= OP_SHR) {
+          int b = GETARG_B(inner_inst);
+          int c = GETARG_C(inner_inst);
+          TMS tm = cast(TMS, (inner_opcode - OP_ADD) + TM_ADD);
+          luaK_codeABCk(fs, OP_MMBIN, b, c, cast_int(tm), 0);
+          luaK_fixline(fs, line);
+        }
+        else if (inner_opcode == OP_ADDI || inner_opcode == OP_SHLI || inner_opcode == OP_SHRI) {
+          int b = GETARG_B(inner_inst);
+          int sc = GETARG_C(inner_inst);
+          TMS tm = (inner_opcode == OP_ADDI) ? TM_ADD : (inner_opcode == OP_SHLI) ? TM_SHL : TM_SHR;
+          luaK_codeABCk(fs, OP_MMBINI, b, sc, cast_int(tm), 0);
+          luaK_fixline(fs, line);
+        }
+        else if (inner_opcode >= OP_ADDK && inner_opcode <= OP_IDIVK) {
+          int b = GETARG_B(inner_inst);
+          int c = GETARG_C(inner_inst);
+          TMS tm = cast(TMS, (inner_opcode - OP_ADDK) + TM_ADD);
+          luaK_codeABCk(fs, OP_MMBINK, b, c, cast_int(tm), 0);
+          luaK_fixline(fs, line);
+        }
         
         if (inner_needsPatch && inner_pendingLabel) {
           asm_addpending(ls, &ctx, inner_pendingLabel, inner_instpc, ls->linenumber, inner_isJump);
@@ -11422,7 +11454,7 @@ static void constexprstat (LexState *ls) {
   }
   else if (strcmp(name, "type") == 0) {
      luaX_next(ls); /* skip 'type' */
-     TString *name = str_checkname(ls);
+     TString *name = str_checkname_allow_types(ls);
      checknext(ls, '=');
      TypeHint *th = typehint_new(ls);
      checktypehint(ls, th);
@@ -11435,7 +11467,7 @@ static void constexprstat (LexState *ls) {
   }
   else if (strcmp(name, "declare") == 0) {
      luaX_next(ls); /* skip 'declare' */
-     TString *name = str_checkname(ls);
+     TString *name = str_checkname_allow_types(ls);
      TypeHint *th = NULL;
      int nodiscard = 0;
 

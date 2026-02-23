@@ -137,7 +137,8 @@ class Shape implements Drawable
     end
 end
 
-class Circle extends Shape
+-- 密封类 (不可被继承)
+sealed class Circle extends Shape
     private _radius = 0
 
     function __init__(self, r)
@@ -178,6 +179,13 @@ struct Point {
 }
 local p = Point()
 p.x = 10
+
+-- 概念 (类型谓词)
+concept IsPositive(x)
+    return x > 0
+end
+-- 或单表达式形式
+concept IsEven(x) = x % 2 == 0
 
 -- SuperStruct (增强表定义)
 superstruct MetaPoint [
@@ -245,7 +253,8 @@ with (ctx) {
 namespace MyLib {
     function test() return "test" end
 }
-using namespace MyLib;
+using namespace MyLib; -- 导入所有
+-- using MyLib::test;  -- 导入特定成员
 ```
 
 ### 7. Shell 风格测试
@@ -282,11 +291,18 @@ end
 -- 使用 $$ 前缀调用
 local res = $$++(10)
 
--- 预处理器
+-- 预处理器指令
 $define DEBUG 1
+$alias CONST_VAL = 100
+$type MyInt = int
+
 $if DEBUG
     print("Debug mode")
+$else
+    print("Release mode")
 $end
+
+$declare g_var: MyInt
 
 -- 对象宏
 local x = 10
@@ -296,12 +312,28 @@ local obj = $object(x) -- {x=10}
 ### 9. 内联汇编 (Inline ASM)
 
 直接编写 VM 指令。使用 `newreg` 安全分配寄存器。
+支持伪指令如 `rep`, `_if`, `_print`。
 
 ```lua
 asm(
     newreg r0
     LOADI r0 100
-    -- ... instructions
+
+    -- 编译时循环
+    rep 5 {
+        ADDI r0 r0 1
+    }
+
+    -- 条件汇编
+    _if 1
+       _print "Compiling this block"
+    _endif
+
+    -- 嵌入数据
+    -- db 1, 2, 3, 4
+    -- str "RawData"
+
+    RETURN1 r0
 )
 ```
 
@@ -326,6 +358,7 @@ make mingw
 ```bash
 ./lxclua tests/verify_docs_full.lua
 ./lxclua tests/test_parser_features.lua
+./lxclua tests/test_advanced_parser.lua
 ```
 
 ## 许可证

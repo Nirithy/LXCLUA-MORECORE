@@ -137,7 +137,8 @@ class Shape implements Drawable
     end
 end
 
-class Circle extends Shape
+-- Sealed Class (cannot be extended)
+sealed class Circle extends Shape
     private _radius = 0
 
     function __init__(self, r)
@@ -178,6 +179,13 @@ struct Point {
 }
 local p = Point()
 p.x = 10
+
+-- Concept (Type Predicate)
+concept IsPositive(x)
+    return x > 0
+end
+-- Or single expression form
+concept IsEven(x) = x % 2 == 0
 
 -- SuperStruct (Enhanced Table Definition)
 superstruct MetaPoint [
@@ -245,7 +253,8 @@ with (ctx) {
 namespace MyLib {
     function test() return "test" end
 }
-using namespace MyLib;
+using namespace MyLib; -- Import all
+-- using MyLib::test;  -- Import specific member
 ```
 
 ### 7. Shell-like Tests
@@ -282,11 +291,18 @@ end
 -- Call with $$ prefix
 local res = $$++(10)
 
--- Preprocessor
+-- Preprocessor Directives
 $define DEBUG 1
+$alias CONST_VAL = 100
+$type MyInt = int
+
 $if DEBUG
     print("Debug mode")
+$else
+    print("Release mode")
 $end
+
+$declare g_var: MyInt
 
 -- Object Macro
 local x = 10
@@ -296,12 +312,28 @@ local obj = $object(x) -- {x=10}
 ### 9. Inline ASM
 
 Write VM instructions directly. Use `newreg` to allocate registers safely.
+Supports pseudo-instructions like `rep`, `_if`, `_print`.
 
 ```lua
 asm(
     newreg r0
     LOADI r0 100
-    -- ... instructions
+
+    -- Compile-time loop
+    rep 5 {
+        ADDI r0 r0 1
+    }
+
+    -- Conditional assembly
+    _if 1
+       _print "Compiling this block"
+    _endif
+
+    -- Embedding data
+    -- db 1, 2, 3, 4
+    -- str "RawData"
+
+    RETURN1 r0
 )
 ```
 
@@ -326,6 +358,7 @@ Run the test suite to verify all features:
 ```bash
 ./lxclua tests/verify_docs_full.lua
 ./lxclua tests/test_parser_features.lua
+./lxclua tests/test_advanced_parser.lua
 ```
 
 ## License
