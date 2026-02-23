@@ -295,9 +295,13 @@ LUALIB_API int (luaL_fileresult) (lua_State *L, int stat, const char *fname);
 LUALIB_API int (luaL_execresult) (lua_State *L, int stat);
 
 
-/* predefined references */
+/**
+ * @name Predefined References
+ * @{
+ */
 #define LUA_NOREF       (-2)
 #define LUA_REFNIL      (-1)
+/** @} */
 
 /**
  * @brief Creates and returns a reference, in the table at index t, for the object at the top of the stack (and pops the object).
@@ -564,15 +568,22 @@ LUALIB_API void (luaL_requiref) (lua_State *L, const char *modname,
 #define luaL_loadbuffer(L,s,sz,n)	luaL_loadbufferx(L,s,sz,n,NULL)
 
 
-/*
-** Perform arithmetic operations on lua_Integer values with wrap-around
-** semantics, as the Lua core does.
-*/
+/**
+ * @brief Performs arithmetic operations on lua_Integer values with wrap-around semantics.
+ *
+ * @param op Operator.
+ * @param v1 First value.
+ * @param v2 Second value.
+ */
 #define luaL_intop(op,v1,v2)  \
 	((lua_Integer)((lua_Unsigned)(v1) op (lua_Unsigned)(v2)))
 
 
-/* push the value used to represent failure/error */
+/**
+ * @brief Pushes the value used to represent failure/error.
+ *
+ * @param L The Lua state.
+ */
 #define luaL_pushfail(L)	lua_pushnil(L)
 
 
@@ -742,17 +753,23 @@ typedef struct luaL_Stream {
 ** ========================================================
 */
 
-/* print a string */
+/**
+ * @brief Macro to print a string.
+ */
 #if !defined(lua_writestring)
 #define lua_writestring(s,l)   fwrite((s), sizeof(char), (l), stdout)
 #endif
 
-/* print a newline and flush the output */
+/**
+ * @brief Macro to print a newline and flush the output.
+ */
 #if !defined(lua_writeline)
 #define lua_writeline()        (lua_writestring("\n", 1), fflush(stdout))
 #endif
 
-/* print an error message */
+/**
+ * @brief Macro to print an error message.
+ */
 #if !defined(lua_writestringerror)
 #define lua_writestringerror(s,p) \
         (fprintf(stderr, (s), (p)), fflush(stderr))
