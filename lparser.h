@@ -21,44 +21,46 @@
 ** by short-circuit operators 'and'/'or').
 */
 
-/* kinds of variables/expressions */
+/**
+ * @brief Kinds of variables/expressions.
+ */
 typedef enum {
-  VVOID,  /* when 'expdesc' describes the last expression of a list,
+  VVOID,  /**< when 'expdesc' describes the last expression of a list,
              this kind means an empty list (so, no expression) */
-  VNIL,  /* constant nil */
-  VTRUE,  /* constant true */
-  VFALSE,  /* constant false */
-  VK,  /* constant in 'k'; info = index of constant in 'k' */
-  VKFLT,  /* floating constant; nval = numerical float value */
-  VKINT,  /* integer constant; ival = numerical integer value */
-  VKSTR,  /* string constant; strval = TString address;
+  VNIL,  /**< constant nil */
+  VTRUE,  /**< constant true */
+  VFALSE,  /**< constant false */
+  VK,  /**< constant in 'k'; info = index of constant in 'k' */
+  VKFLT,  /**< floating constant; nval = numerical float value */
+  VKINT,  /**< integer constant; ival = numerical integer value */
+  VKSTR,  /**< string constant; strval = TString address;
              (string is fixed by the scanner) */
-  VNONRELOC,  /* expression has its value in a fixed register;
+  VNONRELOC,  /**< expression has its value in a fixed register;
                  info = result register */
-  VLOCAL,  /* local variable; var.ridx = register index;
+  VLOCAL,  /**< local variable; var.ridx = register index;
               var.vidx = relative index in 'actvar.arr'  */
-  VUPVAL,  /* upvalue variable; info = index of upvalue in 'upvalues' */
-  VCONST,  /* compile-time <const> variable;
+  VUPVAL,  /**< upvalue variable; info = index of upvalue in 'upvalues' */
+  VCONST,  /**< compile-time <const> variable;
               info = absolute index in 'actvar.arr'  */
-  VINDEXED,  /* indexed variable;
+  VINDEXED,  /**< indexed variable;
                 ind.t = table register;
                 ind.idx = key's R index */
-  VINDEXUP,  /* indexed upvalue;
+  VINDEXUP,  /**< indexed upvalue;
                 ind.t = table upvalue;
                 ind.idx = key's K index */
-  VINDEXI, /* indexed variable with constant integer;
+  VINDEXI, /**< indexed variable with constant integer;
                 ind.t = table register;
                 ind.idx = key's value */
-  VINDEXSTR, /* indexed variable with literal string;
+  VINDEXSTR, /**< indexed variable with literal string;
                 ind.t = table register;
                 ind.idx = key's K index */
-  VJMP,  /* expression is a test/comparison;
+  VJMP,  /**< expression is a test/comparison;
             info = pc of corresponding jump instruction */
-  VRELOC,  /* expression can put result in any register;
+  VRELOC,  /**< expression can put result in any register;
               info = instruction pc */
-  VCALL,  /* expression is a function call; info = instruction pc */
-  VVARARG,  /* vararg expression; info = instruction pc */
-  VINTERP  /* 字符串插值表达式; strval = 原始字符串 */
+  VCALL,  /**< expression is a function call; info = instruction pc */
+  VVARARG,  /**< vararg expression; info = instruction pc */
+  VINTERP  /**< 字符串插值表达式; strval = 原始字符串 */
 } expkind;
 
 
@@ -66,27 +68,30 @@ typedef enum {
 #define vkisindexed(k)	(VINDEXED <= (k) && (k) <= VINDEXSTR)
 
 
+/**
+ * @brief Expression descriptor structure.
+ */
 typedef struct expdesc {
-  expkind k;
+  expkind k;  /**< Expression kind. */
   union {
-    lua_Integer ival;    /* for VKINT */
-    lua_Number nval;  /* for VKFLT */
-    TString *strval;  /* for VKSTR */
-    int info;  /* for generic use */
-    struct {  /* for indexed variables */
-      short idx;  /* index (R or "long" K) */
-      lu_byte t;  /* table (register or upvalue) */
-      lu_byte ro;  /* true if variable is read-only */
-      int keystr;  /* index in 'k' of string key, or -1 if not a string */
+    lua_Integer ival;    /**< for VKINT */
+    lua_Number nval;  /**< for VKFLT */
+    TString *strval;  /**< for VKSTR */
+    int info;  /**< for generic use */
+    struct {  /**< for indexed variables */
+      short idx;  /**< index (R or "long" K) */
+      lu_byte t;  /**< table (register or upvalue) */
+      lu_byte ro;  /**< true if variable is read-only */
+      int keystr;  /**< index in 'k' of string key, or -1 if not a string */
     } ind;
-    struct {  /* for local variables */
-      lu_byte ridx;  /* register holding the variable */
-      unsigned short vidx;  /* compiler index (in 'actvar.arr')  */
+    struct {  /**< for local variables */
+      lu_byte ridx;  /**< register holding the variable */
+      unsigned short vidx;  /**< compiler index (in 'actvar.arr')  */
     } var;
   } u;
-  int t;  /* patch list of 'exit when true' */
-  int f;  /* patch list of 'exit when false' */
-  unsigned int nodiscard:1; /* Result is from a nodiscard function */
+  int t;  /**< patch list of 'exit when true' */
+  int f;  /**< patch list of 'exit when false' */
+  unsigned int nodiscard:1; /**< Result is from a nodiscard function */
 } expdesc;
 
 
@@ -104,11 +109,13 @@ typedef struct expdesc {
 /* test for global variables */
 #define varglobal(v)	((v)->vd.kind >= GDKREG)
 
-/* types of values, for type hinting and propagation */
+/**
+ * @brief Types of values, for type hinting and propagation.
+ */
 typedef enum {
   LVT_NONE = 0,
   LVT_ANY,
-  LVT_NULL,  /* used to represent an implicit nil (when the assignment has too few values) */
+  LVT_NULL,  /**< used to represent an implicit nil (when the assignment has too few values) */
   LVT_NIL,
   LVT_NUMBER,
   LVT_INT,
@@ -127,6 +134,9 @@ struct TypeHint;
 #define MAX_TYPED_PARAMS 7
 #define MAX_TYPED_FIELDS 5
 
+/**
+ * @brief Type descriptor structure.
+ */
 typedef struct TypeDesc {
   ValType type;
   /* function info */
@@ -147,55 +157,66 @@ typedef struct TypeDesc {
 
 #define MAX_TYPE_DESCS 3
 
+/**
+ * @brief Type hint structure.
+ */
 typedef struct TypeHint {
   TypeDesc descs[MAX_TYPE_DESCS];
-  struct TypeHint *next; /* For memory management */
+  struct TypeHint *next; /**< For memory management */
 } TypeHint;
 
-/* description of an active local variable */
+/**
+ * @brief Description of an active local variable.
+ */
 typedef union Vardesc {
   struct {
-    TValuefields;  /* constant value (if it is a compile-time constant) */
+    TValuefields;  /**< constant value (if it is a compile-time constant) */
     lu_byte kind;
-    struct TypeHint *hint; /* type hint */
-    lu_byte ridx;  /* register holding the variable */
-    short pidx;  /* index of the variable in the Proto's 'locvars' array */
-    TString *name;  /* variable name */
+    struct TypeHint *hint; /**< type hint */
+    lu_byte ridx;  /**< register holding the variable */
+    short pidx;  /**< index of the variable in the Proto's 'locvars' array */
+    TString *name;  /**< variable name */
     lu_byte used;
-    lu_byte nodiscard; /* Variable (function) is nodiscard */
+    lu_byte nodiscard; /**< Variable (function) is nodiscard */
   } vd;
-  TValue k;  /* constant value (if any) */
+  TValue k;  /**< constant value (if any) */
 } Vardesc;
 
 
 
-/* description of pending goto statements and label statements */
+/**
+ * @brief Description of pending goto statements and label statements.
+ */
 typedef struct Labeldesc {
-  TString *name;  /* label identifier */
-  int pc;  /* position in code */
-  int line;  /* line where it appeared */
-  lu_byte nactvar;  /* number of active variables in that position */
-  lu_byte close;  /* goto that escapes upvalues */
+  TString *name;  /**< label identifier */
+  int pc;  /**< position in code */
+  int line;  /**< line where it appeared */
+  lu_byte nactvar;  /**< number of active variables in that position */
+  lu_byte close;  /**< goto that escapes upvalues */
 } Labeldesc;
 
 
-/* list of labels or gotos */
+/**
+ * @brief List of labels or gotos.
+ */
 typedef struct Labellist {
-  Labeldesc *arr;  /* array */
-  int n;  /* number of entries in use */
-  int size;  /* array size */
+  Labeldesc *arr;  /**< array */
+  int n;  /**< number of entries in use */
+  int size;  /**< array size */
 } Labellist;
 
 
-/* dynamic structures used by the parser */
+/**
+ * @brief Dynamic structures used by the parser.
+ */
 typedef struct Dyndata {
-  struct {  /* list of all active local variables */
+  struct {  /**< list of all active local variables */
     Vardesc *arr;
     int n;
     int size;
   } actvar;
-  Labellist gt;  /* list of pending gotos */
-  Labellist label;   /* list of active labels */
+  Labellist gt;  /**< list of pending gotos */
+  Labellist label;   /**< list of active labels */
 } Dyndata;
 
 
@@ -203,26 +224,28 @@ typedef struct Dyndata {
 struct BlockCnt;  /* defined in lparser.c */
 
 
-/* state needed to generate code for a given function */
+/**
+ * @brief State needed to generate code for a given function.
+ */
 typedef struct FuncState {
-  Proto *f;  /* current function header */
-  struct FuncState *prev;  /* enclosing function */
-  struct LexState *ls;  /* lexical state */
-  struct BlockCnt *bl;  /* chain of current blocks */
-  int pc;  /* next position to code (equivalent to 'ncode') */
-  int lasttarget;   /* 'label' of last 'jump label' */
-  int previousline;  /* last line that was saved in 'lineinfo' */
-  int nk;  /* number of elements in 'k' */
-  int np;  /* number of elements in 'p' */
-  int nabslineinfo;  /* number of elements in 'abslineinfo' */
-  int firstlocal;  /* index of first local var (in Dyndata array) */
-  int firstlabel;  /* index of first label (in 'dyd->label->arr') */
-  short ndebugvars;  /* number of elements in 'f->locvars' */
-  lu_byte nactvar;  /* number of active local variables */
-  lu_byte nups;  /* number of upvalues */
-  lu_byte freereg;  /* first free register */
-  lu_byte iwthabs;  /* instructions issued since last absolute line info */
-  lu_byte needclose;  /* function needs to close upvalues when returning */
+  Proto *f;  /**< current function header */
+  struct FuncState *prev;  /**< enclosing function */
+  struct LexState *ls;  /**< lexical state */
+  struct BlockCnt *bl;  /**< chain of current blocks */
+  int pc;  /**< next position to code (equivalent to 'ncode') */
+  int lasttarget;   /**< 'label' of last 'jump label' */
+  int previousline;  /**< last line that was saved in 'lineinfo' */
+  int nk;  /**< number of elements in 'k' */
+  int np;  /**< number of elements in 'p' */
+  int nabslineinfo;  /**< number of elements in 'abslineinfo' */
+  int firstlocal;  /**< index of first local var (in Dyndata array) */
+  int firstlabel;  /**< index of first label (in 'dyd->label->arr') */
+  short ndebugvars;  /**< number of elements in 'f->locvars' */
+  lu_byte nactvar;  /**< number of active local variables */
+  lu_byte nups;  /**< number of upvalues */
+  lu_byte freereg;  /**< first free register */
+  lu_byte iwthabs;  /**< instructions issued since last absolute line info */
+  lu_byte needclose;  /**< function needs to close upvalues when returning */
 } FuncState;
 
 

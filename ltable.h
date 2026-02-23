@@ -43,7 +43,16 @@
 #define nodefromval(v)	cast(Node *, (v))
 
 
+/**
+ * @brief Gets an integer key from a table.
+ *
+ * @param t The table.
+ * @param key The integer key.
+ * @return The value associated with the key.
+ */
 LUAI_FUNC const TValue *luaH_getint (Table *t, lua_Integer key);
+
+
 #define luaH_fastgeti(t,k,res,tag) \
   { Table *h = t; lua_Unsigned u = l_castS2U(k) - 1u; \
     if ((u < h->asize)) { \
@@ -142,23 +151,138 @@ LUAI_FUNC const TValue *luaH_getint (Table *t, lua_Integer key);
 
 #define fval2arr(h,k,tag,val)  \
   do { *tag = (val)->tt_; getArrVal(h,(k))->value_ = (val)->value_; } while(0)
+
+
+/**
+ * @brief Sets an integer key in a table.
+ *
+ * @param L The Lua state.
+ * @param t The table.
+ * @param key The integer key.
+ * @param value The value to set.
+ */
 LUAI_FUNC void luaH_setint (lua_State *L, Table *t, lua_Integer key,
                                                     TValue *value);
+
+/**
+ * @brief Gets a short string key from a table.
+ *
+ * @param t The table.
+ * @param key The short string key.
+ * @return The value associated with the key.
+ */
 LUAI_FUNC const TValue *luaH_getshortstr (Table *t, TString *key);
+
+/**
+ * @brief Gets a string key from a table.
+ *
+ * @param t The table.
+ * @param key The string key.
+ * @return The value associated with the key.
+ */
 LUAI_FUNC const TValue *luaH_getstr (Table *t, TString *key);
+
+/**
+ * @brief Gets a generic key from a table.
+ *
+ * @param t The table.
+ * @param key The key.
+ * @return The value associated with the key.
+ */
 LUAI_FUNC const TValue *luaH_get (Table *t, const TValue *key);
+
+/**
+ * @brief Optimized get function for tables.
+ *
+ * @param t The table.
+ * @param key The key.
+ * @return The value associated with the key.
+ */
 LUAI_FUNC const TValue *luaH_get_optimized (Table *t, const TValue *key);
+
+/**
+ * @brief Sets a generic key in a table.
+ *
+ * @param L The Lua state.
+ * @param t The table.
+ * @param key The key.
+ * @param value The value to set.
+ */
 LUAI_FUNC void luaH_set (lua_State *L, Table *t, const TValue *key,
                                                  TValue *value);
+
+/**
+ * @brief Finishes a set operation (used when the key is not present).
+ *
+ * @param L The Lua state.
+ * @param t The table.
+ * @param key The key.
+ * @param slot The slot where the key should be inserted.
+ * @param value The value to set.
+ */
 LUAI_FUNC void luaH_finishset (lua_State *L, Table *t, const TValue *key,
                                        const TValue *slot, TValue *value);
+
+/**
+ * @brief Creates a new table.
+ *
+ * @param L The Lua state.
+ * @return The new table.
+ */
 LUAI_FUNC Table *luaH_new (lua_State *L);
+
+/**
+ * @brief Resizes a table.
+ *
+ * @param L The Lua state.
+ * @param t The table.
+ * @param nasize New array size.
+ * @param nhsize New hash size.
+ */
 LUAI_FUNC void luaH_resize (lua_State *L, Table *t, unsigned int nasize,
                                                     unsigned int nhsize);
+
+/**
+ * @brief Resizes the array part of a table.
+ *
+ * @param L The Lua state.
+ * @param t The table.
+ * @param nasize New array size.
+ */
 LUAI_FUNC void luaH_resizearray (lua_State *L, Table *t, unsigned int nasize);
+
+/**
+ * @brief Frees a table.
+ *
+ * @param L The Lua state.
+ * @param t The table.
+ */
 LUAI_FUNC void luaH_free (lua_State *L, Table *t);
+
+/**
+ * @brief Iterates over a table.
+ *
+ * @param L The Lua state.
+ * @param t The table.
+ * @param key The current key (on stack).
+ * @return 1 if there are more elements, 0 otherwise.
+ */
 LUAI_FUNC int luaH_next (lua_State *L, Table *t, StkId key);
+
+/**
+ * @brief Returns the "length" of a table (the # operator).
+ *
+ * @param t The table.
+ * @return The length.
+ */
 LUAI_FUNC lua_Unsigned luaH_getn (Table *t);
+
+/**
+ * @brief Returns the real size of the array part of a table.
+ *
+ * @param t The table.
+ * @return The real array size.
+ */
 LUAI_FUNC unsigned int luaH_realasize (const Table *t);
 
 
@@ -167,30 +291,169 @@ LUAI_FUNC Node *luaH_mainposition (const Table *t, const TValue *key);
 #endif
 
 
+/* Access logging and filtering functions */
+
+/**
+ * @brief Enables or disables access logging.
+ * @param L Lua state.
+ * @param enable 1 to enable, 0 to disable.
+ * @return Previous state.
+ */
 LUAI_FUNC int luaH_enable_access_log (lua_State *L, int enable);
+
+/**
+ * @brief Gets the path to the access log file.
+ * @param L Lua state.
+ * @return Log file path.
+ */
 LUAI_FUNC const char *luaH_get_log_path (lua_State *L);
+
+/**
+ * @brief Sets whether access filters are enabled.
+ * @param enabled 1 to enable, 0 to disable.
+ */
 LUAI_FUNC void luaH_set_access_filter_enabled (int enabled);
+
+/**
+ * @brief Clears all access filters.
+ */
 LUAI_FUNC void luaH_clear_access_filters (void);
+
+/**
+ * @brief Adds an include key filter pattern.
+ * @param pattern Glob pattern.
+ * @return 0 on success.
+ */
 LUAI_FUNC int luaH_add_include_key_filter (const char *pattern);
+
+/**
+ * @brief Adds an exclude key filter pattern.
+ * @param pattern Glob pattern.
+ * @return 0 on success.
+ */
 LUAI_FUNC int luaH_add_exclude_key_filter (const char *pattern);
+
+/**
+ * @brief Adds an include value filter pattern.
+ * @param pattern Glob pattern.
+ * @return 0 on success.
+ */
 LUAI_FUNC int luaH_add_include_value_filter (const char *pattern);
+
+/**
+ * @brief Adds an exclude value filter pattern.
+ * @param pattern Glob pattern.
+ * @return 0 on success.
+ */
 LUAI_FUNC int luaH_add_exclude_value_filter (const char *pattern);
+
+/**
+ * @brief Adds an include operation filter pattern.
+ * @param pattern Glob pattern.
+ * @return 0 on success.
+ */
 LUAI_FUNC int luaH_add_include_op_filter (const char *pattern);
+
+/**
+ * @brief Adds an exclude operation filter pattern.
+ * @param pattern Glob pattern.
+ * @return 0 on success.
+ */
 LUAI_FUNC int luaH_add_exclude_op_filter (const char *pattern);
+
+/**
+ * @brief Sets the integer range for key filtering.
+ * @param min_val Minimum value.
+ * @param max_val Maximum value.
+ */
 LUAI_FUNC void luaH_set_key_int_range (int min_val, int max_val);
+
+/**
+ * @brief Sets the integer range for value filtering.
+ * @param min_val Minimum value.
+ * @param max_val Maximum value.
+ */
 LUAI_FUNC void luaH_set_value_int_range (int min_val, int max_val);
+
+/**
+ * @brief Enables or disables deduplication of log entries.
+ * @param enabled 1 to enable, 0 to disable.
+ */
 LUAI_FUNC void luaH_set_dedup_enabled (int enabled);
+
+/**
+ * @brief Enables or disables showing only unique log entries.
+ * @param enabled 1 to enable, 0 to disable.
+ */
 LUAI_FUNC void luaH_set_show_unique_only (int enabled);
+
+/**
+ * @brief Resets the deduplication cache.
+ */
 LUAI_FUNC void luaH_reset_dedup_cache (void);
+
+/**
+ * @brief Adds an include key type filter.
+ * @param type Type name.
+ * @return 0 on success.
+ */
 LUAI_FUNC int luaH_add_include_key_type_filter (const char *type);
+
+/**
+ * @brief Adds an exclude key type filter.
+ * @param type Type name.
+ * @return 0 on success.
+ */
 LUAI_FUNC int luaH_add_exclude_key_type_filter (const char *type);
+
+/**
+ * @brief Adds an include value type filter.
+ * @param type Type name.
+ * @return 0 on success.
+ */
 LUAI_FUNC int luaH_add_include_value_type_filter (const char *type);
+
+/**
+ * @brief Adds an exclude value type filter.
+ * @param type Type name.
+ * @return 0 on success.
+ */
 LUAI_FUNC int luaH_add_exclude_value_type_filter (const char *type);
+
+/**
+ * @brief Sets intelligent mode for logging.
+ * @param enabled 1 to enable, 0 to disable.
+ */
 LUAI_FUNC void luaH_set_intelligent_mode (int enabled);
+
+/**
+ * @brief Checks if intelligent mode is enabled.
+ * @return 1 if enabled, 0 otherwise.
+ */
 LUAI_FUNC int luaH_is_intelligent_mode_enabled (void);
+
+/**
+ * @brief Sets whether to filter JNI environment pointers.
+ * @param enabled 1 to enable, 0 to disable.
+ */
 LUAI_FUNC void luaH_set_filter_jnienv (int enabled);
+
+/**
+ * @brief Checks if JNI environment filtering is enabled.
+ * @return 1 if enabled, 0 otherwise.
+ */
 LUAI_FUNC int luaH_is_filter_jnienv_enabled (void);
+
+/**
+ * @brief Sets whether to filter generic userdata.
+ * @param enabled 1 to enable, 0 to disable.
+ */
 LUAI_FUNC void luaH_set_filter_userdata (int enabled);
+
+/**
+ * @brief Checks if userdata filtering is enabled.
+ * @return 1 if enabled, 0 otherwise.
+ */
 LUAI_FUNC int luaH_is_filter_userdata_enabled (void);
 
 
