@@ -5344,7 +5344,10 @@ static void switchstat (LexState *ls, int line) {
       do {
         expdesc e;
         expdesc c = ctrl; /* Copy ctrl expdesc */
+        int old_flags = ls->expr_flags;
+        ls->expr_flags |= E_NO_COLON;
         expr(ls, &e);
+        ls->expr_flags = old_flags;
 
         luaK_infix(fs, OPR_EQ, &c);
         luaK_posfix(fs, OPR_EQ, &c, &e, ls->linenumber);
