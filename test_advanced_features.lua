@@ -11,11 +11,6 @@ end
 
 print("=== Verifying Undocumented Features ===\n")
 
--- Initialize meta-tables
-_OPERATORS = {}
-_KEYWORDS = {}
-_CMDS = {}
-
 -- 1. Macro $object(...)
 print("--- 1. Macro $object(...) ---")
 local x = 10
