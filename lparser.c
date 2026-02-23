@@ -8348,8 +8348,8 @@ static void asmstat_ex (LexState *ls, int line, AsmContext *parent_ctx) {
         }
         
         for (j = 0; j < junk_count; j++) {
-          /* 生成 MOVE 0 0 作为无意义指令 */
-          Instruction nop_inst = CREATE_ABCk(OP_MOVE, 0, 0, 0, 0);
+          /* 生成 NOP 指令 */
+          Instruction nop_inst = CREATE_ABCk(OP_NOP, 0, 0, 0, 0);
           luaK_code(fs, nop_inst);
           luaK_fixline(fs, line);
         }
