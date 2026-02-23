@@ -1335,6 +1335,9 @@ LUALIB_API const char *luaL_tolstring (lua_State *L, int idx, size_t *len) {
       case LUA_TBOOLEAN:
         lua_pushstring(L, (lua_toboolean(L, idx) ? "true" : "false"));
         break;
+      case LUA_TFUNCTION:
+        lua_pushfstring(L, "function: %p", lua_topointer(L, idx));
+        break;
       case LUA_TNIL:
         lua_pushliteral(L, "nil");
         break;
