@@ -4,9 +4,6 @@
 print("Running Comprehensive README Documentation Tests...")
 
 -- Global Setup for Metaprogramming Examples
-if not _G._OPERATORS then _G._OPERATORS = {} end
-if not _G._CMDS then _G._CMDS = {} end
-
 function assert_eq(a, b, msg)
     if a ~= b then
         error(string.format("Assertion failed: %s (expected %s, got %s)", msg or "", tostring(b), tostring(a)))
@@ -381,7 +378,7 @@ do
     assert_eq(obj.y, "hello", "$object macro y")
 
     -- Operator Call $$
-    _OPERATORS["+"] = function(a, b) return a + b end
+    operator + (a, b) return a + b end
     local res = $$+(10, 20)
     assert_eq(res, 30, "$$ operator call")
 

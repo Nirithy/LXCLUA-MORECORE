@@ -926,6 +926,26 @@ static int is_value_equal_package_loaded(lua_State *L, int value_idx) {
   return equal;
 }
 
+/* Helper function to get/create a table in Registry */
+static int get_registry_table(lua_State *L, const char *key) {
+  lua_getfield(L, LUA_REGISTRYINDEX, key);
+  if (lua_isnil(L, -1)) {
+    lua_pop(L, 1);
+    lua_newtable(L);
+    lua_pushvalue(L, -1);
+    lua_setfield(L, LUA_REGISTRYINDEX, key);
+  }
+  return 1;
+}
+
+static int luaB_lxc_get_cmds(lua_State *L) {
+  return get_registry_table(L, "LXC_CMDS");
+}
+
+static int luaB_lxc_get_ops(lua_State *L) {
+  return get_registry_table(L, "LXC_OPERATORS");
+}
+
 /* Custom buffer to avoid Lua stack issues during recursive traversal */
 typedef struct {
   char *b;
@@ -2920,6 +2940,8 @@ static const luaL_Reg base_funcs[] = {
   {"__async_wrap", luaB_async_wrap},
   {"__generic_wrap", luaB_generic_wrap},
   {"__check_type", luaB_check_type},
+  {"__lxc_get_cmds", luaB_lxc_get_cmds},
+  {"__lxc_get_ops", luaB_lxc_get_ops},
   {"typeof", luaB_typeof},
   {"issubtype", luaB_issubtype},
   {"isgeneric", luaB_isgeneric},
@@ -3077,10 +3099,6 @@ LUAMOD_API int luaopen_base (lua_State *L) {
   /* set global _VERSION */
   lua_pushliteral(L, LUA_VERSION);
   lua_setfield(L, -2, "_VERSION");
-  
-  /* 初始化全局 _CMDS 表，用于存储已注册的命令 */
-  lua_newtable(L);
-  lua_setfield(L, -2, "_CMDS");
   
   /* 注册 with 语句辅助函数 */
   lua_pushcfunction(L, with_create_env);

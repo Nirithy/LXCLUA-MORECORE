@@ -3064,15 +3064,21 @@ static void primaryexp (LexState *ls, expdesc *v) {
       
       luaX_next(ls);  /* 跳过运算符符号 */
       
-      /* 获取 _OPERATORS 表 */
-      singlevaraux(fs, luaS_newliteral(ls->L, "_OPERATORS"), &operators_table, 1);
-      if (operators_table.k == VVOID) {
-        /* 从 _ENV 获取 _OPERATORS */
+      /* 获取 _OPERATORS 表 (via helper) */
+      expdesc get_func;
+      singlevaraux(fs, luaS_newliteral(ls->L, "__lxc_get_ops"), &get_func, 1);
+      if (get_func.k == VVOID) {
+        /* fallback to _ENV */
         expdesc env_key;
-        singlevaraux(fs, ls->envn, &operators_table, 1);
-        codestring(&env_key, luaS_newliteral(ls->L, "_OPERATORS"));
-        luaK_indexed(fs, &operators_table, &env_key);
+        singlevaraux(fs, ls->envn, &get_func, 1);
+        codestring(&env_key, luaS_newliteral(ls->L, "__lxc_get_ops"));
+        luaK_indexed(fs, &get_func, &env_key);
       }
+      luaK_exp2nextreg(fs, &get_func);
+      int base = get_func.u.info;
+      luaK_codeABC(fs, OP_CALL, base, 1, 2);
+      init_exp(&operators_table, VNONRELOC, base);
+      fs->freereg = base + 1;
       
       /* 获取 _OPERATORS[运算符] */
       luaK_exp2anyreg(fs, &operators_table);
@@ -9115,15 +9121,20 @@ static void commandstat (LexState *ls, int line) {
     FuncState *fs = ls->fs;
     expdesc cmds_table, key_exp, val_exp;
     
-    /* 获取 _CMDS 全局表 */
-    singlevaraux(fs, luaS_newliteral(ls->L, "_CMDS"), &cmds_table, 1);
-    if (cmds_table.k == VVOID) {
-      /* _CMDS 不存在，从 _ENV 获取 */
+    /* 获取 _CMDS 表 (via helper) */
+    expdesc get_func;
+    singlevaraux(fs, luaS_newliteral(ls->L, "__lxc_get_cmds"), &get_func, 1);
+    if (get_func.k == VVOID) {
       expdesc env_key;
-      singlevaraux(fs, ls->envn, &cmds_table, 1);
-      codestring(&env_key, luaS_newliteral(ls->L, "_CMDS"));
-      luaK_indexed(fs, &cmds_table, &env_key);
+      singlevaraux(fs, ls->envn, &get_func, 1);
+      codestring(&env_key, luaS_newliteral(ls->L, "__lxc_get_cmds"));
+      luaK_indexed(fs, &get_func, &env_key);
     }
+    luaK_exp2nextreg(fs, &get_func);
+    int base = get_func.u.info;
+    luaK_codeABC(fs, OP_CALL, base, 1, 2);
+    init_exp(&cmds_table, VNONRELOC, base);
+    fs->freereg = base + 1;
     
     /* 设置 _CMDS[命令名] = true */
     luaK_exp2anyregup(fs, &cmds_table);
@@ -9290,15 +9301,20 @@ static void operatorstat (LexState *ls, int line) {
   {
     expdesc operators_table, key_exp;
     
-    /* 获取 _OPERATORS 全局表 */
-    singlevaraux(fs, luaS_newliteral(ls->L, "_OPERATORS"), &operators_table, 1);
-    if (operators_table.k == VVOID) {
-      /* _OPERATORS 不存在，从 _ENV 获取 */
+    /* 获取 _OPERATORS 表 (via helper) */
+    expdesc get_func;
+    singlevaraux(fs, luaS_newliteral(ls->L, "__lxc_get_ops"), &get_func, 1);
+    if (get_func.k == VVOID) {
       expdesc env_key;
-      singlevaraux(fs, ls->envn, &operators_table, 1);
-      codestring(&env_key, luaS_newliteral(ls->L, "_OPERATORS"));
-      luaK_indexed(fs, &operators_table, &env_key);
+      singlevaraux(fs, ls->envn, &get_func, 1);
+      codestring(&env_key, luaS_newliteral(ls->L, "__lxc_get_ops"));
+      luaK_indexed(fs, &get_func, &env_key);
     }
+    luaK_exp2nextreg(fs, &get_func);
+    int base = get_func.u.info;
+    luaK_codeABC(fs, OP_CALL, base, 1, 2);
+    init_exp(&operators_table, VNONRELOC, base);
+    fs->freereg = base + 1;
     
     /* 确保函数在寄存器中 */
     luaK_exp2anyreg(fs, &b);
