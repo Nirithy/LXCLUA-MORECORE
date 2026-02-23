@@ -393,11 +393,14 @@ typedef struct GCObject {
 ** ========================================================
 */
 
+/**
+ * @brief Big Integer structure.
+ */
 typedef struct TBigInt {
   CommonHeader;
-  unsigned int len;  /* number of limbs */
-  int sign;          /* 1 or -1 */
-  l_uint32 buff[1];  /* limbs (little endian) */
+  unsigned int len;  /**< Number of limbs. */
+  int sign;          /**< 1 or -1. */
+  l_uint32 buff[1];  /**< Limbs (little endian). */
 } TBigInt;
 
 #define gco2big(o)	check_exp((o)->tt == LUA_VNUMBIG, (TBigInt*)(o))
@@ -446,14 +449,14 @@ LUAI_FUNC lua_Number luaB_bigtonumber (const TValue *obj);
  */
 typedef struct TString {
   CommonHeader;
-  lu_byte extra;  /**< reserved words for short strings; "has hash" for longs */
-  lu_byte shrlen;  /**< length for short strings, 0xFF for long strings */
-  unsigned int hash; /**< hash code */
+  lu_byte extra;  /**< Reserved words for short strings; "has hash" for longs. */
+  lu_byte shrlen;  /**< Length for short strings, 0xFF for long strings. */
+  unsigned int hash; /**< Hash code. */
   union {
-    size_t lnglen;  /**< length for long strings */
-    struct TString *hnext;  /**< linked list for hash table */
+    size_t lnglen;  /**< Length for long strings. */
+    struct TString *hnext;  /**< Linked list for hash table. */
   } u;
-  char contents[1]; /**< string data */
+  char contents[1]; /**< String data. */
 } TString;
 
 /**
@@ -461,16 +464,16 @@ typedef struct TString {
  */
 typedef struct TExternalString {
   CommonHeader;
-  lu_byte extra;  /**< reserved words for short strings; "has hash" for longs */
-  lu_byte shrlen;  /**< length for short strings, 0xFF for long strings */
-  unsigned int hash; /**< hash code */
+  lu_byte extra;  /**< Reserved words for short strings; "has hash" for longs. */
+  lu_byte shrlen;  /**< Length for short strings, 0xFF for long strings. */
+  unsigned int hash; /**< Hash code. */
   union {
-    size_t lnglen;  /**< length for long strings */
-    struct TString *hnext;  /**< linked list for hash table */
+    size_t lnglen;  /**< Length for long strings. */
+    struct TString *hnext;  /**< Linked list for hash table. */
   } u;
-  const char *src; /**< pointer to string data */
-  lua_Alloc falloc;  /**< deallocation function for external strings */
-  void *ud;  /**< user data for external strings */
+  const char *src; /**< Pointer to string data. */
+  lua_Alloc falloc;  /**< Deallocation function for external strings. */
+  void *ud;  /**< User data for external strings. */
 } TExternalString;
 
 
@@ -590,11 +593,11 @@ typedef union UValue {
  */
 typedef struct Udata {
   CommonHeader;
-  unsigned short nuvalue;  /**< number of user values */
-  size_t len;  /**< number of bytes */
-  struct GCObject *metatable; /**< metatable */
-  GCObject *gclist; /**< garbage collector list */
-  UValue uv[1];  /**< user values */
+  unsigned short nuvalue;  /**< Number of user values. */
+  size_t len;  /**< Number of bytes. */
+  struct GCObject *metatable; /**< Metatable. */
+  GCObject *gclist; /**< Garbage collector list. */
+  UValue uv[1];  /**< User values. */
 } Udata;
 
 
@@ -605,10 +608,10 @@ typedef struct Udata {
  */
 typedef struct Udata0 {
   CommonHeader;
-  unsigned short nuvalue;  /**< number of user values */
-  size_t len;  /**< number of bytes */
-  struct GCObject *metatable; /**< metatable */
-  union {LUAI_MAXALIGN;} bindata; /**< data */
+  unsigned short nuvalue;  /**< Number of user values. */
+  size_t len;  /**< Number of bytes. */
+  struct GCObject *metatable; /**< Metatable. */
+  union {LUAI_MAXALIGN;} bindata; /**< Data. */
 } Udata0;
 
 
@@ -642,10 +645,10 @@ typedef l_uint64 Instruction;
  * @brief Description of an upvalue for function prototypes.
  */
 typedef struct Upvaldesc {
-  TString *name;  /**< upvalue name (for debug information) */
-  lu_byte instack;  /**< whether it is in stack (register) */
-  lu_byte idx;  /**< index of upvalue (in stack or in outer function's list) */
-  lu_byte kind;  /**< kind of corresponding variable */
+  TString *name;  /**< Upvalue name (for debug information). */
+  lu_byte instack;  /**< Whether it is in stack (register). */
+  lu_byte idx;  /**< Index of upvalue (in stack or in outer function's list). */
+  lu_byte kind;  /**< Kind of corresponding variable. */
 } Upvaldesc;
 
 
@@ -654,9 +657,9 @@ typedef struct Upvaldesc {
  * (used for debug information)
  */
 typedef struct LocVar {
-  TString *varname; /**< variable name */
-  int startpc;  /**< first point where variable is active */
-  int endpc;    /**< first point where variable is dead */
+  TString *varname; /**< Variable name. */
+  int startpc;  /**< First point where variable is active. */
+  int endpc;    /**< First point where variable is dead. */
 } LocVar;
 
 
@@ -664,8 +667,8 @@ typedef struct LocVar {
  * @brief Associates the absolute line source for a given instruction ('pc').
  */
 typedef struct AbsLineInfo {
-  int pc;   /**< instruction index */
-  int line; /**< line number */
+  int pc;   /**< Instruction index. */
+  int line; /**< Line number. */
 } AbsLineInfo;
 
 
@@ -693,12 +696,18 @@ typedef struct AbsLineInfo {
 
 #define MAX_CALL_ARGS 64
 
+/**
+ * @brief Call queue node.
+ */
 typedef struct CallNode {
   int nargs;
   TValue args[MAX_CALL_ARGS];
   struct CallNode *next;
 } CallNode;
 
+/**
+ * @brief Call queue.
+ */
 typedef struct {
   CallNode *head;
   CallNode *tail;
@@ -745,9 +754,9 @@ typedef struct Proto {
   AbsLineInfo *abslineinfo;  /**< Map from opcodes to absolute source lines. */
   LocVar *locvars;  /**< Information about local variables. */
   TString  *source;  /**< Source file name. */
-  GCObject *gclist; /**< garbage collector list */
-  int is_sleeping; /**< sleep status */
-  CallQueue *call_queue; /**< call queue for sleep/wake */
+  GCObject *gclist; /**< Garbage collector list. */
+  int is_sleeping; /**< Sleep status. */
+  CallQueue *call_queue; /**< Call queue for sleep/wake. */
   struct VMCodeTable *vm_code_table;  /**< VM protection code table pointer. */
 } Proto;
 
@@ -806,15 +815,15 @@ typedef struct Proto {
 typedef struct UpVal {
   CommonHeader;
   union {
-    TValue *p;  /**< points to stack or to its own value */
-    ptrdiff_t offset;  /**< used while the stack is being reallocated */
+    TValue *p;  /**< Points to stack or to its own value. */
+    ptrdiff_t offset;  /**< Used while the stack is being reallocated. */
   } v;
   union {
     struct {  /* (when open) */
-      struct UpVal *next;  /**< linked list */
+      struct UpVal *next;  /**< Linked list. */
       struct UpVal **previous;
     } open;
-    TValue value;  /**< the value (when closed) */
+    TValue value;  /**< The value (when closed). */
   } u;
 } UpVal;
 
@@ -828,8 +837,8 @@ typedef struct UpVal {
  */
 typedef struct CClosure {
   ClosureHeader;
-  lua_CFunction f; /**< C function */
-  TValue upvalue[1];  /**< list of upvalues */
+  lua_CFunction f; /**< C function. */
+  TValue upvalue[1];  /**< List of upvalues. */
 } CClosure;
 
 
@@ -838,8 +847,8 @@ typedef struct CClosure {
  */
 typedef struct LClosure {
   ClosureHeader;
-  struct Proto *p; /**< function prototype */
-  UpVal *upvals[1];  /**< list of upvalues */
+  struct Proto *p; /**< Function prototype. */
+  UpVal *upvals[1];  /**< List of upvalues. */
 } LClosure;
 
 
@@ -874,10 +883,13 @@ typedef union Closure {
     val_(io).gc = obj2gco(x_); settt_(io, ctb(LUA_VCONCEPT)); \
     checkliveness(L,io); }
 
+/**
+ * @brief Concept structure.
+ */
 typedef struct Concept {
   ClosureHeader;
-  struct Proto *p; /**< function prototype */
-  UpVal *upvals[1];  /**< list of upvalues */
+  struct Proto *p; /**< Function prototype. */
+  UpVal *upvals[1];  /**< List of upvalues. */
 } Concept;
 
 
@@ -898,12 +910,15 @@ typedef struct Concept {
     val_(io).gc = obj2gco(x_); settt_(io, ctb(LUA_VNAMESPACE)); \
     checkliveness(L,io); }
 
+/**
+ * @brief Namespace structure.
+ */
 typedef struct Namespace {
   CommonHeader;
-  struct Table *data;
-  TString *name;
-  struct GCObject *gclist;
-  struct Namespace *using_next;
+  struct Table *data; /**< Namespace data. */
+  TString *name; /**< Namespace name. */
+  struct GCObject *gclist; /**< GC list. */
+  struct Namespace *using_next; /**< Linked list of used namespaces. */
 } Namespace;
 
 
@@ -924,12 +939,15 @@ typedef struct Namespace {
     val_(io).gc = obj2gco(x_); settt_(io, ctb(LUA_VSUPERSTRUCT)); \
     checkliveness(L,io); }
 
+/**
+ * @brief SuperStruct structure.
+ */
 typedef struct SuperStruct {
   CommonHeader;
-  TString *name;
-  unsigned int nsize;
-  unsigned int ncapacity;
-  TValue *data;
+  TString *name; /**< SuperStruct name. */
+  unsigned int nsize; /**< Size. */
+  unsigned int ncapacity; /**< Capacity. */
+  TValue *data; /**< Data. */
 } SuperStruct;
 
 #define gco2superstruct(o)	check_exp((o)->tt == LUA_VSUPERSTRUCT, &((cast_u(o) - offsetof(SuperStruct, next))->superstruct))
@@ -1012,10 +1030,10 @@ typedef struct Table {
   Node *node;      /**< Hash part. */
   Node *lastfree;  /**< Any free position is before this position. */
   struct GCObject *metatable; /**< Metatable pointer. */
-  GCObject *gclist; /**< garbage collector list */
+  GCObject *gclist; /**< Garbage collector list. */
   lu_byte type;    /**< Custom type flag. */
   l_rwlock_t lock; /**< Lock for thread safety. */
-  struct Namespace *using_next; /**< Used namespaces */
+  struct Namespace *using_next; /**< Used namespaces. */
 } Table;
 
 
