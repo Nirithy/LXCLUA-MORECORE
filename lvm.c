@@ -3282,6 +3282,10 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
         ** Format: OP_NEWCLASS A Bx
         ** Function: R[A] := create new class with name K[Bx]
         */
+        if (L->top.p < base + cl->p->maxstacksize)
+             L->top.p = base + cl->p->maxstacksize;
+        luaD_checkstack(L, 1);
+        updatebase(ci);
         TString *classname = tsvalue(&k[GETARG_Bx(i)]);
         
         /* Manually save state */
@@ -3804,7 +3808,10 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
         vmbreak;
       }
       vmcase(OP_ASYNCWRAP) {
+        if (L->top.p < base + cl->p->maxstacksize)
+             L->top.p = base + cl->p->maxstacksize;
         luaD_checkstack(L, 1);
+        updatebase(ci);
         int b = GETARG_B(i);
         lua_getglobal(L, "__async_wrap");
         if (ttisfunction(s2v(L->top.p - 1))) {
@@ -3832,6 +3839,8 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
         vmbreak;
       }
       vmcase(OP_GENERICWRAP) {
+        if (L->top.p < base + cl->p->maxstacksize)
+             L->top.p = base + cl->p->maxstacksize;
         luaD_checkstack(L, 5);
         updatebase(ci);
         int b = GETARG_B(i);
@@ -3888,6 +3897,10 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
         vmbreak;
       }
       vmcase(OP_CHECKTYPE) {
+        if (L->top.p < base + cl->p->maxstacksize)
+             L->top.p = base + cl->p->maxstacksize;
+        luaD_checkstack(L, 2);
+        updatebase(ci);
         StkId ra = RA(i);
         TValue *rb = vRB(i);
         TValue *rc = KC(i);
