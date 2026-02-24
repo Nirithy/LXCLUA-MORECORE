@@ -89,8 +89,6 @@ do
     }
     assert_eq(sum(10, 20), 30, "C-style function")
 
-    print("Skipping Generics and Async tests (Segfault)")
-    --[[
     -- Generic Function (Check if syntax parses and runs)
     local f = function(T)(x) requires type(T) == "number"
         return x
@@ -111,7 +109,6 @@ do
         local data = await http.get(url)
         return data
     end
-    ]]
 end
 
 -- 4. OOP
@@ -316,18 +313,13 @@ end
 do
     print("8. Testing Metaprogramming...")
 
-    print("Skipping Command (Error/Segfault)")
-    --[[
     -- Command
     command echo_cmd(msg)
         return msg
     end
     local ret = echo_cmd("Hello")
     assert_eq(ret, "Hello", "command definition")
-    ]]
 
-    print("Skipping Custom Operator (Segfault)")
-    --[[
     -- Custom Operator
     operator ++ (x)
         return x + 1
@@ -336,7 +328,6 @@ do
     local val = 10
     local res = $$++(val)
     assert_eq(res, 11, "custom operator call via $$")
-    ]]
 
     -- Preprocessor $define
     $define DEBUG_TEST 1
@@ -387,13 +378,10 @@ do
     assert_eq(obj.x, 10, "$object macro x")
     assert_eq(obj.y, "hello", "$object macro y")
 
-    print("Skipping $$ operator (Segfault)")
-    --[[
     -- Operator Call $$
     operator + (a, b) return a + b end
     local res = $$+(10, 20)
     assert_eq(res, 30, "$$ operator call")
-    ]]
 
     -- Lambda Shorthand
     local dbl = lambda(x): x * 2
