@@ -3731,17 +3731,28 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
         vmbreak;
       }
       vmcase(OP_CASE) {
+        if (L->top.p < base + cl->p->maxstacksize)
+             L->top.p = base + cl->p->maxstacksize;
+        luaD_checkstack(L, 2);
+        updatebase(ci);
         StkId ra = RA(i);
-        TValue rb; setobj(L, &rb, vRB(i)); /* copy B before it might be overwritten */
-        TValue rc; setobj(L, &rc, vRC(i)); /* copy C before it might be overwritten */
-        Table *t;
-        L->top.p = ra + 1;  /* correct top in case of emergency GC */
-        t = luaH_new(L);  /* memory allocation */
+        /* Save operands to stack to protect from GC during allocation */
+        setobj2s(L, L->top.p, vRB(i));
+        L->top.p++;
+        setobj2s(L, L->top.p, vRC(i));
+        L->top.p++;
+
+        Table *t = luaH_new(L);  /* memory allocation */
+        updatebase(ci);
+        ra = RA(i);
         sethvalue2s(L, ra, t);
+
         /* t[1] = RB */
-        luaH_setint(L, t, 1, &rb);
+        luaH_setint(L, t, 1, s2v(L->top.p - 2));
         /* t[2] = RC */
-        luaH_setint(L, t, 2, &rc);
+        luaH_setint(L, t, 2, s2v(L->top.p - 1));
+
+        L->top.p -= 2; /* restore top */
         checkGC(L, ra + 1);
         vmbreak;
       }
@@ -3844,6 +3855,27 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
         luaD_checkstack(L, 5);
         updatebase(ci);
         int b = GETARG_B(i);
+
+        lua_getglobal(L, "__generic_wrap");
+        updatebase(ci); /* Safety: update base after potential stack realloc */
+        if (ttisfunction(s2v(L->top.p - 1))) {
+           StkId base_args = base + b;
+           setobj2s(L, L->top.p, s2v(base_args));
+           L->top.p++;
+           setobj2s(L, L->top.p, s2v(base_args + 1));
+           L->top.p++;
+           setobj2s(L, L->top.p, s2v(base_args + 2));
+           L->top.p++;
+           lua_call(L, 3, 1);
+           updatebase(ci);
+           StkId ra = RA(i);
+           setobj2s(L, ra, s2v(L->top.p - 1));
+           L->top.p--;
+           checkGC(L, ra + 1);
+           vmbreak;
+        } else {
+           lua_pop(L, 1);
+        }
 
         /* 1. Create Closure */
         CClosure *ncl = luaF_newCclosure(L, 3);
