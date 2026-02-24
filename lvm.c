@@ -3800,6 +3800,7 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
         vmbreak;
       }
       vmcase(OP_ASYNCWRAP) {
+        luaD_checkstack(L, 1);
         int b = GETARG_B(i);
         lua_getglobal(L, "__async_wrap");
         if (ttisfunction(s2v(L->top.p - 1))) {

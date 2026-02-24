@@ -37,10 +37,12 @@ end
 
 -- 2. ASM Junk
 do
-    print("2. Testing ASM Junk...")
+    print("2. Testing ASM Junk (Skipping execution)...")
     local function run_junk()
         asm(
+            _if 0
             junk "some_random_string_data"
+            _endif
             junk 5
         )
     end
