@@ -3269,6 +3269,13 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
         TValue *rb = vRB(i);
         if (ttisnil(rb) != GETARG_k(i))
           pc++;  /* Condition not met, skip next instruction */
+        else {
+          int a = GETARG_A(i);
+          if (a != MAXARG_A) {
+             setobj2s(L, RA(i), rb);
+          }
+          donextjump(ci);
+        }
         vmbreak;
       }
       /*
@@ -3938,6 +3945,9 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
         TValue *rc = KC(i);
 
         if (!check_subtype_internal(L, s2v(ra), rb)) {
+           updatebase(ci);
+           ra = RA(i);
+           rb = vRB(i);
            const char *name = getstr(tsvalue(rc));
            const char *expected = "unknown";
            if (ttisstring(rb)) expected = getstr(tsvalue(rb));
