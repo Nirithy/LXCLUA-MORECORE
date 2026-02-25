@@ -7,6 +7,7 @@
 #include <string.h>
 #include <stdarg.h>
 #include <stdlib.h>
+#include <time.h>
 
 #include "lua.h"
 #include "lauxlib.h"
@@ -96,6 +97,58 @@ LUA_API void lua_tcc_store_results(lua_State *L, int start_reg, int count) {
     for (int i = count - 1; i >= 0; i--) {
         lua_replace(L, start_reg + i);
     }
+}
+
+/*
+** Interface Obfuscation Support
+*/
+
+/* Helper X-macros to generate API lists */
+#define X(name, ret, args) name,
+static const void *tcc_api_funcs[] = {
+#include "ltcc_api_list.h"
+};
+#undef X
+
+#define X(name, ret, args) #name,
+static const char *tcc_api_names[] = {
+#include "ltcc_api_list.h"
+};
+#undef X
+
+static const int tcc_api_count = sizeof(tcc_api_funcs) / sizeof(tcc_api_funcs[0]);
+
+/* Simple LCG for deterministic shuffling */
+static int my_rand(unsigned int *seed) {
+    *seed = (*seed * 1103515245 + 12345) & 0x7fffffff;
+    return *seed;
+}
+
+LUA_API void *lua_tcc_get_interface(lua_State *L, int seed) {
+    /* Allocate array of function pointers */
+    void **iface = (void **)lua_newuserdatauv(L, tcc_api_count * sizeof(void *), 0);
+
+    /* Create indices array */
+    int *indices = (int *)malloc(tcc_api_count * sizeof(int));
+    if (!indices) return NULL;
+    for (int i = 0; i < tcc_api_count; i++) indices[i] = i;
+
+    /* Shuffle indices using the seed */
+    unsigned int useed = (unsigned int)seed;
+    for (int i = tcc_api_count - 1; i > 0; i--) {
+        int j = my_rand(&useed) % (i + 1);
+        int temp = indices[i];
+        indices[i] = indices[j];
+        indices[j] = temp;
+    }
+
+    /* Populate interface */
+    for (int i = 0; i < tcc_api_count; i++) {
+        iface[indices[i]] = (void *)tcc_api_funcs[i];
+    }
+
+    free(indices);
+    return iface;
 }
 
 
@@ -1329,17 +1382,49 @@ static int tcc_compile(lua_State *L) {
     const char *code = luaL_checklstring(L, 1, &len);
     const char *modname = "module";
     int use_pure_c = 0;
+    int obfuscate = 0;
+    int seed = 0;
 
     if (lua_gettop(L) >= 2) {
-        if (lua_type(L, 2) == LUA_TBOOLEAN) {
+        if (lua_type(L, 2) == LUA_TTABLE) {
+             /* Parse table options */
+             lua_getfield(L, 2, "use_pure_c");
+             if (!lua_isnil(L, -1)) use_pure_c = lua_toboolean(L, -1);
+             lua_pop(L, 1);
+
+             lua_getfield(L, 2, "obfuscate");
+             if (!lua_isnil(L, -1)) obfuscate = lua_toboolean(L, -1);
+             lua_pop(L, 1);
+
+             lua_getfield(L, 2, "seed");
+             if (!lua_isnil(L, -1)) seed = (int)lua_tointeger(L, -1);
+             else seed = (int)time(NULL);
+             lua_pop(L, 1);
+        } else if (lua_type(L, 2) == LUA_TBOOLEAN) {
             use_pure_c = lua_toboolean(L, 2);
         } else {
             modname = luaL_checkstring(L, 2);
             if (lua_gettop(L) >= 3) {
-                 use_pure_c = lua_toboolean(L, 3);
+                 if (lua_type(L, 3) == LUA_TTABLE) {
+                     lua_getfield(L, 3, "use_pure_c");
+                     if (!lua_isnil(L, -1)) use_pure_c = lua_toboolean(L, -1);
+                     lua_pop(L, 1);
+
+                     lua_getfield(L, 3, "obfuscate");
+                     if (!lua_isnil(L, -1)) obfuscate = lua_toboolean(L, -1);
+                     lua_pop(L, 1);
+
+                     lua_getfield(L, 3, "seed");
+                     if (!lua_isnil(L, -1)) seed = (int)lua_tointeger(L, -1);
+                     else seed = (int)time(NULL);
+                     lua_pop(L, 1);
+                 } else {
+                     use_pure_c = lua_toboolean(L, 3);
+                 }
             }
         }
     }
+
     // Compile Lua code to Bytecode
     if (luaL_loadbuffer(L, code, len, modname) != LUA_OK) {
         return lua_error(L);
@@ -1372,6 +1457,40 @@ static int tcc_compile(lua_State *L) {
     }
     add_fmt(&B, "\n");
 
+    if (obfuscate) {
+        add_fmt(&B, "/* Obfuscated Interface */\n");
+        add_fmt(&B, "typedef struct TCC_Interface {\n");
+        add_fmt(&B, "    void *f[%d];\n", tcc_api_count);
+        add_fmt(&B, "} TCC_Interface;\n");
+        add_fmt(&B, "static const TCC_Interface *api;\n\n");
+
+        /* Generate shuffled indices matching lua_tcc_get_interface logic */
+        int *indices = (int *)malloc(tcc_api_count * sizeof(int));
+        for (int i = 0; i < tcc_api_count; i++) indices[i] = i;
+
+        unsigned int useed = (unsigned int)seed;
+        for (int i = tcc_api_count - 1; i > 0; i--) {
+            int j = my_rand(&useed) % (i + 1);
+            int temp = indices[i];
+            indices[i] = indices[j];
+            indices[j] = temp;
+        }
+
+        /* Emit macros mapping original names to shuffled locations */
+        int counter = 0;
+        #define X(name, ret, args) \
+            add_fmt(&B, "#undef %s\n", #name); \
+            add_fmt(&B, "#define %s(...) ((%s (*) %s)api->f[%d])(__VA_ARGS__)\n", #name, #ret, #args, indices[counter++]);
+
+        #include "ltcc_api_list.h"
+        #undef X
+
+        free(indices);
+        add_fmt(&B, "\n");
+
+        add_fmt(&B, "extern void *lua_tcc_get_interface(lua_State *L, int seed);\n");
+    }
+
     // Helpers (now provided by lapi.c/ltcc.c via LUA_API)
 
     // Forward declarations
@@ -1386,6 +1505,11 @@ static int tcc_compile(lua_State *L) {
 
     // Main entry point
     add_fmt(&B, "\nint luaopen_%s(lua_State *L) {\n", modname);
+
+    if (obfuscate) {
+        add_fmt(&B, "    api = (const TCC_Interface *)lua_tcc_get_interface(L, %d);\n", seed);
+        add_fmt(&B, "    luaL_ref(L, LUA_REGISTRYINDEX); /* Anchor interface to prevent GC */\n");
+    }
 
     if (p->sizeupvalues > 0) {
          add_fmt(&B, "    lua_pushglobaltable(L);\n"); // Upvalue 1
