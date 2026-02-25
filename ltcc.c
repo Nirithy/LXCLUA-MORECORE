@@ -754,11 +754,12 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             } else {
                 add_fmt(B, "    {\n");
                 add_fmt(B, "        int nvar = (int)lua_rawlen(L, %d);\n", vtab_idx);
-                add_fmt(B, "        lua_settop(L, %d + nvar);\n", a);
+                add_fmt(B, "        if (%d + nvar > %d) lua_settop(L, %d + nvar);\n", a, vtab_idx, a);
                 add_fmt(B, "        for (int i=1; i<=nvar; i++) {\n");
                 add_fmt(B, "            lua_rawgeti(L, %d, i);\n", vtab_idx);
                 add_fmt(B, "            lua_replace(L, %d + i - 1);\n", a + 1);
                 add_fmt(B, "        }\n");
+                add_fmt(B, "        lua_settop(L, %d + nvar);\n", a);
                 add_fmt(B, "    }\n");
             }
             break;
