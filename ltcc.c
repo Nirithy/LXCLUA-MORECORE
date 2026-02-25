@@ -307,7 +307,7 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
                 }
                 add_fmt(B, "    lua_tcc_settabup(L, %d, ", a + 1);
                 emit_quoted_string(B, getstr(tsvalue(k)), tsslen(tsvalue(k)));
-                add_fmt(B, ");\n");
+                add_fmt(B, ", -1);\n");
             } else {
                 add_fmt(B, "    lua_pushvalue(L, lua_upvalueindex(%d));\n", a + 1); // table
                 emit_loadk(B, p, b); // key
@@ -538,6 +538,7 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             int nargs = (b == 0) ? -1 : (b - 1); // b=0 means top-A
             int nresults = (c == 0) ? -1 : (c - 1);
 
+            add_fmt(B, "    {\n");
             if (b != 0) {
                 if (c == 0) add_fmt(B, "    int s = lua_gettop(L);\n");
                 add_fmt(B, "    lua_tcc_push_args(L, %d, %d); /* func + args */\n", a + 1, nargs + 1);
@@ -563,6 +564,7 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
                       add_fmt(B, "    lua_settop(L, %d);\n", p->maxstacksize);
                  }
             }
+            add_fmt(B, "    }\n");
             break;
         }
 
