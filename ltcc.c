@@ -214,6 +214,44 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             break;
         }
 
+        case OP_ADDK: case OP_SUBK: case OP_MULK: case OP_MODK:
+        case OP_POWK: case OP_DIVK: case OP_IDIVK:
+        case OP_BANDK: case OP_BORK: case OP_BXORK: {
+            int b = GETARG_B(i);
+            int c = GETARG_C(i);
+            add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
+            emit_loadk(B, p, c);
+            int op_enum = -1;
+            if (op == OP_ADDK) op_enum = LUA_OPADD;
+            else if (op == OP_SUBK) op_enum = LUA_OPSUB;
+            else if (op == OP_MULK) op_enum = LUA_OPMUL;
+            else if (op == OP_MODK) op_enum = LUA_OPMOD;
+            else if (op == OP_POWK) op_enum = LUA_OPPOW;
+            else if (op == OP_DIVK) op_enum = LUA_OPDIV;
+            else if (op == OP_IDIVK) op_enum = LUA_OPIDIV;
+            else if (op == OP_BANDK) op_enum = LUA_OPBAND;
+            else if (op == OP_BORK) op_enum = LUA_OPBOR;
+            else if (op == OP_BXORK) op_enum = LUA_OPBXOR;
+
+            add_fmt(B, "    lua_arith(L, %d);\n", op_enum);
+            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+            break;
+        }
+
+        case OP_SELF: {
+            int b = GETARG_B(i);
+            int c = GETARG_C(i);
+            add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
+            add_fmt(B, "    lua_pushvalue(L, -1);\n");
+            add_fmt(B, "    lua_replace(L, %d);\n", a + 2);
+            if (TESTARG_k(i)) emit_loadk(B, p, c);
+            else add_fmt(B, "    lua_pushvalue(L, %d);\n", c + 1);
+            add_fmt(B, "    lua_gettable(L, -2);\n");
+            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "    lua_pop(L, 1);\n");
+            break;
+        }
+
         case OP_ADDI: { // R[A] := R[B] + sC
              int b = GETARG_B(i);
              int sc = GETARG_sC(i);
@@ -222,6 +260,42 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
              add_fmt(B, "    lua_arith(L, LUA_OPADD);\n");
              add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
              break;
+        }
+
+        case OP_SHLI: { // R[A] := sC << R[B]
+             int b = GETARG_B(i);
+             int sc = GETARG_sC(i);
+             add_fmt(B, "    lua_pushinteger(L, %d);\n", sc);
+             add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
+             add_fmt(B, "    lua_arith(L, LUA_OPSHL);\n");
+             add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+             break;
+        }
+
+        case OP_SHRI: { // R[A] := R[B] >> sC
+             int b = GETARG_B(i);
+             int sc = GETARG_sC(i);
+             add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
+             add_fmt(B, "    lua_pushinteger(L, %d);\n", sc);
+             add_fmt(B, "    lua_arith(L, LUA_OPSHR);\n");
+             add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+             break;
+        }
+
+        case OP_UNM: {
+            int b = GETARG_B(i);
+            add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
+            add_fmt(B, "    lua_arith(L, LUA_OPUNM);\n");
+            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+            break;
+        }
+
+        case OP_BNOT: {
+            int b = GETARG_B(i);
+            add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
+            add_fmt(B, "    lua_arith(L, LUA_OPBNOT);\n");
+            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+            break;
         }
 
         case OP_CALL: { // R[A], ... := R[A](R[A+1], ... ,R[A+B-1])
@@ -336,6 +410,99 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
             add_fmt(B, "    if (lua_compare(L, -2, -1, LUA_OPLT) != %d) goto Label_%d;\n", k, pc + 1 + 2);
             add_fmt(B, "    lua_pop(L, 2);\n");
+            break;
+        }
+
+        case OP_LE: {
+            int b = GETARG_B(i);
+            int k = GETARG_k(i);
+            add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1);
+            add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
+            add_fmt(B, "    if (lua_compare(L, -2, -1, LUA_OPLE) != %d) goto Label_%d;\n", k, pc + 1 + 2);
+            add_fmt(B, "    lua_pop(L, 2);\n");
+            break;
+        }
+
+        case OP_EQK: {
+            int b = GETARG_B(i);
+            int k = GETARG_k(i);
+            add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1);
+            emit_loadk(B, p, b);
+            add_fmt(B, "    if (lua_compare(L, -2, -1, LUA_OPEQ) != %d) goto Label_%d;\n", k, pc + 1 + 2);
+            add_fmt(B, "    lua_pop(L, 2);\n");
+            break;
+        }
+
+        case OP_EQI: {
+            int sb = GETARG_sB(i);
+            int k = GETARG_k(i);
+            add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1);
+            add_fmt(B, "    lua_pushinteger(L, %d);\n", sb);
+            add_fmt(B, "    if (lua_compare(L, -2, -1, LUA_OPEQ) != %d) goto Label_%d;\n", k, pc + 1 + 2);
+            add_fmt(B, "    lua_pop(L, 2);\n");
+            break;
+        }
+
+        case OP_LTI: {
+            int sb = GETARG_sB(i);
+            int k = GETARG_k(i);
+            add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1);
+            add_fmt(B, "    lua_pushinteger(L, %d);\n", sb);
+            add_fmt(B, "    if (lua_compare(L, -2, -1, LUA_OPLT) != %d) goto Label_%d;\n", k, pc + 1 + 2);
+            add_fmt(B, "    lua_pop(L, 2);\n");
+            break;
+        }
+
+        case OP_LEI: {
+            int sb = GETARG_sB(i);
+            int k = GETARG_k(i);
+            add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1);
+            add_fmt(B, "    lua_pushinteger(L, %d);\n", sb);
+            add_fmt(B, "    if (lua_compare(L, -2, -1, LUA_OPLE) != %d) goto Label_%d;\n", k, pc + 1 + 2);
+            add_fmt(B, "    lua_pop(L, 2);\n");
+            break;
+        }
+
+        case OP_GTI: {
+            int sb = GETARG_sB(i);
+            int k = GETARG_k(i);
+            add_fmt(B, "    lua_pushinteger(L, %d);\n", sb);
+            add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1);
+            add_fmt(B, "    if (lua_compare(L, -2, -1, LUA_OPLT) != %d) goto Label_%d;\n", k, pc + 1 + 2);
+            add_fmt(B, "    lua_pop(L, 2);\n");
+            break;
+        }
+
+        case OP_GEI: {
+            int sb = GETARG_sB(i);
+            int k = GETARG_k(i);
+            add_fmt(B, "    lua_pushinteger(L, %d);\n", sb);
+            add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1);
+            add_fmt(B, "    if (lua_compare(L, -2, -1, LUA_OPLE) != %d) goto Label_%d;\n", k, pc + 1 + 2);
+            add_fmt(B, "    lua_pop(L, 2);\n");
+            break;
+        }
+
+        case OP_VARARG: {
+            int a = GETARG_A(i);
+            int nneeded = GETARG_C(i) - 1;
+            int vtab_idx = p->maxstacksize + 1;
+
+            if (nneeded >= 0) {
+                add_fmt(B, "    for (int i=0; i<%d; i++) {\n", nneeded);
+                add_fmt(B, "        lua_rawgeti(L, %d, i+1);\n", vtab_idx);
+                add_fmt(B, "        lua_replace(L, %d + i);\n", a + 1);
+                add_fmt(B, "    }\n");
+            } else {
+                add_fmt(B, "    {\n");
+                add_fmt(B, "        int nvar = (int)lua_rawlen(L, %d);\n", vtab_idx);
+                add_fmt(B, "        lua_settop(L, %d + nvar);\n", a);
+                add_fmt(B, "        for (int i=1; i<=nvar; i++) {\n");
+                add_fmt(B, "            lua_rawgeti(L, %d, i);\n", vtab_idx);
+                add_fmt(B, "            lua_replace(L, %d + i - 1);\n", a + 1);
+                add_fmt(B, "        }\n");
+                add_fmt(B, "    }\n");
+            }
             break;
         }
 
@@ -459,7 +626,7 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             add_fmt(B, "        lua_pushvalue(L, %d); /* table */\n", a + 1);
             add_fmt(B, "        for (int j = 1; j <= n; j++) {\n");
             add_fmt(B, "            lua_pushvalue(L, %d + j);\n", a + 1);
-            add_fmt(B, "            lua_seti(L, -2, %d + j);\n", (c - 1) * LFIELDS_PER_FLUSH);
+        add_fmt(B, "            lua_seti(L, -2, %d + j);\n", c);
             add_fmt(B, "        }\n");
             add_fmt(B, "        lua_pop(L, 1);\n");
             if (n == 0) {
@@ -513,6 +680,162 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             break;
         }
 
+        case OP_TESTNIL: {
+            int b = GETARG_B(i);
+            int k = GETARG_k(i);
+            add_fmt(B, "    if (lua_isnil(L, %d) != %d) goto Label_%d;\n", b + 1, k, pc + 1 + 2);
+            int a = GETARG_A(i);
+            if (a != MAXARG_A) {
+                 add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
+                 add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+            }
+            break;
+        }
+
+        case OP_NEWCLASS: {
+            int bx = GETARG_Bx(i);
+            emit_loadk(B, p, bx);
+            add_fmt(B, "    lua_newclass(L, lua_tostring(L, -1));\n");
+            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "    lua_pop(L, 1);\n");
+            break;
+        }
+
+        case OP_INHERIT: {
+            int b = GETARG_B(i);
+            add_fmt(B, "    lua_inherit(L, %d, %d);\n", a + 1, b + 1);
+            break;
+        }
+
+        case OP_SETMETHOD: {
+            int b = GETARG_B(i);
+            int c = GETARG_C(i);
+            emit_loadk(B, p, b);
+            add_fmt(B, "    lua_setmethod(L, %d, lua_tostring(L, -1), %d);\n", a + 1, c + 1);
+            add_fmt(B, "    lua_pop(L, 1);\n");
+            break;
+        }
+
+        case OP_SETSTATIC: {
+            int b = GETARG_B(i);
+            int c = GETARG_C(i);
+            emit_loadk(B, p, b);
+            add_fmt(B, "    lua_setstatic(L, %d, lua_tostring(L, -1), %d);\n", a + 1, c + 1);
+            add_fmt(B, "    lua_pop(L, 1);\n");
+            break;
+        }
+
+        case OP_GETSUPER: {
+            int b = GETARG_B(i);
+            int c = GETARG_C(i);
+            add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
+            emit_loadk(B, p, c);
+            add_fmt(B, "    lua_getsuper(L, -2, lua_tostring(L, -1));\n");
+            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "    lua_pop(L, 2);\n");
+            break;
+        }
+
+        case OP_NEWOBJ: {
+            int b = GETARG_B(i);
+            int c = GETARG_C(i);
+            int nargs = c - 1;
+            add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
+            for (int k = 0; k < nargs; k++) {
+                add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1 + k);
+            }
+            add_fmt(B, "    lua_newobject(L, -%d, %d);\n", nargs + 1, nargs);
+            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "    lua_pop(L, 1);\n");
+            break;
+        }
+
+        case OP_GETPROP: {
+            int b = GETARG_B(i);
+            int c = GETARG_C(i);
+            add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
+            emit_loadk(B, p, c);
+            add_fmt(B, "    lua_getprop(L, -2, lua_tostring(L, -1));\n");
+            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "    lua_pop(L, 2);\n");
+            break;
+        }
+
+        case OP_SETPROP: {
+            int b = GETARG_B(i);
+            int c = GETARG_C(i);
+            add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1);
+            emit_loadk(B, p, b);
+            if (TESTARG_k(i)) emit_loadk(B, p, c);
+            else add_fmt(B, "    lua_pushvalue(L, %d);\n", c + 1);
+            add_fmt(B, "    lua_setprop(L, -3, lua_tostring(L, -2), -1);\n");
+            add_fmt(B, "    lua_pop(L, 3);\n");
+            break;
+        }
+
+        case OP_INSTANCEOF: {
+            int b = GETARG_B(i);
+            int c = GETARG_C(i); // Unused? OP_INSTANCEOF A B C k.
+            // C is unused in lvm.c (checks R[B] against R[C]... wait)
+            // lvm.c: TValue *rb = vRB(i); res = luaC_instanceof(L, -2, -1).
+            // A is object? No.
+            // lvm.c:
+            // StkId ra = RA(i); // object?
+            // TValue *rb = vRB(i); // class?
+            // luaC_instanceof(L, -2, -1) -> L, ra, rb?
+            // lvm.c code:
+            // setobj2s(L, top, ra); top++;
+            // setobj2s(L, top, rb); top++;
+            // luaC_instanceof(L, -2, -1);
+            // So RA is object, RB is class.
+            int k = GETARG_k(i);
+            add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1);
+            add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
+            add_fmt(B, "    if (lua_instanceof(L, -2, -1) != %d) goto Label_%d;\n", k, pc + 1 + 2);
+            add_fmt(B, "    lua_pop(L, 2);\n");
+            break;
+        }
+
+        case OP_IMPLEMENT: {
+            int b = GETARG_B(i);
+            add_fmt(B, "    lua_implement(L, %d, %d);\n", a + 1, b + 1);
+            break;
+        }
+
+        case OP_ASYNCWRAP: {
+            int b = GETARG_B(i);
+            add_fmt(B, "    lua_getglobal(L, \"__async_wrap\");\n");
+            add_fmt(B, "    if (lua_isfunction(L, -1)) {\n");
+            add_fmt(B, "        lua_pushvalue(L, %d);\n", b + 1);
+            add_fmt(B, "        lua_call(L, 1, 1);\n");
+            add_fmt(B, "        lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "    } else {\n");
+            add_fmt(B, "        lua_pop(L, 1);\n");
+            add_fmt(B, "        luaL_error(L, \"__async_wrap not found\");\n");
+            add_fmt(B, "    }\n");
+            break;
+        }
+
+        case OP_GENERICWRAP: {
+            int b = GETARG_B(i);
+            add_fmt(B, "    lua_getglobal(L, \"__generic_wrap\");\n");
+            add_fmt(B, "    if (lua_isfunction(L, -1)) {\n");
+            add_fmt(B, "        lua_pushvalue(L, %d);\n", b + 1);
+            add_fmt(B, "        lua_pushvalue(L, %d);\n", b + 2);
+            add_fmt(B, "        lua_pushvalue(L, %d);\n", b + 3);
+            add_fmt(B, "        lua_call(L, 3, 1);\n");
+            add_fmt(B, "        lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "    } else {\n");
+            add_fmt(B, "        lua_pop(L, 1);\n");
+            add_fmt(B, "    }\n");
+            break;
+        }
+
+        case OP_CHECKTYPE: {
+            add_fmt(B, "    /* OP_CHECKTYPE ignored in TCC for now */\n");
+            break;
+        }
+
         case OP_NOT: {
             int b = GETARG_B(i);
             add_fmt(B, "    lua_pushboolean(L, !lua_toboolean(L, %d));\n", b + 1);
@@ -553,7 +876,34 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
 static void process_proto(luaL_Buffer *B, Proto *p, int id, ProtoInfo *protos, int proto_count) {
     add_fmt(B, "\n/* Proto %d */\n", id);
     add_fmt(B, "static int function_%d(lua_State *L) {\n", id);
-    add_fmt(B, "    lua_settop(L, %d); /* Max Stack Size */\n", p->maxstacksize);
+
+    if (p->is_vararg) {
+        add_fmt(B, "    {\n");
+        add_fmt(B, "        int nargs = lua_gettop(L);\n");
+        add_fmt(B, "        int nparams = %d;\n", p->numparams);
+        add_fmt(B, "        lua_createtable(L, (nargs > nparams) ? nargs - nparams : 0, 0);\n");
+        add_fmt(B, "        if (nargs > nparams) {\n");
+        add_fmt(B, "            for (int i = nparams + 1; i <= nargs; i++) {\n");
+        add_fmt(B, "                lua_pushvalue(L, i);\n");
+        add_fmt(B, "                lua_rawseti(L, -2, i - nparams);\n");
+        add_fmt(B, "            }\n");
+        add_fmt(B, "        }\n");
+        add_fmt(B, "        int table_pos = lua_gettop(L);\n");
+        add_fmt(B, "        int target = %d + 1;\n", p->maxstacksize);
+        add_fmt(B, "        if (table_pos >= target) {\n");
+        add_fmt(B, "            lua_replace(L, target);\n");
+        add_fmt(B, "            lua_settop(L, target);\n");
+        add_fmt(B, "        } else {\n");
+        add_fmt(B, "            lua_settop(L, target);\n");
+        add_fmt(B, "            lua_pushvalue(L, table_pos);\n");
+        add_fmt(B, "            lua_replace(L, target);\n");
+        add_fmt(B, "            lua_pushnil(L);\n");
+        add_fmt(B, "            lua_replace(L, table_pos);\n");
+        add_fmt(B, "        }\n");
+        add_fmt(B, "    }\n");
+    } else {
+        add_fmt(B, "    lua_settop(L, %d); /* Max Stack Size */\n", p->maxstacksize);
+    }
 
     // Iterate instructions
     for (int i = 0; i < p->sizecode; i++) {
