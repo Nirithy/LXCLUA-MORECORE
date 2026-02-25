@@ -143,6 +143,14 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             add_fmt(B, "    lua_pushboolean(L, 0);\n");
             add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
             break;
+        case OP_LFALSESKIP:
+            add_fmt(B, "    if (!lua_toboolean(L, %d)) {\n", a + 1);
+            add_fmt(B, "        goto Label_%d;\n", pc + 1 + 2);
+            add_fmt(B, "    } else {\n");
+            add_fmt(B, "        lua_pushboolean(L, 0);\n");
+            add_fmt(B, "        lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "    }\n");
+            break;
         case OP_LOADTRUE:
             add_fmt(B, "    lua_pushboolean(L, 1);\n");
             add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
@@ -152,6 +160,14 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             int b = GETARG_B(i);
             add_fmt(B, "    lua_pushvalue(L, lua_upvalueindex(%d));\n", b + 1);
             add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+            break;
+        }
+        case OP_LOADKX: {
+            if (pc + 1 < p->sizecode && GET_OPCODE(p->code[pc+1]) == OP_EXTRAARG) {
+                int ax = GETARG_Ax(p->code[pc+1]);
+                emit_loadk(B, p, ax);
+                add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+            }
             break;
         }
         case OP_SETUPVAL: {
@@ -685,6 +701,45 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             break;
         }
 
+        case OP_TFORPREP: {
+            int bx = GETARG_Bx(i);
+            add_fmt(B, "    goto Label_%d;\n", pc + 1 + bx + 1);
+            break;
+        }
+
+        case OP_TFORCALL: {
+            int c = GETARG_C(i);
+            add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1);
+            add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 2);
+            add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 3);
+            add_fmt(B, "    lua_call(L, 2, %d);\n", c);
+            for (int k = c; k >= 1; k--) {
+                add_fmt(B, "    lua_replace(L, %d);\n", a + 4 + k);
+            }
+            break;
+        }
+
+        case OP_TFORLOOP: {
+            int bx = GETARG_Bx(i);
+            add_fmt(B, "    if (!lua_isnil(L, %d)) {\n", a + 4); /* R[A+4] is first result from TFORCALL? No, A+1 relative to A? */
+            /* Standard Lua: if R[A+1] ~= nil then R[A]=R[A+1]; pc -= bx */
+            /* But TFORLOOP argument A is base. */
+            /* The control variable is at R[A+1] (which is the first return value from TFORCALL, if TFORCALL used R[A]). */
+            /* Wait, let's verify register mapping. */
+            /* TFORCALL A C: R[A+3+1]... = R[A](R[A+1], R[A+2]) */
+            /* So results start at R[A+4]. */
+            /* TFORLOOP A Bx: if R[A+1] ~= nil ... */
+            /* My previous analysis said R[A+2]. lopcodes.h says R[A+2]. */
+            /* Let's trust lopcodes.h: "if R[A+2] ~= nil". */
+            /* R[A+2] in 1-based indexing is a + 3. */
+            add_fmt(B, "    if (!lua_isnil(L, %d)) {\n", a + 3);
+            add_fmt(B, "        lua_pushvalue(L, %d);\n", a + 3);
+            add_fmt(B, "        lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "        goto Label_%d;\n", pc + 1 - bx);
+            add_fmt(B, "    }\n");
+            break;
+        }
+
         case OP_TEST: {
             int k = GETARG_k(i);
             add_fmt(B, "    if (lua_toboolean(L, %d) != %d) goto Label_%d;\n", a + 1, k, pc + 1 + 2);
@@ -884,6 +939,11 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             }
             add_fmt(B, "    lua_concat(L, %d);\n", b);
             add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+            break;
+        }
+
+        case OP_CLOSE: {
+            add_fmt(B, "    lua_toclose(L, %d);\n", a + 1);
             break;
         }
 
