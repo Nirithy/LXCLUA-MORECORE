@@ -649,6 +649,8 @@ void luaX_setinput (lua_State *L, LexState *ls, ZIO *z, TString *source,
     ls->warnings.states[WT_ALL] = WS_OFF;
   }
 
+  ls->expr_flags = 0;
+
 #if defined(LUA_COMPAT_GLOBAL)
   /* compatibility mode: "global" is not a reserved word */
   ls->glbn = luaS_newliteral(L, "global");  /* get "global" string */
