@@ -709,90 +709,117 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
         case OP_EQ: { // if ((R[A] == R[B]) ~= k) then pc++
             int b = GETARG_B(i);
             int k = GETARG_k(i);
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1);
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
-            add_fmt(B, "    if (lua_compare(L, -2, -1, LUA_OPEQ) != %d) goto Label_%d;\n", k, pc + 1 + 2);
-            add_fmt(B, "    lua_pop(L, 2);\n");
+            add_fmt(B, "    {\n");
+            add_fmt(B, "        lua_pushvalue(L, %d);\n", a + 1);
+            add_fmt(B, "        lua_pushvalue(L, %d);\n", b + 1);
+            add_fmt(B, "        int res = lua_compare(L, -2, -1, LUA_OPEQ);\n");
+            add_fmt(B, "        lua_pop(L, 2);\n");
+            add_fmt(B, "        if (res != %d) goto Label_%d;\n", k, pc + 1 + 2);
+            add_fmt(B, "    }\n");
             break;
         }
 
         case OP_LT: {
             int b = GETARG_B(i);
             int k = GETARG_k(i);
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1);
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
-            add_fmt(B, "    if (lua_compare(L, -2, -1, LUA_OPLT) != %d) goto Label_%d;\n", k, pc + 1 + 2);
-            add_fmt(B, "    lua_pop(L, 2);\n");
+            add_fmt(B, "    {\n");
+            add_fmt(B, "        lua_pushvalue(L, %d);\n", a + 1);
+            add_fmt(B, "        lua_pushvalue(L, %d);\n", b + 1);
+            add_fmt(B, "        int res = lua_compare(L, -2, -1, LUA_OPLT);\n");
+            add_fmt(B, "        lua_pop(L, 2);\n");
+            add_fmt(B, "        if (res != %d) goto Label_%d;\n", k, pc + 1 + 2);
+            add_fmt(B, "    }\n");
             break;
         }
 
         case OP_LE: {
             int b = GETARG_B(i);
             int k = GETARG_k(i);
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1);
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
-            add_fmt(B, "    if (lua_compare(L, -2, -1, LUA_OPLE) != %d) goto Label_%d;\n", k, pc + 1 + 2);
-            add_fmt(B, "    lua_pop(L, 2);\n");
+            add_fmt(B, "    {\n");
+            add_fmt(B, "        lua_pushvalue(L, %d);\n", a + 1);
+            add_fmt(B, "        lua_pushvalue(L, %d);\n", b + 1);
+            add_fmt(B, "        int res = lua_compare(L, -2, -1, LUA_OPLE);\n");
+            add_fmt(B, "        lua_pop(L, 2);\n");
+            add_fmt(B, "        if (res != %d) goto Label_%d;\n", k, pc + 1 + 2);
+            add_fmt(B, "    }\n");
             break;
         }
 
         case OP_EQK: {
             int b = GETARG_B(i);
             int k = GETARG_k(i);
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1);
+            add_fmt(B, "    {\n");
+            add_fmt(B, "        lua_pushvalue(L, %d);\n", a + 1);
             emit_loadk(B, p, b);
-            add_fmt(B, "    if (lua_compare(L, -2, -1, LUA_OPEQ) != %d) goto Label_%d;\n", k, pc + 1 + 2);
-            add_fmt(B, "    lua_pop(L, 2);\n");
+            add_fmt(B, "        int res = lua_compare(L, -2, -1, LUA_OPEQ);\n");
+            add_fmt(B, "        lua_pop(L, 2);\n");
+            add_fmt(B, "        if (res != %d) goto Label_%d;\n", k, pc + 1 + 2);
+            add_fmt(B, "    }\n");
             break;
         }
 
         case OP_EQI: {
             int sb = GETARG_sB(i);
             int k = GETARG_k(i);
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1);
-            add_fmt(B, "    lua_pushinteger(L, %d);\n", sb);
-            add_fmt(B, "    if (lua_compare(L, -2, -1, LUA_OPEQ) != %d) goto Label_%d;\n", k, pc + 1 + 2);
-            add_fmt(B, "    lua_pop(L, 2);\n");
+            add_fmt(B, "    {\n");
+            add_fmt(B, "        lua_pushvalue(L, %d);\n", a + 1);
+            add_fmt(B, "        lua_pushinteger(L, %d);\n", sb);
+            add_fmt(B, "        int res = lua_compare(L, -2, -1, LUA_OPEQ);\n");
+            add_fmt(B, "        lua_pop(L, 2);\n");
+            add_fmt(B, "        if (res != %d) goto Label_%d;\n", k, pc + 1 + 2);
+            add_fmt(B, "    }\n");
             break;
         }
 
         case OP_LTI: {
             int sb = GETARG_sB(i);
             int k = GETARG_k(i);
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1);
-            add_fmt(B, "    lua_pushinteger(L, %d);\n", sb);
-            add_fmt(B, "    if (lua_compare(L, -2, -1, LUA_OPLT) != %d) goto Label_%d;\n", k, pc + 1 + 2);
-            add_fmt(B, "    lua_pop(L, 2);\n");
+            add_fmt(B, "    {\n");
+            add_fmt(B, "        lua_pushvalue(L, %d);\n", a + 1);
+            add_fmt(B, "        lua_pushinteger(L, %d);\n", sb);
+            add_fmt(B, "        int res = lua_compare(L, -2, -1, LUA_OPLT);\n");
+            add_fmt(B, "        lua_pop(L, 2);\n");
+            add_fmt(B, "        if (res != %d) goto Label_%d;\n", k, pc + 1 + 2);
+            add_fmt(B, "    }\n");
             break;
         }
 
         case OP_LEI: {
             int sb = GETARG_sB(i);
             int k = GETARG_k(i);
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1);
-            add_fmt(B, "    lua_pushinteger(L, %d);\n", sb);
-            add_fmt(B, "    if (lua_compare(L, -2, -1, LUA_OPLE) != %d) goto Label_%d;\n", k, pc + 1 + 2);
-            add_fmt(B, "    lua_pop(L, 2);\n");
+            add_fmt(B, "    {\n");
+            add_fmt(B, "        lua_pushvalue(L, %d);\n", a + 1);
+            add_fmt(B, "        lua_pushinteger(L, %d);\n", sb);
+            add_fmt(B, "        int res = lua_compare(L, -2, -1, LUA_OPLE);\n");
+            add_fmt(B, "        lua_pop(L, 2);\n");
+            add_fmt(B, "        if (res != %d) goto Label_%d;\n", k, pc + 1 + 2);
+            add_fmt(B, "    }\n");
             break;
         }
 
         case OP_GTI: {
             int sb = GETARG_sB(i);
             int k = GETARG_k(i);
-            add_fmt(B, "    lua_pushinteger(L, %d);\n", sb);
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1);
-            add_fmt(B, "    if (lua_compare(L, -2, -1, LUA_OPLT) != %d) goto Label_%d;\n", k, pc + 1 + 2);
-            add_fmt(B, "    lua_pop(L, 2);\n");
+            add_fmt(B, "    {\n");
+            add_fmt(B, "        lua_pushinteger(L, %d);\n", sb);
+            add_fmt(B, "        lua_pushvalue(L, %d);\n", a + 1);
+            add_fmt(B, "        int res = lua_compare(L, -2, -1, LUA_OPLT);\n");
+            add_fmt(B, "        lua_pop(L, 2);\n");
+            add_fmt(B, "        if (res != %d) goto Label_%d;\n", k, pc + 1 + 2);
+            add_fmt(B, "    }\n");
             break;
         }
 
         case OP_GEI: {
             int sb = GETARG_sB(i);
             int k = GETARG_k(i);
-            add_fmt(B, "    lua_pushinteger(L, %d);\n", sb);
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1);
-            add_fmt(B, "    if (lua_compare(L, -2, -1, LUA_OPLE) != %d) goto Label_%d;\n", k, pc + 1 + 2);
-            add_fmt(B, "    lua_pop(L, 2);\n");
+            add_fmt(B, "    {\n");
+            add_fmt(B, "        lua_pushinteger(L, %d);\n", sb);
+            add_fmt(B, "        lua_pushvalue(L, %d);\n", a + 1);
+            add_fmt(B, "        int res = lua_compare(L, -2, -1, LUA_OPLE);\n");
+            add_fmt(B, "        lua_pop(L, 2);\n");
+            add_fmt(B, "        if (res != %d) goto Label_%d;\n", k, pc + 1 + 2);
+            add_fmt(B, "    }\n");
             break;
         }
 
@@ -1209,9 +1236,12 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
         case OP_IS: {
             int b = GETARG_B(i);
             int k = GETARG_k(i);
+            add_fmt(B, "    {\n");
             emit_loadk(B, p, b); // Push type name K[B]
-            add_fmt(B, "    if (lua_is(L, %d, lua_tostring(L, -1)) != %d) goto Label_%d;\n", a + 1, k, pc + 1 + 2);
-            add_fmt(B, "    lua_pop(L, 1);\n");
+            add_fmt(B, "        int res = lua_is(L, %d, lua_tostring(L, -1));\n", a + 1);
+            add_fmt(B, "        lua_pop(L, 1);\n");
+            add_fmt(B, "        if (res != %d) goto Label_%d;\n", k, pc + 1 + 2);
+            add_fmt(B, "    }\n");
             break;
         }
 

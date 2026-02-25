@@ -47,10 +47,13 @@ static int function_0(lua_State *L) {
 static int function_1(lua_State *L) {
     lua_settop(L, 5); /* Max Stack Size */
     Label_1: /* EQI */
-    lua_pushvalue(L, 1);
-    lua_pushinteger(L, 0);
-    if (lua_compare(L, -2, -1, LUA_OPEQ) != 0) goto Label_3;
-    lua_pop(L, 2);
+    {
+        lua_pushvalue(L, 1);
+        lua_pushinteger(L, 0);
+        int res = lua_compare(L, -2, -1, LUA_OPEQ);
+        lua_pop(L, 2);
+        if (res != 0) goto Label_3;
+    }
     Label_2: /* JMP */
     goto Label_4;
     Label_3: /* RETURN1 */

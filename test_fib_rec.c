@@ -45,10 +45,13 @@ static int function_0(lua_State *L) {
 static int function_1(lua_State *L) {
     lua_settop(L, 4); /* Max Stack Size */
     Label_1: /* LTI */
-    lua_pushvalue(L, 1);
-    lua_pushinteger(L, 2);
-    if (lua_compare(L, -2, -1, LUA_OPLT) != 0) goto Label_3;
-    lua_pop(L, 2);
+    {
+        lua_pushvalue(L, 1);
+        lua_pushinteger(L, 2);
+        int res = lua_compare(L, -2, -1, LUA_OPLT);
+        lua_pop(L, 2);
+        if (res != 0) goto Label_3;
+    }
     Label_2: /* JMP */
     goto Label_4;
     Label_3: /* RETURN1 */
@@ -64,9 +67,11 @@ static int function_1(lua_State *L) {
     Label_6: /* MMBINI */
     /* MMBIN: ignored as lua_arith handles it */
     Label_7: /* CALL */
+    {
     lua_tcc_push_args(L, 2, 2); /* func + args */
     lua_call(L, 1, 1);
     lua_tcc_store_results(L, 2, 1);
+    }
     Label_8: /* GETTABUP */
     lua_tcc_gettabup(L, 1, "fib", 3);
     Label_9: /* ADDI */
@@ -77,9 +82,11 @@ static int function_1(lua_State *L) {
     Label_10: /* MMBINI */
     /* MMBIN: ignored as lua_arith handles it */
     Label_11: /* CALL */
+    {
     lua_tcc_push_args(L, 3, 2); /* func + args */
     lua_call(L, 1, 1);
     lua_tcc_store_results(L, 3, 1);
+    }
     Label_12: /* ADD */
     lua_pushvalue(L, 2);
     lua_pushvalue(L, 3);

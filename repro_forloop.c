@@ -63,9 +63,11 @@ static int function_1(lua_State *L) {
     lua_pushvalue(L, 1);
     lua_replace(L, 5);
     Label_11: /* CALL */
+    {
     lua_tcc_push_args(L, 4, 2); /* func + args */
     lua_call(L, 1, 4);
     lua_tcc_store_results(L, 4, 4);
+    }
     Label_12: /* TFORPREP */
     lua_toclose(L, 7);
     goto Label_20;

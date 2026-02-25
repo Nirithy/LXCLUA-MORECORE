@@ -18,9 +18,11 @@ static int function_0(lua_State *L) {
     Label_4: /* LOADK */
     lua_tcc_loadk_str(L, 3, "Hello from TCC compiled module!");
     Label_5: /* CALL */
+    {
     lua_tcc_push_args(L, 2, 2); /* func + args */
     lua_call(L, 1, 0);
     lua_tcc_store_results(L, 2, 0);
+    }
     Label_6: /* MOVE */
     lua_pushvalue(L, 1);
     lua_replace(L, 2);
