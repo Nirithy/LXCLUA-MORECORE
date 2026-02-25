@@ -321,6 +321,7 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             int nresults = (c == 0) ? -1 : (c - 1);
 
             if (b != 0) {
+                if (c == 0) add_fmt(B, "    int s = lua_gettop(L);\n");
                 add_fmt(B, "    lua_pushvalue(L, %d); /* func */\n", a + 1);
                 for (int n = 0; n < nargs; n++) {
                      add_fmt(B, "    lua_pushvalue(L, %d); /* arg %d */\n", a + 2 + n, n);
@@ -330,6 +331,15 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
                      for (int n = nresults - 1; n >= 0; n--) {
                          add_fmt(B, "    lua_replace(L, %d);\n", a + 1 + n);
                      }
+                } else {
+                     add_fmt(B, "    {\n");
+                     add_fmt(B, "        int nres = lua_gettop(L) - s;\n");
+                     add_fmt(B, "        for (int k = 0; k < nres; k++) {\n");
+                     add_fmt(B, "            lua_pushvalue(L, s + 1 + k);\n");
+                     add_fmt(B, "            lua_replace(L, %d + k);\n", a + 1);
+                     add_fmt(B, "        }\n");
+                     add_fmt(B, "        lua_settop(L, %d + nres);\n", a);
+                     add_fmt(B, "    }\n");
                 }
             } else {
                  /* Variable number of arguments from stack (B=0) */
@@ -564,8 +574,8 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
              break;
 
         case OP_NEWTABLE: {
-            unsigned int b = GETARG_B(i);
-            unsigned int c = GETARG_C(i);
+            unsigned int b = GETARG_vB(i);
+            unsigned int c = GETARG_vC(i);
             if (TESTARG_k(i)) {
                 if (pc + 1 < p->sizecode && GET_OPCODE(p->code[pc+1]) == OP_EXTRAARG) {
                     int ax = GETARG_Ax(p->code[pc+1]);
@@ -658,8 +668,8 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
         }
 
         case OP_SETLIST: {
-            int n = GETARG_B(i);
-            unsigned int c = GETARG_C(i);
+            int n = GETARG_vB(i);
+            unsigned int c = GETARG_vC(i);
             if (TESTARG_k(i)) {
                 if (pc + 1 < p->sizecode && GET_OPCODE(p->code[pc+1]) == OP_EXTRAARG) {
                     int ax = GETARG_Ax(p->code[pc+1]);
@@ -779,7 +789,7 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
         case OP_TESTNIL: {
             int b = GETARG_B(i);
             int k = GETARG_k(i);
-            add_fmt(B, "    if (lua_isnil(L, %d) != %d) goto Label_%d;\n", b + 1, k, pc + 1 + 2);
+            add_fmt(B, "    if (lua_isnil(L, %d) == %d) goto Label_%d;\n", b + 1, k, pc + 1 + 2);
             int a = GETARG_A(i);
             if (a != MAXARG_A) {
                  add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
