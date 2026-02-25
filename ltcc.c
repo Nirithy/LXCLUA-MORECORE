@@ -729,6 +729,7 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
 
         case OP_TFORPREP: {
             int bx = GETARG_Bx(i);
+            add_fmt(B, "    lua_toclose(L, %d);\n", a + 3 + 1);
             add_fmt(B, "    goto Label_%d;\n", pc + 1 + bx + 1);
             break;
         }

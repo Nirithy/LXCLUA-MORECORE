@@ -61,8 +61,25 @@ function test_tcc_getvarg()
     print("test_tcc_getvarg compilation passed")
 end
 
+function test_tcc_tfor_toclose()
+    local code = [[
+        for k, v in pairs({}) do
+        end
+    ]]
+    local c_code = tcc.compile(code)
+
+    -- Verify OP_TFORPREP generates lua_toclose
+    -- Note: We look for lua_toclose call. The argument index depends on stack allocation,
+    -- but we can just check for existence of "lua_toclose".
+    if not string.find(c_code, "lua_toclose") then
+        error("OP_TFORPREP failed to generate expected C code (missing 'lua_toclose')")
+    end
+    print("test_tcc_tfor_toclose passed")
+end
+
 test_tcc_concept()
 test_tcc_vararg()
 test_tcc_getvarg()
+test_tcc_tfor_toclose()
 
 print("All TCC correctness tests passed!")
