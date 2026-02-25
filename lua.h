@@ -1675,6 +1675,20 @@ struct lua_Debug {
 #define LUAI_TOSTR(x)		LUAI_TOSTRAUX(x)
 
 
+/*
+** Object-Oriented API
+*/
+LUA_API void  (lua_newclass) (lua_State *L, const char *name);
+LUA_API void  (lua_inherit) (lua_State *L, int child_idx, int parent_idx);
+LUA_API void  (lua_newobject) (lua_State *L, int class_idx, int nargs);
+LUA_API void  (lua_setmethod) (lua_State *L, int class_idx, const char *name, int func_idx);
+LUA_API void  (lua_setstatic) (lua_State *L, int class_idx, const char *name, int value_idx);
+LUA_API void  (lua_getprop) (lua_State *L, int obj_idx, const char *key);
+LUA_API void  (lua_setprop) (lua_State *L, int obj_idx, const char *key, int value_idx);
+LUA_API int   (lua_instanceof) (lua_State *L, int obj_idx, int class_idx);
+LUA_API void  (lua_implement) (lua_State *L, int class_idx, int interface_idx);
+LUA_API void  (lua_getsuper) (lua_State *L, int obj_idx, const char *name);
+
 
 /******************************************************************************
 * Copyright (C) 1994-2025 Lua.org, PUC-Rio.

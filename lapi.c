@@ -31,6 +31,7 @@
 #include "lsuper.h"
 #include "lobfuscate.h"
 #include "lthread.h"
+#include "lclass.h"
 
 
 
@@ -2306,6 +2307,73 @@ LUA_API const char *lua_setupvalue (lua_State *L, int funcindex, int n) {
   }
   lua_unlock(L);
   return name;
+}
+
+
+/*
+** Object-Oriented API
+*/
+
+LUA_API void lua_newclass (lua_State *L, const char *name) {
+  lua_lock(L);
+  luaC_newclass(L, luaS_new(L, name));
+  lua_unlock(L);
+}
+
+LUA_API void lua_inherit (lua_State *L, int child_idx, int parent_idx) {
+  lua_lock(L);
+  luaC_inherit(L, child_idx, parent_idx);
+  lua_unlock(L);
+}
+
+LUA_API void lua_newobject (lua_State *L, int class_idx, int nargs) {
+  lua_lock(L);
+  luaC_newobject(L, class_idx, nargs);
+  lua_unlock(L);
+}
+
+LUA_API void lua_setmethod (lua_State *L, int class_idx, const char *name, int func_idx) {
+  lua_lock(L);
+  luaC_setmethod(L, class_idx, luaS_new(L, name), func_idx);
+  lua_unlock(L);
+}
+
+LUA_API void lua_setstatic (lua_State *L, int class_idx, const char *name, int value_idx) {
+  lua_lock(L);
+  luaC_setstatic(L, class_idx, luaS_new(L, name), value_idx);
+  lua_unlock(L);
+}
+
+LUA_API void lua_getprop (lua_State *L, int obj_idx, const char *key) {
+  lua_lock(L);
+  luaC_getprop(L, obj_idx, luaS_new(L, key));
+  lua_unlock(L);
+}
+
+LUA_API void lua_setprop (lua_State *L, int obj_idx, const char *key, int value_idx) {
+  lua_lock(L);
+  luaC_setprop(L, obj_idx, luaS_new(L, key), value_idx);
+  lua_unlock(L);
+}
+
+LUA_API int lua_instanceof (lua_State *L, int obj_idx, int class_idx) {
+  int res;
+  lua_lock(L);
+  res = luaC_instanceof(L, obj_idx, class_idx);
+  lua_unlock(L);
+  return res;
+}
+
+LUA_API void lua_implement (lua_State *L, int class_idx, int interface_idx) {
+  lua_lock(L);
+  luaC_implement(L, class_idx, interface_idx);
+  lua_unlock(L);
+}
+
+LUA_API void lua_getsuper (lua_State *L, int obj_idx, const char *name) {
+  lua_lock(L);
+  luaC_super(L, obj_idx, luaS_new(L, name));
+  lua_unlock(L);
 }
 
 
