@@ -179,27 +179,48 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
         case OP_GETTABUP: { // R[A] := UpValue[B][K[C]]
             int b = GETARG_B(i);
             int c = GETARG_C(i);
-            add_fmt(B, "    lua_pushvalue(L, lua_upvalueindex(%d));\n", b + 1); // table
-            emit_loadk(B, p, c); // key
-            add_fmt(B, "    lua_gettable(L, -2);\n");
-            add_fmt(B, "    lua_replace(L, %d);\n", a + 1); // result to R[A]
-            add_fmt(B, "    lua_pop(L, 1);\n"); // pop table
+            TValue *k = &p->k[c];
+            if (ttisstring(k)) {
+                 add_fmt(B, "    lua_getfield(L, lua_upvalueindex(%d), ", b + 1);
+                 emit_quoted_string(B, getstr(tsvalue(k)), tsslen(tsvalue(k)));
+                 add_fmt(B, ");\n");
+                 add_fmt(B, "    lua_replace(L, %d);\n", a + 1); // result to R[A]
+            } else {
+                 add_fmt(B, "    lua_pushvalue(L, lua_upvalueindex(%d));\n", b + 1); // table
+                 emit_loadk(B, p, c); // key
+                 add_fmt(B, "    lua_gettable(L, -2);\n");
+                 add_fmt(B, "    lua_replace(L, %d);\n", a + 1); // result to R[A]
+                 add_fmt(B, "    lua_pop(L, 1);\n"); // pop table
+            }
             break;
         }
         case OP_SETTABUP: { // UpValue[A][K[B]] := RK(C)
             // A is upval index
             int b = GETARG_B(i);
             int c = GETARG_C(i);
-            add_fmt(B, "    lua_pushvalue(L, lua_upvalueindex(%d));\n", a + 1); // table
-            emit_loadk(B, p, b); // key
-            // RK(C)
-            if (TESTARG_k(i)) {
-                emit_loadk(B, p, c);
+            TValue *k = &p->k[b];
+            if (ttisstring(k)) {
+                // RK(C)
+                if (TESTARG_k(i)) {
+                    emit_loadk(B, p, c);
+                } else {
+                    add_fmt(B, "    lua_pushvalue(L, %d);\n", c + 1);
+                }
+                add_fmt(B, "    lua_setfield(L, lua_upvalueindex(%d), ", a + 1);
+                emit_quoted_string(B, getstr(tsvalue(k)), tsslen(tsvalue(k)));
+                add_fmt(B, ");\n");
             } else {
-                add_fmt(B, "    lua_pushvalue(L, %d);\n", c + 1);
+                add_fmt(B, "    lua_pushvalue(L, lua_upvalueindex(%d));\n", a + 1); // table
+                emit_loadk(B, p, b); // key
+                // RK(C)
+                if (TESTARG_k(i)) {
+                    emit_loadk(B, p, c);
+                } else {
+                    add_fmt(B, "    lua_pushvalue(L, %d);\n", c + 1);
+                }
+                add_fmt(B, "    lua_settable(L, -3);\n");
+                add_fmt(B, "    lua_pop(L, 1);\n"); // pop table
             }
-            add_fmt(B, "    lua_settable(L, -3);\n");
-            add_fmt(B, "    lua_pop(L, 1);\n"); // pop table
             break;
         }
 
@@ -260,11 +281,26 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
             add_fmt(B, "    lua_pushvalue(L, -1);\n");
             add_fmt(B, "    lua_replace(L, %d);\n", a + 2);
-            if (TESTARG_k(i)) emit_loadk(B, p, c);
-            else add_fmt(B, "    lua_pushvalue(L, %d);\n", c + 1);
-            add_fmt(B, "    lua_gettable(L, -2);\n");
-            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
-            add_fmt(B, "    lua_pop(L, 1);\n");
+            if (TESTARG_k(i)) {
+                 TValue *k = &p->k[c];
+                 if (ttisstring(k)) {
+                      add_fmt(B, "    lua_getfield(L, -1, ");
+                      emit_quoted_string(B, getstr(tsvalue(k)), tsslen(tsvalue(k)));
+                      add_fmt(B, ");\n");
+                      add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+                      add_fmt(B, "    lua_pop(L, 1);\n");
+                 } else {
+                      emit_loadk(B, p, c);
+                      add_fmt(B, "    lua_gettable(L, -2);\n");
+                      add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+                      add_fmt(B, "    lua_pop(L, 1);\n");
+                 }
+            } else {
+                add_fmt(B, "    lua_pushvalue(L, %d);\n", c + 1);
+                add_fmt(B, "    lua_gettable(L, -2);\n");
+                add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+                add_fmt(B, "    lua_pop(L, 1);\n");
+            }
             break;
         }
 
