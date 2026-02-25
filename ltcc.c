@@ -17,6 +17,88 @@
 #include "ltcc.h"
 #include "lopnames.h"
 
+/*
+** tcc support functions (Library API)
+*/
+
+LUA_API void lua_tcc_prologue(lua_State *L, int nparams, int maxstack) {
+    int nargs = lua_gettop(L);
+    lua_createtable(L, (nargs > nparams) ? nargs - nparams : 0, 0);
+    if (nargs > nparams) {
+        for (int i = nparams + 1; i <= nargs; i++) {
+            lua_pushvalue(L, i);
+            lua_rawseti(L, -2, i - nparams);
+        }
+    }
+    int table_pos = lua_gettop(L);
+    int target = maxstack + 1;
+    if (table_pos >= target) {
+        lua_replace(L, target);
+        lua_settop(L, target);
+    } else {
+        lua_settop(L, target);
+        lua_pushvalue(L, table_pos);
+        lua_replace(L, target);
+        lua_pushnil(L);
+        lua_replace(L, table_pos);
+    }
+}
+
+LUA_API void lua_tcc_gettabup(lua_State *L, int upval, const char *k, int dest) {
+    lua_getfield(L, lua_upvalueindex(upval), k);
+    lua_replace(L, dest);
+}
+
+LUA_API void lua_tcc_settabup(lua_State *L, int upval, const char *k, int val_idx) {
+    lua_pushvalue(L, val_idx);
+    lua_setfield(L, lua_upvalueindex(upval), k);
+    lua_pop(L, 1);
+}
+
+LUA_API void lua_tcc_loadk_str(lua_State *L, int dest, const char *s) {
+    lua_pushstring(L, s);
+    lua_replace(L, dest);
+}
+
+LUA_API void lua_tcc_loadk_int(lua_State *L, int dest, lua_Integer v) {
+    lua_pushinteger(L, v);
+    lua_replace(L, dest);
+}
+
+LUA_API void lua_tcc_loadk_flt(lua_State *L, int dest, lua_Number v) {
+    lua_pushnumber(L, v);
+    lua_replace(L, dest);
+}
+
+LUA_API int lua_tcc_in(lua_State *L, int val_idx, int container_idx) {
+    int res = 0;
+    if (lua_type(L, container_idx) == LUA_TTABLE) {
+        lua_pushvalue(L, val_idx);
+        lua_gettable(L, container_idx);
+        if (!lua_isnil(L, -1)) res = 1;
+        lua_pop(L, 1);
+    } else if (lua_isstring(L, container_idx) && lua_isstring(L, val_idx)) {
+        const char *s = lua_tostring(L, container_idx);
+        const char *sub = lua_tostring(L, val_idx);
+        if (strstr(s, sub)) res = 1;
+    }
+    return res;
+}
+
+LUA_API void lua_tcc_push_args(lua_State *L, int start_reg, int count) {
+    lua_checkstack(L, count);
+    for (int i = 0; i < count; i++) {
+        lua_pushvalue(L, start_reg + i);
+    }
+}
+
+LUA_API void lua_tcc_store_results(lua_State *L, int start_reg, int count) {
+    for (int i = count - 1; i >= 0; i--) {
+        lua_replace(L, start_reg + i);
+    }
+}
+
+
 /* Helper to format string and add to buffer */
 static void add_fmt(luaL_Buffer *B, const char *fmt, ...) {
     va_list args;
@@ -117,13 +199,13 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             int bx = GETARG_Bx(i);
             TValue *k = &p->k[bx];
             if (ttisstring(k)) {
-                 add_fmt(B, "    tcc_loadk_str(L, %d, ", a + 1);
+                 add_fmt(B, "    lua_tcc_loadk_str(L, %d, ", a + 1);
                  emit_quoted_string(B, getstr(tsvalue(k)), tsslen(tsvalue(k)));
                  add_fmt(B, ");\n");
             } else if (ttisinteger(k)) {
-                 add_fmt(B, "    tcc_loadk_int(L, %d, %lld);\n", a + 1, (long long)ivalue(k));
+                 add_fmt(B, "    lua_tcc_loadk_int(L, %d, %lld);\n", a + 1, (long long)ivalue(k));
             } else if (ttisnumber(k)) {
-                 add_fmt(B, "    tcc_loadk_flt(L, %d, %f);\n", a + 1, fltvalue(k));
+                 add_fmt(B, "    lua_tcc_loadk_flt(L, %d, %f);\n", a + 1, fltvalue(k));
             } else {
                  emit_loadk(B, p, bx);
                  add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
@@ -132,12 +214,12 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
         }
         case OP_LOADI: {
             int sbx = GETARG_sBx(i);
-            add_fmt(B, "    tcc_loadk_int(L, %d, %d);\n", a + 1, sbx);
+            add_fmt(B, "    lua_tcc_loadk_int(L, %d, %d);\n", a + 1, sbx);
             break;
         }
          case OP_LOADF: {
             int sbx = GETARG_sBx(i);
-            add_fmt(B, "    tcc_loadk_flt(L, %d, (lua_Number)%d);\n", a + 1, sbx);
+            add_fmt(B, "    lua_tcc_loadk_flt(L, %d, (lua_Number)%d);\n", a + 1, sbx);
             break;
         }
         case OP_LOADNIL: {
@@ -176,11 +258,11 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
                 int ax = GETARG_Ax(p->code[pc+1]);
                 TValue *k = &p->k[ax];
                 if (ttisstring(k)) {
-                     add_fmt(B, "    tcc_loadk_str(L, %d, ", a + 1);
+                     add_fmt(B, "    lua_tcc_loadk_str(L, %d, ", a + 1);
                      emit_quoted_string(B, getstr(tsvalue(k)), tsslen(tsvalue(k)));
                      add_fmt(B, ");\n");
                 } else if (ttisinteger(k)) {
-                     add_fmt(B, "    tcc_loadk_int(L, %d, %lld);\n", a + 1, (long long)ivalue(k));
+                     add_fmt(B, "    lua_tcc_loadk_int(L, %d, %lld);\n", a + 1, (long long)ivalue(k));
                 } else {
                      emit_loadk(B, p, ax);
                      add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
@@ -199,7 +281,7 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             int c = GETARG_C(i);
             TValue *k = &p->k[c];
             if (ttisstring(k)) {
-                 add_fmt(B, "    tcc_gettabup(L, %d, ", b + 1);
+                 add_fmt(B, "    lua_tcc_gettabup(L, %d, ", b + 1);
                  emit_quoted_string(B, getstr(tsvalue(k)), tsslen(tsvalue(k)));
                  add_fmt(B, ", %d);\n", a + 1);
             } else {
@@ -223,7 +305,7 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
                 } else {
                     add_fmt(B, "    lua_pushvalue(L, %d);\n", c + 1);
                 }
-                add_fmt(B, "    tcc_settabup(L, %d, ", a + 1);
+                add_fmt(B, "    lua_tcc_settabup(L, %d, ", a + 1);
                 emit_quoted_string(B, getstr(tsvalue(k)), tsslen(tsvalue(k)));
                 add_fmt(B, ");\n");
             } else {
@@ -375,15 +457,10 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
 
             if (b != 0) {
                 if (c == 0) add_fmt(B, "    int s = lua_gettop(L);\n");
-                add_fmt(B, "    lua_pushvalue(L, %d); /* func */\n", a + 1);
-                for (int n = 0; n < nargs; n++) {
-                     add_fmt(B, "    lua_pushvalue(L, %d); /* arg %d */\n", a + 2 + n, n);
-                }
+                add_fmt(B, "    lua_tcc_push_args(L, %d, %d); /* func + args */\n", a + 1, nargs + 1);
                 add_fmt(B, "    lua_call(L, %d, %d);\n", nargs, nresults);
                 if (c != 0) {
-                     for (int n = nresults - 1; n >= 0; n--) {
-                         add_fmt(B, "    lua_replace(L, %d);\n", a + 1 + n);
-                     }
+                     add_fmt(B, "    lua_tcc_store_results(L, %d, %d);\n", a + 1, nresults);
                 } else {
                      add_fmt(B, "    {\n");
                      add_fmt(B, "        int nres = lua_gettop(L) - s;\n");
@@ -412,10 +489,7 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             int nargs = (b == 0) ? -1 : (b - 1);
 
             if (b != 0) {
-                add_fmt(B, "    lua_pushvalue(L, %d); /* func */\n", a + 1);
-                for (int n = 0; n < nargs; n++) {
-                     add_fmt(B, "    lua_pushvalue(L, %d); /* arg %d */\n", a + 2 + n, n);
-                }
+                add_fmt(B, "    lua_tcc_push_args(L, %d, %d); /* func + args */\n", a + 1, nargs + 1);
                 add_fmt(B, "    lua_call(L, %d, LUA_MULTRET);\n", nargs);
                 add_fmt(B, "    return lua_gettop(L) - %d;\n", p->maxstacksize + (p->is_vararg ? 1 : 0));
             } else {
@@ -431,9 +505,7 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             int nret = (b == 0) ? -1 : (b - 1);
 
             if (nret > 0) {
-                for (int n = 0; n < nret; n++) {
-                    add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1 + n);
-                }
+                add_fmt(B, "    lua_tcc_push_args(L, %d, %d);\n", a + 1, nret);
                 add_fmt(B, "    return %d;\n", nret);
             } else if (nret == 0) {
                 add_fmt(B, "    return 0;\n");
@@ -1096,7 +1168,7 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
         case OP_IN: {
             int b = GETARG_B(i);
             int c = GETARG_C(i);
-            add_fmt(B, "    lua_pushinteger(L, tcc_in(L, %d, %d));\n", b + 1, c + 1);
+            add_fmt(B, "    lua_pushinteger(L, lua_tcc_in(L, %d, %d));\n", b + 1, c + 1);
             add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
             break;
         }
@@ -1148,7 +1220,7 @@ static void process_proto(luaL_Buffer *B, Proto *p, int id, ProtoInfo *protos, i
     add_fmt(B, "static int function_%d(lua_State *L) {\n", id);
 
     if (p->is_vararg) {
-        add_fmt(B, "    tcc_prologue(L, %d, %d);\n", p->numparams, p->maxstacksize);
+        add_fmt(B, "    lua_tcc_prologue(L, %d, %d);\n", p->numparams, p->maxstacksize);
     } else {
         add_fmt(B, "    lua_settop(L, %d); /* Max Stack Size */\n", p->maxstacksize);
     }
@@ -1199,71 +1271,7 @@ static int tcc_compile(lua_State *L) {
     add_fmt(&B, "#include \"lauxlib.h\"\n");
     add_fmt(&B, "#include <string.h>\n\n");
 
-    // Helpers
-    add_fmt(&B, "static void tcc_prologue(lua_State *L, int nparams, int maxstack) {\n");
-    add_fmt(&B, "    int nargs = lua_gettop(L);\n");
-    add_fmt(&B, "    lua_createtable(L, (nargs > nparams) ? nargs - nparams : 0, 0);\n");
-    add_fmt(&B, "    if (nargs > nparams) {\n");
-    add_fmt(&B, "        for (int i = nparams + 1; i <= nargs; i++) {\n");
-    add_fmt(&B, "            lua_pushvalue(L, i);\n");
-    add_fmt(&B, "            lua_rawseti(L, -2, i - nparams);\n");
-    add_fmt(&B, "        }\n");
-    add_fmt(&B, "    }\n");
-    add_fmt(&B, "    int table_pos = lua_gettop(L);\n");
-    add_fmt(&B, "    int target = maxstack + 1;\n");
-    add_fmt(&B, "    if (table_pos >= target) {\n");
-    add_fmt(&B, "        lua_replace(L, target);\n");
-    add_fmt(&B, "        lua_settop(L, target);\n");
-    add_fmt(&B, "    } else {\n");
-    add_fmt(&B, "        lua_settop(L, target);\n");
-    add_fmt(&B, "        lua_pushvalue(L, table_pos);\n");
-    add_fmt(&B, "        lua_replace(L, target);\n");
-    add_fmt(&B, "        lua_pushnil(L);\n");
-    add_fmt(&B, "        lua_replace(L, table_pos);\n");
-    add_fmt(&B, "    }\n");
-    add_fmt(&B, "}\n\n");
-
-    add_fmt(&B, "static void tcc_gettabup(lua_State *L, int upval, const char *k, int dest) {\n");
-    add_fmt(&B, "    lua_getfield(L, lua_upvalueindex(upval), k);\n");
-    add_fmt(&B, "    lua_replace(L, dest);\n");
-    add_fmt(&B, "}\n\n");
-
-    add_fmt(&B, "static void tcc_settabup(lua_State *L, int upval, const char *k, int val_idx) {\n");
-    add_fmt(&B, "    lua_pushvalue(L, val_idx);\n");
-    add_fmt(&B, "    lua_setfield(L, lua_upvalueindex(upval), k);\n");
-    add_fmt(&B, "    lua_pop(L, 1);\n");
-    add_fmt(&B, "}\n\n");
-
-    add_fmt(&B, "static void tcc_loadk_str(lua_State *L, int dest, const char *s) {\n");
-    add_fmt(&B, "    lua_pushstring(L, s);\n");
-    add_fmt(&B, "    lua_replace(L, dest);\n");
-    add_fmt(&B, "}\n\n");
-
-    add_fmt(&B, "static void tcc_loadk_int(lua_State *L, int dest, lua_Integer v) {\n");
-    add_fmt(&B, "    lua_pushinteger(L, v);\n");
-    add_fmt(&B, "    lua_replace(L, dest);\n");
-    add_fmt(&B, "}\n\n");
-
-    add_fmt(&B, "static void tcc_loadk_flt(lua_State *L, int dest, lua_Number v) {\n");
-    add_fmt(&B, "    lua_pushnumber(L, v);\n");
-    add_fmt(&B, "    lua_replace(L, dest);\n");
-    add_fmt(&B, "}\n\n");
-
-    // Helper function for OP_IN
-    add_fmt(&B, "static int tcc_in(lua_State *L, int val_idx, int container_idx) {\n");
-    add_fmt(&B, "    int res = 0;\n");
-    add_fmt(&B, "    if (lua_type(L, container_idx) == LUA_TTABLE) {\n");
-    add_fmt(&B, "        lua_pushvalue(L, val_idx);\n");
-    add_fmt(&B, "        lua_gettable(L, container_idx);\n");
-    add_fmt(&B, "        if (!lua_isnil(L, -1)) res = 1;\n");
-    add_fmt(&B, "        lua_pop(L, 1);\n");
-    add_fmt(&B, "    } else if (lua_isstring(L, container_idx) && lua_isstring(L, val_idx)) {\n");
-    add_fmt(&B, "        const char *s = lua_tostring(L, container_idx);\n");
-    add_fmt(&B, "        const char *sub = lua_tostring(L, val_idx);\n");
-    add_fmt(&B, "        if (strstr(s, sub)) res = 1;\n");
-    add_fmt(&B, "    }\n");
-    add_fmt(&B, "    return res;\n");
-    add_fmt(&B, "}\n\n");
+    // Helpers (now provided by lapi.c/ltcc.c via LUA_API)
 
     // Forward declarations
     for (int i = 0; i < count; i++) {

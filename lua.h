@@ -1280,6 +1280,19 @@ LUA_API void (lua_closeslot) (lua_State *L, int idx);
  */
 LUA_API void (luaB_hotfix) (lua_State *L, int oldidx, int newidx);
 
+/*
+** tcc support functions
+*/
+LUA_API void  (lua_tcc_prologue) (lua_State *L, int nparams, int maxstack);
+LUA_API void  (lua_tcc_gettabup) (lua_State *L, int upval, const char *k, int dest);
+LUA_API void  (lua_tcc_settabup) (lua_State *L, int upval, const char *k, int val_idx);
+LUA_API void  (lua_tcc_loadk_str) (lua_State *L, int dest, const char *s);
+LUA_API void  (lua_tcc_loadk_int) (lua_State *L, int dest, lua_Integer v);
+LUA_API void  (lua_tcc_loadk_flt) (lua_State *L, int dest, lua_Number v);
+LUA_API int   (lua_tcc_in) (lua_State *L, int val_idx, int container_idx);
+LUA_API void  (lua_tcc_push_args) (lua_State *L, int start_reg, int count);
+LUA_API void  (lua_tcc_store_results) (lua_State *L, int start_reg, int count);
+
 
 /*
 ** {===================================================
