@@ -59,6 +59,9 @@ int luaopen_process(lua_State *L);
 /* 声明vmprotect库的初始化函数 */
 int luaopen_vmprotect(lua_State *L);
 
+/* 声明tcc库的初始化函数 */
+int luaopen_tcc(lua_State *L);
+
 // clang and ffi libraries
 
 /*
@@ -92,6 +95,7 @@ static const luaL_Reg stdlibs[] = {
   {"http", luaopen_http},
   {LUA_FSLIBNAME, luaopen_fs},
   {"vmprotect", luaopen_vmprotect},
+  {"tcc", luaopen_tcc},
 
 #ifndef _WIN32
   {LUA_SMGRNAME, luaopen_smgr},
@@ -159,6 +163,7 @@ static const luaL_Reg loadedlibs[] = {
   {"http", luaopen_http},
   {LUA_FSLIBNAME, luaopen_fs},
   {"vmprotect", luaopen_vmprotect},
+  {"tcc", luaopen_tcc},
 
 #ifndef _WIN32
   {LUA_SMGRNAME, luaopen_smgr},
