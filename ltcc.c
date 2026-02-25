@@ -403,6 +403,25 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             break;
         }
 
+        case OP_NEWCONCEPT: {
+            int bx = GETARG_Bx(i);
+            Proto *child = p->p[bx];
+            int child_id = get_proto_id(child, protos, proto_count);
+
+            for (int k = 0; k < child->sizeupvalues; k++) {
+                 Upvaldesc *uv = &child->upvalues[k];
+                 if (uv->instack) {
+                     add_fmt(B, "    lua_pushvalue(L, %d); /* upval %d (local) */\n", uv->idx + 1, k);
+                 } else {
+                     add_fmt(B, "    lua_pushvalue(L, lua_upvalueindex(%d)); /* upval %d (upval) */\n", uv->idx + 1, k);
+                 }
+            }
+
+            add_fmt(B, "    lua_pushcclosure(L, function_%d, %d); /* concept */\n", child_id, child->sizeupvalues);
+            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+            break;
+        }
+
         case OP_JMP: {
             int sj = GETARG_sJ(i);
             add_fmt(B, "    goto Label_%d;\n", pc + 1 + sj + 1);
@@ -519,6 +538,13 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
                 add_fmt(B, "        }\n");
                 add_fmt(B, "    }\n");
             }
+            break;
+        }
+
+        case OP_GETVARG: {
+            int c = GETARG_C(i);
+            add_fmt(B, "    lua_rawgeti(L, %d, lua_tointeger(L, %d));\n", p->maxstacksize + 1, c + 1);
+            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
             break;
         }
 
