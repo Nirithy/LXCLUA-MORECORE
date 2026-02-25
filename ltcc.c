@@ -338,7 +338,7 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
                  add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1);
                  add_fmt(B, "    lua_call(L, 0, LUA_MULTRET);\n");
             }
-            add_fmt(B, "    return lua_gettop(L) - %d;\n", p->maxstacksize);
+            add_fmt(B, "    return lua_gettop(L) - %d;\n", p->maxstacksize + (p->is_vararg ? 1 : 0));
             break;
         }
 
@@ -639,10 +639,17 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
         case OP_FORPREP: {
             int bx = GETARG_Bx(i);
             add_fmt(B, "    {\n");
-            add_fmt(B, "        lua_Integer step = lua_tointeger(L, %d);\n", a + 3);
-            add_fmt(B, "        lua_Integer init = lua_tointeger(L, %d);\n", a + 1);
-            add_fmt(B, "        lua_pushinteger(L, init - step);\n");
-            add_fmt(B, "        lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "        if (lua_isinteger(L, %d) && lua_isinteger(L, %d)) {\n", a + 1, a + 3);
+            add_fmt(B, "            lua_Integer step = lua_tointeger(L, %d);\n", a + 3);
+            add_fmt(B, "            lua_Integer init = lua_tointeger(L, %d);\n", a + 1);
+            add_fmt(B, "            lua_pushinteger(L, init - step);\n");
+            add_fmt(B, "            lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "        } else {\n");
+            add_fmt(B, "            lua_Number step = lua_tonumber(L, %d);\n", a + 3);
+            add_fmt(B, "            lua_Number init = lua_tonumber(L, %d);\n", a + 1);
+            add_fmt(B, "            lua_pushnumber(L, init - step);\n");
+            add_fmt(B, "            lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "        }\n");
             add_fmt(B, "        goto Label_%d;\n", pc + 1 + bx + 1);
             add_fmt(B, "    }\n");
             break;
@@ -651,15 +658,28 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
         case OP_FORLOOP: {
             int bx = GETARG_Bx(i);
             add_fmt(B, "    {\n");
-            add_fmt(B, "        lua_Integer step = lua_tointeger(L, %d);\n", a + 3);
-            add_fmt(B, "        lua_Integer limit = lua_tointeger(L, %d);\n", a + 2);
-            add_fmt(B, "        lua_Integer idx = lua_tointeger(L, %d) + step;\n", a + 1);
-            add_fmt(B, "        lua_pushinteger(L, idx);\n");
-            add_fmt(B, "        lua_replace(L, %d);\n", a + 1);
-            add_fmt(B, "        if ((step > 0) ? (idx <= limit) : (idx >= limit)) {\n");
+            add_fmt(B, "        if (lua_isinteger(L, %d)) {\n", a + 3);
+            add_fmt(B, "            lua_Integer step = lua_tointeger(L, %d);\n", a + 3);
+            add_fmt(B, "            lua_Integer limit = lua_tointeger(L, %d);\n", a + 2);
+            add_fmt(B, "            lua_Integer idx = lua_tointeger(L, %d) + step;\n", a + 1);
             add_fmt(B, "            lua_pushinteger(L, idx);\n");
-            add_fmt(B, "            lua_replace(L, %d);\n", a + 4);
-            add_fmt(B, "            goto Label_%d;\n", pc + 1 - bx);
+            add_fmt(B, "            lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "            if ((step > 0) ? (idx <= limit) : (idx >= limit)) {\n");
+            add_fmt(B, "                lua_pushinteger(L, idx);\n");
+            add_fmt(B, "                lua_replace(L, %d);\n", a + 4);
+            add_fmt(B, "                goto Label_%d;\n", pc + 2 - bx);
+            add_fmt(B, "            }\n");
+            add_fmt(B, "        } else {\n");
+            add_fmt(B, "            lua_Number step = lua_tonumber(L, %d);\n", a + 3);
+            add_fmt(B, "            lua_Number limit = lua_tonumber(L, %d);\n", a + 2);
+            add_fmt(B, "            lua_Number idx = lua_tonumber(L, %d) + step;\n", a + 1);
+            add_fmt(B, "            lua_pushnumber(L, idx);\n");
+            add_fmt(B, "            lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "            if ((step > 0) ? (idx <= limit) : (idx >= limit)) {\n");
+            add_fmt(B, "                lua_pushnumber(L, idx);\n");
+            add_fmt(B, "                lua_replace(L, %d);\n", a + 4);
+            add_fmt(B, "                goto Label_%d;\n", pc + 2 - bx);
+            add_fmt(B, "            }\n");
             add_fmt(B, "        }\n");
             add_fmt(B, "    }\n");
             break;
@@ -832,7 +852,12 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
         }
 
         case OP_CHECKTYPE: {
-            add_fmt(B, "    /* OP_CHECKTYPE ignored in TCC for now */\n");
+            int b = GETARG_B(i);
+            int c = GETARG_C(i);
+            add_fmt(B, "    lua_pushvalue(L, %d); /* type */\n", b + 1);
+            emit_loadk(B, p, c); /* name */
+            add_fmt(B, "    tcc_checktype(L, %d, lua_gettop(L)-1, lua_tostring(L, -1));\n", a + 1);
+            add_fmt(B, "    lua_pop(L, 2);\n");
             break;
         }
 
@@ -948,7 +973,49 @@ static int tcc_compile(lua_State *L) {
     luaL_buffinit(L, &B);
 
     add_fmt(&B, "#include \"lua.h\"\n");
-    add_fmt(&B, "#include \"lauxlib.h\"\n\n");
+    add_fmt(&B, "#include \"lauxlib.h\"\n");
+    add_fmt(&B, "#include <string.h>\n\n");
+
+    // Helper function for OP_CHECKTYPE
+    add_fmt(&B, "static void tcc_checktype(lua_State *L, int val_idx, int type_idx, const char *arg_name) {\n");
+    add_fmt(&B, "    int res = 0;\n");
+    add_fmt(&B, "    int type = lua_type(L, type_idx);\n");
+    add_fmt(&B, "    if (type == LUA_TSTRING) {\n");
+    add_fmt(&B, "        const char *tname = lua_tostring(L, type_idx);\n");
+    add_fmt(&B, "        if (strcmp(tname, \"any\") == 0) res = 1;\n");
+    add_fmt(&B, "        else if (strcmp(tname, \"int\") == 0 || strcmp(tname, \"integer\") == 0) res = lua_isinteger(L, val_idx);\n");
+    add_fmt(&B, "        else if (strcmp(tname, \"number\") == 0 || strcmp(tname, \"float\") == 0) res = (lua_type(L, val_idx) == LUA_TNUMBER);\n");
+    add_fmt(&B, "        else if (strcmp(tname, \"string\") == 0) res = (lua_type(L, val_idx) == LUA_TSTRING);\n");
+    add_fmt(&B, "        else if (strcmp(tname, \"boolean\") == 0) res = (lua_type(L, val_idx) == LUA_TBOOLEAN);\n");
+    add_fmt(&B, "        else if (strcmp(tname, \"table\") == 0) res = (lua_type(L, val_idx) == LUA_TTABLE);\n");
+    add_fmt(&B, "        else if (strcmp(tname, \"function\") == 0) res = (lua_type(L, val_idx) == LUA_TFUNCTION);\n");
+    add_fmt(&B, "        else if (strcmp(tname, \"thread\") == 0) res = (lua_type(L, val_idx) == LUA_TTHREAD);\n");
+    add_fmt(&B, "        else if (strcmp(tname, \"userdata\") == 0) res = (lua_type(L, val_idx) == LUA_TUSERDATA);\n");
+    add_fmt(&B, "        else if (strcmp(tname, \"nil\") == 0 || strcmp(tname, \"void\") == 0) res = (lua_type(L, val_idx) == LUA_TNIL);\n");
+    add_fmt(&B, "    } else if (type == LUA_TTABLE) {\n");
+    add_fmt(&B, "        lua_getglobal(L, \"string\");\n");
+    add_fmt(&B, "        if (lua_rawequal(L, -1, type_idx)) {\n");
+    add_fmt(&B, "            lua_pop(L, 1);\n");
+    add_fmt(&B, "            res = (lua_type(L, val_idx) == LUA_TSTRING);\n");
+    add_fmt(&B, "        } else {\n");
+    add_fmt(&B, "            lua_pop(L, 1);\n");
+    add_fmt(&B, "            lua_getglobal(L, \"table\");\n");
+    add_fmt(&B, "            if (lua_rawequal(L, -1, type_idx)) {\n");
+    add_fmt(&B, "                lua_pop(L, 1);\n");
+    add_fmt(&B, "                res = (lua_type(L, val_idx) == LUA_TTABLE);\n");
+    add_fmt(&B, "            } else {\n");
+    add_fmt(&B, "                lua_pop(L, 1);\n");
+    add_fmt(&B, "                lua_pushvalue(L, val_idx);\n");
+    add_fmt(&B, "                lua_pushvalue(L, type_idx);\n");
+    add_fmt(&B, "                res = lua_instanceof(L, -2, -1);\n");
+    add_fmt(&B, "                lua_pop(L, 2);\n");
+    add_fmt(&B, "            }\n");
+    add_fmt(&B, "        }\n");
+    add_fmt(&B, "    }\n");
+    add_fmt(&B, "    if (!res) {\n");
+    add_fmt(&B, "        luaL_error(L, \"Type mismatch for argument '%%s'\", arg_name);\n");
+    add_fmt(&B, "    }\n");
+    add_fmt(&B, "}\n\n");
 
     // Forward declarations
     for (int i = 0; i < count; i++) {
