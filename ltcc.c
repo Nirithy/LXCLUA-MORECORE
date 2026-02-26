@@ -853,10 +853,10 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
 
             if (nneeded >= 0) {
                 add_fmt(B, "    if (%d + %d >= vtab_idx) {\n", a + 1, nneeded);
-                add_fmt(B, "        lua_settop(L, %d + %d + 1);\n", a + 1, nneeded);
+                add_fmt(B, "        lua_settop(L, %d + %d);\n", a + 1, nneeded);
                 add_fmt(B, "        lua_pushvalue(L, vtab_idx);\n");
-                add_fmt(B, "        lua_replace(L, %d + %d + 1);\n", a + 1, nneeded);
-                add_fmt(B, "        vtab_idx = %d + %d + 1;\n", a + 1, nneeded);
+                add_fmt(B, "        lua_replace(L, %d + %d);\n", a + 1, nneeded);
+                add_fmt(B, "        vtab_idx = %d + %d;\n", a + 1, nneeded);
                 add_fmt(B, "    }\n");
                 add_fmt(B, "    for (int i=0; i<%d; i++) {\n", nneeded);
                 add_fmt(B, "        lua_rawgeti(L, vtab_idx, i+1);\n");
@@ -865,10 +865,10 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             } else {
                 add_fmt(B, "    {\n");
                 add_fmt(B, "        int nvar = (int)lua_rawlen(L, vtab_idx);\n");
-                add_fmt(B, "        lua_settop(L, %d + nvar + 1);\n", a + 1);
+                add_fmt(B, "        lua_settop(L, %d + nvar);\n", a + 1);
                 add_fmt(B, "        lua_pushvalue(L, vtab_idx);\n");
-                add_fmt(B, "        lua_replace(L, %d + nvar + 1);\n", a + 1);
-                add_fmt(B, "        vtab_idx = %d + nvar + 1;\n", a + 1);
+                add_fmt(B, "        lua_replace(L, %d + nvar);\n", a + 1);
+                add_fmt(B, "        vtab_idx = %d + nvar;\n", a + 1);
                 add_fmt(B, "        for (int i=1; i<=nvar; i++) {\n");
                 add_fmt(B, "            lua_rawgeti(L, vtab_idx, i);\n");
                 add_fmt(B, "            lua_replace(L, %d + i - 1);\n", a + 1);
