@@ -62,6 +62,9 @@ int luaopen_vmprotect(lua_State *L);
 /* 声明tcc库的初始化函数 */
 int luaopen_tcc(lua_State *L);
 
+/* 声明ByteCode库的初始化函数 */
+int luaopen_ByteCode(lua_State *L);
+
 // clang and ffi libraries
 
 /*
@@ -96,6 +99,7 @@ static const luaL_Reg stdlibs[] = {
   {LUA_FSLIBNAME, luaopen_fs},
   {"vmprotect", luaopen_vmprotect},
   {"tcc", luaopen_tcc},
+  {"ByteCode", luaopen_ByteCode},
 
 #ifndef _WIN32
   {LUA_SMGRNAME, luaopen_smgr},
@@ -164,6 +168,7 @@ static const luaL_Reg loadedlibs[] = {
   {LUA_FSLIBNAME, luaopen_fs},
   {"vmprotect", luaopen_vmprotect},
   {"tcc", luaopen_tcc},
+  {"ByteCode", luaopen_ByteCode},
 
 #ifndef _WIN32
   {LUA_SMGRNAME, luaopen_smgr},
