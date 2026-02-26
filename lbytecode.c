@@ -88,6 +88,9 @@ static int bytecode_getproto (lua_State *L) {
 */
 static int bytecode_getcodecount (lua_State *L) {
   Proto *p = get_proto_from_arg(L, 1);
+  if (p->flag & PF_LOCKED) {
+    return luaL_error(L, "function is locked");
+  }
   lua_pushinteger(L, p->sizecode);
   return 1;
 }
@@ -98,6 +101,9 @@ static int bytecode_getcodecount (lua_State *L) {
 */
 static int bytecode_getcode (lua_State *L) {
   Proto *p = get_proto_from_arg(L, 1);
+  if (p->flag & PF_LOCKED) {
+    return luaL_error(L, "function is locked");
+  }
   lua_Integer idx = luaL_checkinteger(L, 2);
   if (idx < 1 || idx > p->sizecode) {
     return luaL_error(L, "index out of range");
@@ -132,6 +138,9 @@ static int bytecode_setcode (lua_State *L) {
 */
 static int bytecode_getline (lua_State *L) {
   Proto *p = get_proto_from_arg(L, 1);
+  if (p->flag & PF_LOCKED) {
+    return luaL_error(L, "function is locked");
+  }
   lua_Integer idx = luaL_checkinteger(L, 2);
   if (idx < 1 || idx > p->sizecode) {
     return luaL_error(L, "index out of range");
@@ -147,6 +156,9 @@ static int bytecode_getline (lua_State *L) {
 */
 static int bytecode_getparamcount (lua_State *L) {
   Proto *p = get_proto_from_arg(L, 1);
+  if (p->flag & PF_LOCKED) {
+    return luaL_error(L, "function is locked");
+  }
   lua_pushinteger(L, p->numparams);
   return 1;
 }
@@ -326,6 +338,9 @@ static int bytecode_make (lua_State *L) {
 */
 static int bytecode_dump (lua_State *L) {
   Proto *p = get_proto_from_arg(L, 1);
+  if (p->flag & PF_LOCKED) {
+    return luaL_error(L, "function is locked");
+  }
   int i;
   printf("\nBytecode Dump: %d instructions\n", p->sizecode);
   for (i = 0; i < p->sizecode; i++) {
@@ -368,6 +383,9 @@ static int bytecode_dump (lua_State *L) {
 /* ByteCode.GetConstant(proto, index) */
 static int bytecode_getconstant (lua_State *L) {
   Proto *p = get_proto_from_arg(L, 1);
+  if (p->flag & PF_LOCKED) {
+    return luaL_error(L, "function is locked");
+  }
   int idx = (int)luaL_checkinteger(L, 2);
   if (idx < 1 || idx > p->sizek) {
     return luaL_error(L, "constant index out of range");
@@ -379,6 +397,9 @@ static int bytecode_getconstant (lua_State *L) {
 /* ByteCode.GetConstants(proto) */
 static int bytecode_getconstants (lua_State *L) {
   Proto *p = get_proto_from_arg(L, 1);
+  if (p->flag & PF_LOCKED) {
+    return luaL_error(L, "function is locked");
+  }
   lua_createtable(L, p->sizek, 0);
   for (int i = 0; i < p->sizek; i++) {
     push_tvalue(L, &p->k[i]);
@@ -390,6 +411,9 @@ static int bytecode_getconstants (lua_State *L) {
 /* ByteCode.GetUpvalue(proto, index) */
 static int bytecode_getupvalue (lua_State *L) {
   Proto *p = get_proto_from_arg(L, 1);
+  if (p->flag & PF_LOCKED) {
+    return luaL_error(L, "function is locked");
+  }
   int idx = (int)luaL_checkinteger(L, 2);
   if (idx < 1 || idx > p->sizeupvalues) {
     return luaL_error(L, "upvalue index out of range");
@@ -410,6 +434,9 @@ static int bytecode_getupvalue (lua_State *L) {
 /* ByteCode.GetUpvalues(proto) */
 static int bytecode_getupvalues (lua_State *L) {
   Proto *p = get_proto_from_arg(L, 1);
+  if (p->flag & PF_LOCKED) {
+    return luaL_error(L, "function is locked");
+  }
   lua_createtable(L, p->sizeupvalues, 0);
   for (int i = 0; i < p->sizeupvalues; i++) {
     Upvaldesc *up = &p->upvalues[i];
@@ -430,6 +457,9 @@ static int bytecode_getupvalues (lua_State *L) {
 /* ByteCode.GetLocal(proto, index) */
 static int bytecode_getlocal (lua_State *L) {
   Proto *p = get_proto_from_arg(L, 1);
+  if (p->flag & PF_LOCKED) {
+    return luaL_error(L, "function is locked");
+  }
   int idx = (int)luaL_checkinteger(L, 2);
   if (idx < 1 || idx > p->sizelocvars) {
     return luaL_error(L, "local index out of range");
@@ -450,6 +480,9 @@ static int bytecode_getlocal (lua_State *L) {
 /* ByteCode.GetLocals(proto) */
 static int bytecode_getlocals (lua_State *L) {
   Proto *p = get_proto_from_arg(L, 1);
+  if (p->flag & PF_LOCKED) {
+    return luaL_error(L, "function is locked");
+  }
   lua_createtable(L, p->sizelocvars, 0);
   for (int i = 0; i < p->sizelocvars; i++) {
     LocVar *loc = &p->locvars[i];
@@ -470,6 +503,9 @@ static int bytecode_getlocals (lua_State *L) {
 /* ByteCode.GetNestedProto(proto, index) */
 static int bytecode_getnestedproto (lua_State *L) {
   Proto *p = get_proto_from_arg(L, 1);
+  if (p->flag & PF_LOCKED) {
+    return luaL_error(L, "function is locked");
+  }
   int idx = (int)luaL_checkinteger(L, 2);
   if (idx < 1 || idx > p->sizep) {
     return luaL_error(L, "nested proto index out of range");
@@ -481,6 +517,9 @@ static int bytecode_getnestedproto (lua_State *L) {
 /* ByteCode.GetNestedProtos(proto) */
 static int bytecode_getnestedprotos (lua_State *L) {
   Proto *p = get_proto_from_arg(L, 1);
+  if (p->flag & PF_LOCKED) {
+    return luaL_error(L, "function is locked");
+  }
   lua_createtable(L, p->sizep, 0);
   for (int i = 0; i < p->sizep; i++) {
     lua_pushlightuserdata(L, p->p[i]);
@@ -544,6 +583,9 @@ static void decode_instruction(lua_State *L, Instruction i) {
 /* ByteCode.GetInstruction(proto, index) */
 static int bytecode_getinstruction (lua_State *L) {
   Proto *p = get_proto_from_arg(L, 1);
+  if (p->flag & PF_LOCKED) {
+    return luaL_error(L, "function is locked");
+  }
   int idx = (int)luaL_checkinteger(L, 2);
   if (idx < 1 || idx > p->sizecode) {
     return luaL_error(L, "instruction index out of range");

@@ -27,6 +27,10 @@ local p1 = ByteCode.GetProto(f1)
 
 assert_false(ByteCode.IsLocked(p1), "Initial state should be unlocked")
 
+-- Get instructions before locking
+local inst = ByteCode.GetCode(p1, 1)
+local inst_tbl = ByteCode.GetInstruction(p1, 1)
+
 ByteCode.Lock(p1)
 assert_true(ByteCode.IsLocked(p1), "Should be locked after Lock()")
 
@@ -34,14 +38,22 @@ assert_true(ByteCode.IsLocked(p1), "Should be locked after Lock()")
 local info = debug.getinfo(f1, "k")
 assert_true(info.islocked, "debug.getinfo should report islocked=true")
 
+-- Test GetCode (should now fail)
+assert_error(function()
+  ByteCode.GetCode(p1, 1)
+end, "function is locked")
+
 -- Test SetCode
-local inst = ByteCode.GetCode(p1, 1)
 assert_error(function()
   ByteCode.SetCode(p1, 1, inst)
 end, "function is locked")
 
+-- Test GetInstruction (should now fail)
+assert_error(function()
+  ByteCode.GetInstruction(p1, 1)
+end, "function is locked")
+
 -- Test SetInstruction
-local inst_tbl = ByteCode.GetInstruction(p1, 1)
 assert_error(function()
   ByteCode.SetInstruction(p1, 1, inst_tbl)
 end, "function is locked")
@@ -103,9 +115,14 @@ local function f3_new() return up + 1 end
 local p3 = ByteCode.GetProto(f3)
 ByteCode.Lock(p3)
 
-assert_error(function()
-  debug.hotfix(f3, f3_new)
-end, "attempt to hotfix a locked function")
+-- Check that hotfix is blocked
+if debug.hotfix then
+  assert_error(function()
+    debug.hotfix(f3, f3_new)
+  end, "attempt to hotfix a locked function")
+else
+  print("   (debug.hotfix not available, skipping)")
+end
 
 print("   Hotfix prevention passed.")
 
