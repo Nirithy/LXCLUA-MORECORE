@@ -1501,8 +1501,12 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
         }
 
         case OP_EXTRAARG:
+            add_fmt(B, "    /* EXTRAARG */\n");
+            break;
+
         case OP_NOP:
-            add_fmt(B, "    /* NOP/EXTRAARG */\n");
+            if (!use_pure_c) add_fmt(B, "    __asm__ volatile (\"nop\");\n");
+            else add_fmt(B, "    /* NOP */\n");
             break;
 
         default:
@@ -1603,6 +1607,27 @@ static int tcc_compile(lua_State *L) {
              if (!lua_isnil(L, -1)) provided_flags = (int)lua_tointeger(L, -1);
              lua_pop(L, 1);
 
+             /* Parse boolean flags from table and merge into provided_flags */
+             struct { const char *name; int flag; } bool_opts[] = {
+                 {"block_shuffle", OBFUSCATE_BLOCK_SHUFFLE},
+                 {"bogus_blocks", OBFUSCATE_BOGUS_BLOCKS},
+                 {"state_encode", OBFUSCATE_STATE_ENCODE},
+                 {"nested_dispatcher", OBFUSCATE_NESTED_DISPATCHER},
+                 {"opaque_predicates", OBFUSCATE_OPAQUE_PREDICATES},
+                 {"func_interleave", OBFUSCATE_FUNC_INTERLEAVE},
+                 {"vm_protect", OBFUSCATE_VM_PROTECT},
+                 {"binary_dispatcher", OBFUSCATE_BINARY_DISPATCHER},
+                 {"random_nop", OBFUSCATE_RANDOM_NOP},
+                 {NULL, 0}
+             };
+             for (int i = 0; bool_opts[i].name; i++) {
+                 lua_getfield(L, 2, bool_opts[i].name);
+                 if (lua_toboolean(L, -1)) {
+                     provided_flags |= bool_opts[i].flag;
+                 }
+                 lua_pop(L, 1);
+             }
+
              lua_getfield(L, 2, "seed");
              if (!lua_isnil(L, -1)) seed = (int)lua_tointeger(L, -1);
              else seed = (int)time(NULL);
@@ -1636,6 +1661,27 @@ static int tcc_compile(lua_State *L) {
                      lua_getfield(L, 3, "flags");
                      if (!lua_isnil(L, -1)) provided_flags = (int)lua_tointeger(L, -1);
                      lua_pop(L, 1);
+
+                     /* Parse boolean flags from table (arg 3) and merge into provided_flags */
+                     struct { const char *name; int flag; } bool_opts[] = {
+                         {"block_shuffle", OBFUSCATE_BLOCK_SHUFFLE},
+                         {"bogus_blocks", OBFUSCATE_BOGUS_BLOCKS},
+                         {"state_encode", OBFUSCATE_STATE_ENCODE},
+                         {"nested_dispatcher", OBFUSCATE_NESTED_DISPATCHER},
+                         {"opaque_predicates", OBFUSCATE_OPAQUE_PREDICATES},
+                         {"func_interleave", OBFUSCATE_FUNC_INTERLEAVE},
+                         {"vm_protect", OBFUSCATE_VM_PROTECT},
+                         {"binary_dispatcher", OBFUSCATE_BINARY_DISPATCHER},
+                         {"random_nop", OBFUSCATE_RANDOM_NOP},
+                         {NULL, 0}
+                     };
+                     for (int i = 0; bool_opts[i].name; i++) {
+                         lua_getfield(L, 3, bool_opts[i].name);
+                         if (lua_toboolean(L, -1)) {
+                             provided_flags |= bool_opts[i].flag;
+                         }
+                         lua_pop(L, 1);
+                     }
 
                      lua_getfield(L, 3, "seed");
                      if (!lua_isnil(L, -1)) seed = (int)lua_tointeger(L, -1);
