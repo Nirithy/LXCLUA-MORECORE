@@ -387,6 +387,21 @@ static int auxgetinfo (lua_State *L, const char *what, lua_Debug *ar,
         break;
       case 'h':
         break;
+      case 'k': {
+        ar->islocked = (LuaClosure(f) && (f->l.p->flag & PF_LOCKED)) ? 1 : 0;
+        break;
+      }
+      case 'T': {
+        ar->istampered = 0;
+        if (LuaClosure(f)) {
+          Proto *p = f->l.p;
+          if (p->bytecode_hash != 0) {
+            uint64_t h = luaF_hashcode(p);
+            ar->istampered = (h != p->bytecode_hash) ? 1 : 0;
+          }
+        }
+        break;
+      }
       default: status = 0;  /* invalid option */
     }
   }
@@ -420,6 +435,19 @@ LUA_API int lua_getinfo (lua_State *L, const char *what, lua_Debug *ar) {
   }
   if (strchr(what, 'h')) {
     ar->ishotfixed = (cl != NULL) ? (cl->c.ishotfixed || cl->l.ishotfixed) : 0;
+  }
+  if (strchr(what, 'k')) {
+    ar->islocked = (LuaClosure(cl) && (cl->l.p->flag & PF_LOCKED)) ? 1 : 0;
+  }
+  if (strchr(what, 'T')) {
+    ar->istampered = 0;
+    if (LuaClosure(cl)) {
+      Proto *p = cl->l.p;
+      if (p->bytecode_hash != 0) {
+        uint64_t h = luaF_hashcode(p);
+        ar->istampered = (h != p->bytecode_hash) ? 1 : 0;
+      }
+    }
   }
   if (strchr(what, 'L'))
     collectvalidlines(L, cl);
@@ -989,6 +1017,16 @@ LUA_API void luaB_hotfix (lua_State *L, int oldidx, int newidx) {
   
   Proto *newproto = getproto(s2v(L->top.p - 1));
   GCObject *oldobj = gcvalue(s2v(L->top.p - 2));
+
+  /* Check if old function is locked */
+  if (oldobj->tt == LUA_VLCL) {
+    LClosure *oldcl = gco2lcl(oldobj);
+    if (oldcl->p->flag & PF_LOCKED) {
+      lua_pop(L, 2);
+      luaG_runerror(L, "attempt to hotfix a locked function");
+    }
+  }
+
   lua_pop(L, 2);
   
   luaF_hotreplace(L, oldobj, newproto);

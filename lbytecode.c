@@ -114,6 +114,9 @@ static int bytecode_getcode (lua_State *L) {
 */
 static int bytecode_setcode (lua_State *L) {
   Proto *p = get_proto_from_arg(L, 1);
+  if (p->flag & PF_LOCKED) {
+    return luaL_error(L, "function is locked");
+  }
   lua_Integer idx = luaL_checkinteger(L, 2);
   lua_Integer inst = luaL_checkinteger(L, 3);
   if (idx < 1 || idx > p->sizecode) {
@@ -563,6 +566,9 @@ static int get_int_field(lua_State *L, int table_idx, const char *key, int def) 
 /* ByteCode.SetInstruction(proto, index, table) */
 static int bytecode_setinstruction (lua_State *L) {
   Proto *p = get_proto_from_arg(L, 1);
+  if (p->flag & PF_LOCKED) {
+    return luaL_error(L, "function is locked");
+  }
   int idx = (int)luaL_checkinteger(L, 2);
   if (idx < 1 || idx > p->sizecode) {
     return luaL_error(L, "instruction index out of range");
@@ -637,6 +643,51 @@ static int bytecode_setinstruction (lua_State *L) {
   return 0;
 }
 
+/*
+** ByteCode.Lock(proto)
+** Locks the function, preventing further modification.
+*/
+static int bytecode_lock (lua_State *L) {
+  Proto *p = get_proto_from_arg(L, 1);
+  p->flag |= PF_LOCKED;
+  return 0;
+}
+
+/*
+** ByteCode.IsLocked(proto)
+** Checks if the function is locked.
+*/
+static int bytecode_islocked (lua_State *L) {
+  Proto *p = get_proto_from_arg(L, 1);
+  lua_pushboolean(L, (p->flag & PF_LOCKED) != 0);
+  return 1;
+}
+
+/*
+** ByteCode.MarkOriginal(proto)
+** Records the current bytecode hash as "original".
+*/
+static int bytecode_markoriginal (lua_State *L) {
+  Proto *p = get_proto_from_arg(L, 1);
+  p->bytecode_hash = luaF_hashcode(p);
+  return 0;
+}
+
+/*
+** ByteCode.IsTampered(proto)
+** Checks if the bytecode has been tampered with since MarkOriginal was called.
+*/
+static int bytecode_istampered (lua_State *L) {
+  Proto *p = get_proto_from_arg(L, 1);
+  if (p->bytecode_hash == 0) {
+    lua_pushboolean(L, 0); /* Not marked, so not tampered (relative to unknown baseline) */
+  } else {
+    uint64_t h = luaF_hashcode(p);
+    lua_pushboolean(L, h != p->bytecode_hash);
+  }
+  return 1;
+}
+
 
 static const luaL_Reg bytecode_funcs[] = {
   {"CheckFunction", bytecode_checkfunction},
@@ -663,6 +714,10 @@ static const luaL_Reg bytecode_funcs[] = {
   {"GetNestedProtos", bytecode_getnestedprotos},
   {"GetInstruction", bytecode_getinstruction},
   {"SetInstruction", bytecode_setinstruction},
+  {"Lock", bytecode_lock},
+  {"IsLocked", bytecode_islocked},
+  {"MarkOriginal", bytecode_markoriginal},
+  {"IsTampered", bytecode_istampered},
 
   {NULL, NULL}
 };

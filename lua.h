@@ -1676,6 +1676,8 @@ struct lua_Debug {
   int ntransfer;   /**< (r) number of transferred values */
   char short_src[LUA_IDSIZE]; /**< (S) Short source name */
   char ishotfixed;  /**< (h) whether function was hotfixed */
+  char islocked;    /**< (k) whether function is locked */
+  char istampered;  /**< (T) whether function is tampered */
   
   /* private part */
   struct CallInfo *i_ci;  /**< active function */

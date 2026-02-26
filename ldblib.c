@@ -211,6 +211,10 @@ static int db_getinfo (lua_State *L) {
     treatstackoption(L, L1, "func");
   if (strchr(options, 'h'))
     settabsb(L, "ishotfixed", ar.ishotfixed);
+  if (strchr(options, 'k'))
+    settabsb(L, "islocked", ar.islocked);
+  if (strchr(options, 'T'))
+    settabsb(L, "istampered", ar.istampered);
   return 1;  /* return table */
 }
 

@@ -678,6 +678,7 @@ typedef struct AbsLineInfo {
 #define PF_VAHID	1  /* function has hidden vararg arguments */
 #define PF_VATAB	2  /* function has vararg table */
 #define PF_FIXED	4  /* prototype has parts in fixed memory */
+#define PF_LOCKED	8  /* function is locked (read-only bytecode) */
 
 /* a vararg function either has hidden args. or a vararg table */
 #define isvararg(p)	((p)->flag & (PF_VAHID | PF_VATAB))
@@ -740,6 +741,7 @@ typedef struct Proto {
   int difierline_pad;      /**< Padding for obfuscation. */
   int difierline_magicnum;      /**< Magic number for identification. */
   uint64_t difierline_data;      /**< Extra data for obfuscation. */
+  uint64_t bytecode_hash;        /**< Hash of original bytecode for tampering detection. */
   int sizeupvalues;  /**< Size of 'upvalues' array. */
   int sizek;  /**< Size of 'k' (constants) array. */
   int sizecode;      /**< Size of 'code' array. */

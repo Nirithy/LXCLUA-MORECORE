@@ -208,5 +208,13 @@ LUAI_FUNC int luaF_callqueuepop (lua_State *L, CallQueue *q, int *nargs, TValue 
  */
 LUAI_FUNC void luaF_hotreplace (lua_State *L, GCObject *cl, Proto *newproto);
 
+/**
+ * @brief Calculates the hash code of a function's bytecode.
+ *
+ * @param p The prototype.
+ * @return The hash code.
+ */
+LUAI_FUNC uint64_t luaF_hashcode (const Proto *p);
+
 
 #endif
