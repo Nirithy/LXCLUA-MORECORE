@@ -13,6 +13,8 @@
 #include "lopcodes.h"
 #include "lgc.h"
 #include "ldebug.h"
+#include "lopnames.h"
+#include <string.h>
 
 /*
 ** Helper to get Proto from stack argument.
@@ -136,6 +138,211 @@ static int bytecode_isgc (lua_State *L) {
   return 0;
 }
 
+/*
+** 9. ByteCode.GetOpCode(inst)
+** Returns the OpCode (integer) and its name (string).
+*/
+static int bytecode_getopcode (lua_State *L) {
+  Instruction i = (Instruction)luaL_checkinteger(L, 1);
+  OpCode op = GET_OPCODE(i);
+  lua_pushinteger(L, op);
+  if (op < NUM_OPCODES && opnames[op]) {
+    lua_pushstring(L, opnames[op]);
+  } else {
+    lua_pushnil(L);
+  }
+  return 2;
+}
+
+/*
+** 10. ByteCode.GetArgs(inst)
+** Returns a table with decoded arguments based on opcode format.
+*/
+static int bytecode_getargs (lua_State *L) {
+  Instruction i = (Instruction)luaL_checkinteger(L, 1);
+  OpCode op = GET_OPCODE(i);
+
+  lua_createtable(L, 0, 4); /* result table */
+
+  enum OpMode mode = getOpMode(op);
+
+  /* Always push OpCode */
+  lua_pushinteger(L, op);
+  lua_setfield(L, -2, "OP");
+
+  switch (mode) {
+    case iABC:
+      lua_pushinteger(L, GETARG_A(i));
+      lua_setfield(L, -2, "A");
+      lua_pushinteger(L, GETARG_B(i));
+      lua_setfield(L, -2, "B");
+      lua_pushinteger(L, GETARG_C(i));
+      lua_setfield(L, -2, "C");
+      lua_pushinteger(L, GETARG_k(i));
+      lua_setfield(L, -2, "k");
+      break;
+    case ivABC:
+      lua_pushinteger(L, GETARG_A(i));
+      lua_setfield(L, -2, "A");
+      lua_pushinteger(L, GETARG_vB(i));
+      lua_setfield(L, -2, "B");
+      lua_pushinteger(L, GETARG_vC(i));
+      lua_setfield(L, -2, "C");
+      lua_pushinteger(L, GETARG_k(i));
+      lua_setfield(L, -2, "k");
+      break;
+    case iABx:
+      lua_pushinteger(L, GETARG_A(i));
+      lua_setfield(L, -2, "A");
+      lua_pushinteger(L, GETARG_Bx(i));
+      lua_setfield(L, -2, "Bx");
+      break;
+    case iAsBx:
+      lua_pushinteger(L, GETARG_A(i));
+      lua_setfield(L, -2, "A");
+      lua_pushinteger(L, GETARG_sBx(i));
+      lua_setfield(L, -2, "sBx");
+      break;
+    case iAx:
+      lua_pushinteger(L, GETARG_Ax(i));
+      lua_setfield(L, -2, "Ax");
+      break;
+    case isJ:
+      lua_pushinteger(L, GETARG_sJ(i));
+      lua_setfield(L, -2, "sJ");
+      break;
+  }
+  return 1;
+}
+
+/*
+** 11. ByteCode.Make(op, ...)
+** Creates an instruction.
+** Usage:
+**   Make(op, A, B, C, k)  -- for iABC/ivABC
+**   Make(op, A, Bx)       -- for iABx
+**   Make(op, A, sBx)      -- for iAsBx
+**   Make(op, Ax)          -- for iAx
+**   Make(op, sJ)          -- for isJ
+*/
+static int bytecode_make (lua_State *L) {
+  int op;
+  if (lua_type(L, 1) == LUA_TSTRING) {
+    const char *name = lua_tostring(L, 1);
+    /* linear search for opcode name */
+    for (op = 0; op < NUM_OPCODES; op++) {
+      if (opnames[op] && strcmp(name, opnames[op]) == 0)
+        break;
+    }
+    if (op == NUM_OPCODES)
+      return luaL_error(L, "unknown opcode: %s", name);
+  } else {
+    op = (int)luaL_checkinteger(L, 1);
+    if (op < 0 || op >= NUM_OPCODES)
+      return luaL_error(L, "opcode out of range");
+  }
+
+  enum OpMode mode = getOpMode(op);
+  Instruction i = 0;
+
+  SET_OPCODE(i, op);
+
+  switch (mode) {
+    case iABC: {
+      int a = (int)luaL_optinteger(L, 2, 0);
+      int b = (int)luaL_optinteger(L, 3, 0);
+      int c = (int)luaL_optinteger(L, 4, 0);
+      int k = (int)luaL_optinteger(L, 5, 0);
+      SETARG_A(i, a);
+      SETARG_B(i, b);
+      SETARG_C(i, c);
+      SETARG_k(i, k);
+      break;
+    }
+    case ivABC: {
+      int a = (int)luaL_optinteger(L, 2, 0);
+      int b = (int)luaL_optinteger(L, 3, 0);
+      int c = (int)luaL_optinteger(L, 4, 0);
+      int k = (int)luaL_optinteger(L, 5, 0);
+      SETARG_A(i, a);
+      SETARG_vB(i, b);
+      SETARG_vC(i, c);
+      SETARG_k(i, k);
+      break;
+    }
+    case iABx: {
+      int a = (int)luaL_optinteger(L, 2, 0);
+      int bx = (int)luaL_optinteger(L, 3, 0);
+      SETARG_A(i, a);
+      SETARG_Bx(i, bx);
+      break;
+    }
+    case iAsBx: {
+      int a = (int)luaL_optinteger(L, 2, 0);
+      int sbx = (int)luaL_optinteger(L, 3, 0);
+      SETARG_A(i, a);
+      SETARG_sBx(i, sbx);
+      break;
+    }
+    case iAx: {
+      int ax = (int)luaL_optinteger(L, 2, 0);
+      SETARG_Ax(i, ax);
+      break;
+    }
+    case isJ: {
+      int sj = (int)luaL_optinteger(L, 2, 0);
+      SETARG_sJ(i, sj);
+      break;
+    }
+  }
+
+  lua_pushinteger(L, (lua_Integer)i);
+  return 1;
+}
+
+/*
+** 12. ByteCode.Dump(proto)
+** Prints the bytecode disassembly to stdout.
+*/
+static int bytecode_dump (lua_State *L) {
+  Proto *p = get_proto_from_arg(L, 1);
+  int i;
+  printf("\nBytecode Dump: %d instructions\n", p->sizecode);
+  for (i = 0; i < p->sizecode; i++) {
+    Instruction inst = p->code[i];
+    OpCode op = GET_OPCODE(inst);
+    enum OpMode mode = getOpMode(op);
+    const char *name = (op < NUM_OPCODES && opnames[op]) ? opnames[op] : "UNKNOWN";
+
+    printf("%4d\t%-12s", i + 1, name);
+
+    switch (mode) {
+      case iABC:
+        printf("\t%d %d %d", GETARG_A(inst), GETARG_B(inst), GETARG_C(inst));
+        if (GETARG_k(inst)) printf(" k");
+        break;
+      case ivABC:
+        printf("\t%d %d %d", GETARG_A(inst), GETARG_vB(inst), GETARG_vC(inst));
+        if (GETARG_k(inst)) printf(" k");
+        break;
+      case iABx:
+        printf("\t%d %d", GETARG_A(inst), GETARG_Bx(inst));
+        break;
+      case iAsBx:
+        printf("\t%d %d", GETARG_A(inst), GETARG_sBx(inst));
+        break;
+      case iAx:
+        printf("\t%d", GETARG_Ax(inst));
+        break;
+      case isJ:
+        printf("\t%d", GETARG_sJ(inst));
+        break;
+    }
+    printf("\n");
+  }
+  return 0;
+}
+
 static const luaL_Reg bytecode_funcs[] = {
   {"CheckFunction", bytecode_checkfunction},
   {"GetProto", bytecode_getproto},
@@ -145,10 +352,25 @@ static const luaL_Reg bytecode_funcs[] = {
   {"GetLine", bytecode_getline},
   {"GetParamCount", bytecode_getparamcount},
   {"IsGC", bytecode_isgc},
+  {"GetOpCode", bytecode_getopcode},
+  {"GetArgs", bytecode_getargs},
+  {"Make", bytecode_make},
+  {"Dump", bytecode_dump},
   {NULL, NULL}
 };
 
 LUAMOD_API int luaopen_ByteCode (lua_State *L) {
   luaL_newlib(L, bytecode_funcs);
+
+  /* Add OpCodes table */
+  lua_newtable(L);
+  for (int i = 0; i < NUM_OPCODES; i++) {
+    if (opnames[i]) {
+      lua_pushinteger(L, i);
+      lua_setfield(L, -2, opnames[i]);
+    }
+  }
+  lua_setfield(L, -2, "OpCodes");
+
   return 1;
 }
