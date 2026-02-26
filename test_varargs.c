@@ -62,8 +62,10 @@ static int function_1(lua_State *L) {
         lua_settop(L, 2 + nvar);
     }
     Label_6: /* CALL */
+    {
     lua_call(L, lua_gettop(L) - 2, 1);
     lua_settop(L, 7);
+    }
     Label_7: /* LOADI */
     lua_tcc_loadk_int(L, 3, 1);
     Label_8: /* GETFIELD */

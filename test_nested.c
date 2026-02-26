@@ -40,10 +40,13 @@ static int function_0(lua_State *L) {
     Label_8: /* MMBINK */
     /* MMBIN: ignored as lua_arith handles it */
     Label_9: /* EQI */
-    lua_pushvalue(L, 6);
-    lua_pushinteger(L, 0);
-    if (lua_compare(L, -2, -1, LUA_OPEQ) != 0) goto Label_11;
-    lua_pop(L, 2);
+    {
+        lua_pushvalue(L, 6);
+        lua_pushinteger(L, 0);
+        int res = lua_compare(L, -2, -1, LUA_OPEQ);
+        lua_pop(L, 2);
+        if (res != 0) goto Label_11;
+    }
     Label_10: /* JMP */
     goto Label_21;
     Label_11: /* LOADI */
@@ -68,10 +71,13 @@ static int function_0(lua_State *L) {
         goto Label_19;
     }
     Label_15: /* EQI */
-    lua_pushvalue(L, 9);
-    lua_pushinteger(L, 3);
-    if (lua_compare(L, -2, -1, LUA_OPEQ) != 1) goto Label_17;
-    lua_pop(L, 2);
+    {
+        lua_pushvalue(L, 9);
+        lua_pushinteger(L, 3);
+        int res = lua_compare(L, -2, -1, LUA_OPEQ);
+        lua_pop(L, 2);
+        if (res != 1) goto Label_17;
+    }
     Label_16: /* JMP */
     goto Label_21;
     Label_17: /* ADDI */
