@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LXCLUA-NCore - 高性能嵌入式脚本引擎</title>
+    <style>
+:root {
+    --bg-primary: #1e1e1e;
+    --bg-secondary: #252526;
+    --text-primary: #d4d4d4;
+    --text-secondary: #858585;
+    --accent: #0e639c;
+    --accent-hover: #1177bb;
+    --border: #3c3c3c;
+    --code-bg: #0d0d0d;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    margin: 0;
+    padding: 0;
+    line-height: 1.6;
+}
+
+.container {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 0 20px;
+}
+
+/* Header */
+.header {
+    background-color: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+    padding: 15px 0;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+
+.header-container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.logo {
+    font-size: 1.5rem;
+    font-weight: bold;
+    color: #fff;
+}
+
+.nav a {
+    color: var(--text-primary);
+    text-decoration: none;
+    margin-left: 20px;
+    transition: color 0.3s;
+}
+
+.nav a:hover {
+    color: #fff;
+}
+
+/* Hero */
+.hero {
+    padding: 80px 0;
+    text-align: center;
+}
+
+.hero h1 {
+    font-size: 3rem;
+    margin-bottom: 10px;
+    color: #fff;
+}
+
+.hero .subtitle {
+    font-size: 1.2rem;
+    color: var(--text-secondary);
+    margin-bottom: 30px;
+}
+
+.hero-badges {
+    margin-bottom: 30px;
+}
+
+.badge {
+    display: inline-block;
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    margin: 0 5px;
+    color: #4ec9b0;
+}
+
+.btn {
+    display: inline-block;
+    padding: 10px 24px;
+    border-radius: 4px;
+    text-decoration: none;
+    font-weight: bold;
+    transition: background-color 0.3s;
+}
+
+.btn-primary {
+    background-color: var(--accent);
+    color: #fff;
+}
+
+.btn-primary:hover {
+    background-color: var(--accent-hover);
+}
+
+.btn-secondary {
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    margin-left: 10px;
+}
+
+.btn-secondary:hover {
+    background-color: #333;
+}
+
+/* Sections */
+.section {
+    padding: 60px 0;
+    border-top: 1px solid var(--border);
+}
+
+.section-title {
+    text-align: center;
+    font-size: 2rem;
+    margin-bottom: 40px;
+    color: #fff;
+}
+
+/* Features */
+.features-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 30px;
+}
+
+.feature-card {
+    background-color: var(--bg-secondary);
+    padding: 30px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    transition: transform 0.3s;
+}
+
+.feature-card:hover {
+    transform: translateY(-5px);
+    border-color: var(--accent);
+}
+
+.feature-card .icon {
+    font-size: 2.5rem;
+    margin-bottom: 15px;
+}
+
+.feature-card h3 {
+    margin-bottom: 10px;
+    color: #fff;
+}
+
+/* Code Syntax Tabs */
+.code-tabs {
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.tab-header {
+    display: flex;
+    background-color: #2d2d2d;
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+}
+
+.tab-btn {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    padding: 15px 20px;
+    cursor: pointer;
+    font-size: 1rem;
+    font-family: inherit;
+    border-right: 1px solid var(--border);
+    transition: all 0.2s;
+}
+
+.tab-btn:hover {
+    color: var(--text-primary);
+    background-color: #383838;
+}
+
+.tab-btn.active {
+    color: #fff;
+    background-color: var(--bg-secondary);
+    border-bottom: 2px solid var(--accent);
+    margin-bottom: -1px;
+}
+
+.tab-content {
+    padding: 20px;
+    background-color: var(--bg-secondary);
+}
+
+.code-block {
+    display: none;
+}
+
+.code-block.active {
+    display: block;
+}
+
+pre {
+    background-color: var(--code-bg);
+    padding: 15px;
+    border-radius: 4px;
+    overflow-x: auto;
+    margin: 0;
+    border: 1px solid var(--border);
+}
+
+code {
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 0.95rem;
+    color: #9cdcfe;
+}
+
+/* Build Instructions */
+.build-instructions {
+    text-align: center;
+    max-width: 700px;
+    margin: 0 auto;
+}
+
+.code-snippet {
+    text-align: left;
+    margin: 20px 0;
+}
+
+.verification-text {
+    margin-top: 20px;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+.verification-text code {
+    background-color: #333;
+    padding: 2px 5px;
+    border-radius: 3px;
+    color: #ce9178;
+}
+
+/* Footer */
+.footer {
+    padding: 40px 0;
+    text-align: center;
+    color: var(--text-secondary);
+    background-color: #181818;
+    border-top: 1px solid var(--border);
+}
+
+.footer p {
+    margin: 5px 0;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .hero h1 {
+        font-size: 2rem;
+    }
+    .header-container {
+        flex-direction: column;
+    }
+    .nav {
+        margin-top: 15px;
+    }
+    .nav a {
+        margin: 0 10px;
+    }
+}
+</style>
+    <meta name="description" content="基于 Lua 5.5 (Custom) 的高性能嵌入式脚本引擎，增强了安全性、扩展库和优化的字节码编译。">
+</head>
+<body>
+    <header class="header">
+        <div class="container header-container">
+            <div class="logo">LXCLUA-NCore</div>
+            <nav class="nav">
+                <a href="#features">特性</a>
+                <a href="#syntax">语法</a>
+                <a href="#download">下载</a>
+                <a href="https://github.com/your-repo/lxclua" target="_blank">GitHub</a>
+            </nav>
+        </div>
+    </header>
+
+    <section class="hero">
+        <div class="container hero-content">
+            <h1>高性能嵌入式脚本引擎</h1>
+            <p class="subtitle">基于 <strong>Lua 5.5 (Custom)</strong>，增强安全性、扩展库与字节码优化。</p>
+            <div class="hero-badges">
+                <span class="badge">License: MIT</span>
+                <span class="badge">C Standard: C23</span>
+                <span class="badge">Platform: Cross-Platform</span>
+            </div>
+            <div class="cta-buttons">
+                <a href="#download" class="btn btn-primary">开始使用</a>
+                <a href="#syntax" class="btn btn-secondary">查看示例</a>
+            </div>
+        </div>
+    </section>
+
+    <section id="features" class="section features">
+        <div class="container">
+            <h2 class="section-title">核心特性</h2>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="icon">🔒</div>
+                    <h3>安全编译</h3>
+                    <p>动态操作码映射、时间戳加密、SHA-256 完整性校验，保护您的代码安全。</p>
+                </div>
+                <div class="feature-card">
+                    <div class="icon">⚡</div>
+                    <h3>自定义 VM</h3>
+                    <p>实现 XCLUA 指令集，优化调度，提供超越原生 Lua 的执行性能。</p>
+                </div>
+                <div class="feature-card">
+                    <div class="icon">✨</div>
+                    <h3>现代语法</h3>
+                    <p>支持类(Class)、Switch、Try-Catch、箭头函数、管道操作符等现代语言特性。</p>
+                </div>
+                <div class="feature-card">
+                    <div class="icon">📦</div>
+                    <h3>丰富扩展</h3>
+                    <p>内置 JSON、HTTP、多线程、文件系统、结构体等常用模块，开箱即用。</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="syntax" class="section syntax">
+        <div class="container">
+            <h2 class="section-title">语法展示</h2>
+            <div class="code-tabs">
+                <div class="tab-header">
+                    <button class="tab-btn active" data-tab="operators">扩展操作符</button>
+                    <button class="tab-btn" data-tab="oop">面向对象</button>
+                    <button class="tab-btn" data-tab="control">控制流</button>
+                    <button class="tab-btn" data-tab="functions">函数特性</button>
+                </div>
+                <div class="tab-content">
+                    <div class="code-block active" id="operators">
+<pre><code>-- 复合赋值与自增
+local a = 10
+a += 5          -- a = 15
+a++             -- a = 16
+
+-- 太空船操作符 (-1, 0, 1)
+local cmp = 10 <=> 20  -- -1
+
+-- 空值合并
+local val = nil
+local res = val ?? "default"  -- "default"
+
+-- 管道操作符
+local function double(x) return x * 2 end
+local result = 10 |> double  -- 20
+
+-- 海象操作符 (赋值表达式)
+local x
+if (x := 100) > 50 then
+    print(x) -- 100
+end</code></pre>
+                    </div>
+                    <div class="code-block" id="oop">
+<pre><code>interface Drawable
+    function draw(self)
+end
+
+class Shape implements Drawable
+    function draw(self)
+        -- 类似抽象方法的行为
+    end
+end
+
+-- 密封类 (不可被继承)
+sealed class Circle extends Shape
+    private _radius = 0
+
+    function __init__(self, r)
+        self._radius = r
+    end
+
+    get radius(self)
+        return self._radius
+    end
+
+    function draw(self)
+        super.draw(self)
+        return "Drawing circle: " .. self._radius
+    end
+end</code></pre>
+                    </div>
+                    <div class="code-block" id="control">
+<pre><code>-- Switch 语句
+switch (val) do
+    case 1:
+        print("One")
+        break
+    default:
+        print("Other")
+end
+
+-- Try-Catch-Finally
+try
+    error("Error")
+catch(e)
+    print("Caught: " .. e)
+finally
+    print("Cleanup")
+end
+
+-- Shell 风格测试
+if [ -f "config.lua" ] then
+    print("Config file exists")
+end</code></pre>
+                    </div>
+                    <div class="code-block" id="functions">
+<pre><code>-- 箭头函数
+local add = (a, b) => a + b
+local log = ->(msg) { print("[LOG]: " .. msg) }
+
+-- Lambda 表达式
+local sq = lambda(x): x * x
+
+-- C 风格函数
+int sum(int a, int b) {
+    return a + b;
+}
+
+-- 泛型函数
+local function Factory(T)(val)
+    return { type = T, value = val }
+end</code></pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="download" class="section download">
+        <div class="container">
+            <h2 class="section-title">构建与运行</h2>
+            <div class="build-instructions">
+                <p>支持 Linux 和 Windows (MinGW) 平台构建。</p>
+                <div class="code-snippet">
+                    <pre><code># Linux
+make linux
+
+# Windows (MinGW)
+make mingw</code></pre>
+                </div>
+                <p class="verification-text">运行测试套件验证功能：<code>./lxclua tests/verify_docs_full.lua</code></p>
+            </div>
+        </div>
+    </section>
+
+    <footer class="footer">
+        <div class="container">
+            <p>&copy; 2024 LXCLUA-NCore. MIT License.</p>
+            <p>Lua original code Copyright © PUC-Rio.</p>
+        </div>
+    </footer>
+
+    <script>
+document.addEventListener('DOMContentLoaded', function() {
+    const tabBtns = document.querySelectorAll('.tab-btn');
+    const codeBlocks = document.querySelectorAll('.code-block');
+
+    tabBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            // Remove active class from all buttons and blocks
+            tabBtns.forEach(b => b.classList.remove('active'));
+            codeBlocks.forEach(block => block.classList.remove('active'));
+
+            // Add active class to clicked button
+            btn.classList.add('active');
+
+            // Find and activate the corresponding code block
+            const tabId = btn.getAttribute('data-tab');
+            const targetBlock = document.getElementById(tabId);
+            if (targetBlock) {
+                targetBlock.classList.add('active');
+            }
+        });
+    });
+
+    // Smooth scrolling for anchor links
+    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+        anchor.addEventListener('click', function (e) {
+            e.preventDefault();
+            const targetId = this.getAttribute('href');
+            if (targetId === '#') return;
+
+            const targetElement = document.querySelector(targetId);
+            if (targetElement) {
+                targetElement.scrollIntoView({
+                    behavior: 'smooth'
+                });
+            }
+        });
+    });
+});
+</script>
+</body>
+</html>
