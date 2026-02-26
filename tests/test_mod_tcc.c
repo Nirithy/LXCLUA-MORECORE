@@ -7,11 +7,8 @@ static int function_1(lua_State *L);
 
 /* Proto 0 */
 static int function_0(lua_State *L) {
-    int vtab_idx = lua_upvalueindex(2);
+    int vtab_idx = 5;
     lua_tcc_prologue(L, 0, 4);
-    lua_pushvalue(L, 5);
-    lua_replace(L, vtab_idx);
-    lua_settop(L, 4);
     Label_1: /* VARARGPREP */
     /* VARARGPREP: adjust varargs if needed */
     Label_2: /* CLOSURE */
@@ -37,8 +34,9 @@ static int function_0(lua_State *L) {
     Label_9: /* TAILCALL */
     lua_tcc_push_args(L, 2, 3); /* func + args */
     lua_call(L, 2, LUA_MULTRET);
-    return lua_gettop(L) - 4;
+    return lua_gettop(L) - 5;
     Label_10: /* RETURN */
+    if (vtab_idx == lua_gettop(L)) lua_settop(L, lua_gettop(L) - 1);
     return lua_gettop(L) - 1;
     Label_11: /* RETURN */
     return 0;
@@ -63,8 +61,7 @@ static int function_1(lua_State *L) {
 
 int luaopen_test_mod_tcc(lua_State *L) {
     lua_pushglobaltable(L);
-    lua_pushnil(L);
-    lua_pushcclosure(L, function_0, 2);
+    lua_pushcclosure(L, function_0, 1);
     lua_call(L, 0, 1);
     return 1;
 }

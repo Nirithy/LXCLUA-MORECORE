@@ -1292,6 +1292,7 @@ LUA_API void  (lua_tcc_loadk_flt) (lua_State *L, int dest, lua_Number v);
 LUA_API int   (lua_tcc_in) (lua_State *L, int val_idx, int container_idx);
 LUA_API void  (lua_tcc_push_args) (lua_State *L, int start_reg, int count);
 LUA_API void  (lua_tcc_store_results) (lua_State *L, int start_reg, int count);
+LUA_API void  (lua_tcc_decrypt_string) (lua_State *L, const unsigned char *cipher, size_t len, unsigned int timestamp);
 
 
 /*

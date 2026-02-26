@@ -343,6 +343,21 @@ LUA_API void lua_rotate_multi (lua_State *L, int idx, int n) {
   lua_unlock(L);
 }
 
+LUA_API void lua_tcc_decrypt_string(lua_State *L, const unsigned char *cipher, size_t len, unsigned int timestamp) {
+  char *buff;
+  lua_lock(L);
+  buff = luaM_newvector(L, len, char);
+  for (size_t i = 0; i < len; i++) {
+    buff[i] = cipher[i] ^ ((timestamp + i) & 0xFF);
+  }
+  TString *ts = luaS_newlstr(L, buff, len);
+  setsvalue2s(L, L->top.p, ts);
+  api_incr_top(L);
+  luaC_checkGC(L);
+  luaM_freearray(L, buff, len);
+  lua_unlock(L);
+}
+
 
 /**
  * @brief Copies the element at index `fromidx` into the valid index `toidx`.

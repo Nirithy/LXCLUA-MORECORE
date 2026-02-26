@@ -190,6 +190,35 @@ static int get_proto_id(Proto *p, ProtoInfo *list, int count) {
     return -1;
 }
 
+/* Helper to emit encrypted string push */
+static void emit_encrypted_string_push(luaL_Buffer *B, const char *s, size_t len, int seed) {
+    if (len == 0) {
+        add_fmt(B, "    lua_pushlstring(L, \"\", 0);\n");
+        return;
+    }
+    // Derive a timestamp/key deterministically
+    unsigned int timestamp = (unsigned int)seed ^ (unsigned int)len ^ 0x5A5A5A5A;
+    for(size_t i=0; i<len; i++) timestamp = (timestamp * 1664525) + (unsigned char)s[i] + 1013904223;
+
+    // Encrypt
+    unsigned char *cipher = (unsigned char *)malloc(len);
+    for (size_t i = 0; i < len; i++) {
+        cipher[i] = s[i] ^ ((timestamp + i) & 0xFF);
+    }
+
+    // Emit C code
+    add_fmt(B, "    {\n");
+    add_fmt(B, "        static const unsigned char cipher[] = {");
+    for (size_t i = 0; i < len; i++) {
+        add_fmt(B, "0x%02x,", cipher[i]);
+    }
+    add_fmt(B, "};\n");
+    add_fmt(B, "        lua_tcc_decrypt_string(L, cipher, %llu, %u);\n", (unsigned long long)len, timestamp);
+    add_fmt(B, "    }\n");
+
+    free(cipher);
+}
+
 /* Helper to escape and emit a string literal */
 static void emit_quoted_string(luaL_Buffer *B, const char *s, size_t len) {
     add_fmt(B, "\"");
@@ -207,7 +236,7 @@ static void emit_quoted_string(luaL_Buffer *B, const char *s, size_t len) {
 }
 
 /* Emit code to push a constant */
-static void emit_loadk(luaL_Buffer *B, Proto *p, int k_index) {
+static void emit_loadk(luaL_Buffer *B, Proto *p, int k_index, int str_encrypt, int seed) {
     TValue *k = &p->k[k_index];
     switch (ttype(k)) {
         case LUA_TNIL:
@@ -225,9 +254,13 @@ static void emit_loadk(luaL_Buffer *B, Proto *p, int k_index) {
             break;
         case LUA_TSTRING: {
             TString *ts = tsvalue(k);
-            add_fmt(B, "    lua_pushlstring(L, ");
-            emit_quoted_string(B, getstr(ts), tsslen(ts));
-            add_fmt(B, ", %llu);\n", (unsigned long long)tsslen(ts));
+            if (str_encrypt) {
+                emit_encrypted_string_push(B, getstr(ts), tsslen(ts), seed);
+            } else {
+                add_fmt(B, "    lua_pushlstring(L, ");
+                emit_quoted_string(B, getstr(ts), tsslen(ts));
+                add_fmt(B, ", %llu);\n", (unsigned long long)tsslen(ts));
+            }
             break;
         }
         default:
@@ -236,7 +269,7 @@ static void emit_loadk(luaL_Buffer *B, Proto *p, int k_index) {
     }
 }
 
-static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, ProtoInfo *protos, int proto_count, int use_pure_c) {
+static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, ProtoInfo *protos, int proto_count, int use_pure_c, int str_encrypt, int seed) {
     OpCode op = GET_OPCODE(i);
     int a = GETARG_A(i);
 
@@ -253,15 +286,20 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             int bx = GETARG_Bx(i);
             TValue *k = &p->k[bx];
             if (ttisstring(k)) {
-                 add_fmt(B, "    lua_tcc_loadk_str(L, %d, ", a + 1);
-                 emit_quoted_string(B, getstr(tsvalue(k)), tsslen(tsvalue(k)));
-                 add_fmt(B, ");\n");
+                 if (str_encrypt) {
+                     emit_encrypted_string_push(B, getstr(tsvalue(k)), tsslen(tsvalue(k)), seed);
+                     add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+                 } else {
+                     add_fmt(B, "    lua_tcc_loadk_str(L, %d, ", a + 1);
+                     emit_quoted_string(B, getstr(tsvalue(k)), tsslen(tsvalue(k)));
+                     add_fmt(B, ");\n");
+                 }
             } else if (ttisinteger(k)) {
                  add_fmt(B, "    lua_tcc_loadk_int(L, %d, %lld);\n", a + 1, (long long)ivalue(k));
             } else if (ttisnumber(k)) {
                  add_fmt(B, "    lua_tcc_loadk_flt(L, %d, %f);\n", a + 1, fltvalue(k));
             } else {
-                 emit_loadk(B, p, bx);
+                 emit_loadk(B, p, bx, str_encrypt, seed);
                  add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
             }
             break;
@@ -312,13 +350,18 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
                 int ax = GETARG_Ax(p->code[pc+1]);
                 TValue *k = &p->k[ax];
                 if (ttisstring(k)) {
-                     add_fmt(B, "    lua_tcc_loadk_str(L, %d, ", a + 1);
-                     emit_quoted_string(B, getstr(tsvalue(k)), tsslen(tsvalue(k)));
-                     add_fmt(B, ");\n");
+                     if (str_encrypt) {
+                         emit_encrypted_string_push(B, getstr(tsvalue(k)), tsslen(tsvalue(k)), seed);
+                         add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+                     } else {
+                         add_fmt(B, "    lua_tcc_loadk_str(L, %d, ", a + 1);
+                         emit_quoted_string(B, getstr(tsvalue(k)), tsslen(tsvalue(k)));
+                         add_fmt(B, ");\n");
+                     }
                 } else if (ttisinteger(k)) {
                      add_fmt(B, "    lua_tcc_loadk_int(L, %d, %lld);\n", a + 1, (long long)ivalue(k));
                 } else {
-                     emit_loadk(B, p, ax);
+                     emit_loadk(B, p, ax, str_encrypt, seed);
                      add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
                 }
             }
@@ -335,12 +378,19 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             int c = GETARG_C(i);
             TValue *k = &p->k[c];
             if (ttisstring(k)) {
-                 add_fmt(B, "    lua_tcc_gettabup(L, %d, ", b + 1);
-                 emit_quoted_string(B, getstr(tsvalue(k)), tsslen(tsvalue(k)));
-                 add_fmt(B, ", %d);\n", a + 1);
+                 if (str_encrypt) {
+                     emit_encrypted_string_push(B, getstr(tsvalue(k)), tsslen(tsvalue(k)), seed);
+                     add_fmt(B, "    lua_getfield(L, lua_upvalueindex(%d), lua_tostring(L, -1));\n", b + 1);
+                     add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+                     add_fmt(B, "    lua_pop(L, 1);\n"); // pop decrypted key
+                 } else {
+                     add_fmt(B, "    lua_tcc_gettabup(L, %d, ", b + 1);
+                     emit_quoted_string(B, getstr(tsvalue(k)), tsslen(tsvalue(k)));
+                     add_fmt(B, ", %d);\n", a + 1);
+                 }
             } else {
                  add_fmt(B, "    lua_pushvalue(L, lua_upvalueindex(%d));\n", b + 1); // table
-                 emit_loadk(B, p, c); // key
+                 emit_loadk(B, p, c, str_encrypt, seed); // key
                  add_fmt(B, "    lua_gettable(L, -2);\n");
                  add_fmt(B, "    lua_replace(L, %d);\n", a + 1); // result to R[A]
                  add_fmt(B, "    lua_pop(L, 1);\n"); // pop table
@@ -353,21 +403,33 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             int c = GETARG_C(i);
             TValue *k = &p->k[b];
             if (ttisstring(k)) {
-                // RK(C)
-                if (TESTARG_k(i)) {
-                    emit_loadk(B, p, c);
+                if (str_encrypt) {
+                    emit_encrypted_string_push(B, getstr(tsvalue(k)), tsslen(tsvalue(k)), seed);
+                    // RK(C)
+                    if (TESTARG_k(i)) {
+                        emit_loadk(B, p, c, str_encrypt, seed);
+                    } else {
+                        add_fmt(B, "    lua_pushvalue(L, %d);\n", c + 1);
+                    }
+                    add_fmt(B, "    lua_setfield(L, lua_upvalueindex(%d), lua_tostring(L, -2));\n", a + 1);
+                    add_fmt(B, "    lua_pop(L, 1);\n"); // pop decrypted key
                 } else {
-                    add_fmt(B, "    lua_pushvalue(L, %d);\n", c + 1);
+                    // RK(C)
+                    if (TESTARG_k(i)) {
+                        emit_loadk(B, p, c, str_encrypt, seed);
+                    } else {
+                        add_fmt(B, "    lua_pushvalue(L, %d);\n", c + 1);
+                    }
+                    add_fmt(B, "    lua_tcc_settabup(L, %d, ", a + 1);
+                    emit_quoted_string(B, getstr(tsvalue(k)), tsslen(tsvalue(k)));
+                    add_fmt(B, ", -1);\n");
                 }
-                add_fmt(B, "    lua_tcc_settabup(L, %d, ", a + 1);
-                emit_quoted_string(B, getstr(tsvalue(k)), tsslen(tsvalue(k)));
-                add_fmt(B, ", -1);\n");
             } else {
                 add_fmt(B, "    lua_pushvalue(L, lua_upvalueindex(%d));\n", a + 1); // table
-                emit_loadk(B, p, b); // key
+                emit_loadk(B, p, b, str_encrypt, seed); // key
                 // RK(C)
                 if (TESTARG_k(i)) {
-                    emit_loadk(B, p, c);
+                    emit_loadk(B, p, c, str_encrypt, seed);
                 } else {
                     add_fmt(B, "    lua_pushvalue(L, %d);\n", c + 1);
                 }
@@ -467,7 +529,7 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
                 add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
             } else {
                 add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
-                emit_loadk(B, p, c);
+                emit_loadk(B, p, c, str_encrypt, seed);
                 int op_enum = -1;
                 if (op == OP_ADDK) op_enum = LUA_OPADD;
                 else if (op == OP_SUBK) op_enum = LUA_OPSUB;
@@ -495,13 +557,18 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             if (TESTARG_k(i)) {
                  TValue *k = &p->k[c];
                  if (ttisstring(k)) {
-                      add_fmt(B, "    lua_getfield(L, -1, ");
-                      emit_quoted_string(B, getstr(tsvalue(k)), tsslen(tsvalue(k)));
-                      add_fmt(B, ");\n");
+                      if (str_encrypt) {
+                          emit_encrypted_string_push(B, getstr(tsvalue(k)), tsslen(tsvalue(k)), seed);
+                          add_fmt(B, "    lua_gettable(L, -2);\n");
+                      } else {
+                          add_fmt(B, "    lua_getfield(L, -1, ");
+                          emit_quoted_string(B, getstr(tsvalue(k)), tsslen(tsvalue(k)));
+                          add_fmt(B, ");\n");
+                      }
                       add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
                       add_fmt(B, "    lua_pop(L, 1);\n");
                  } else {
-                      emit_loadk(B, p, c);
+                      emit_loadk(B, p, c, str_encrypt, seed);
                       add_fmt(B, "    lua_gettable(L, -2);\n");
                       add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
                       add_fmt(B, "    lua_pop(L, 1);\n");
@@ -775,7 +842,7 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             int k = GETARG_k(i);
             add_fmt(B, "    {\n");
             add_fmt(B, "        lua_pushvalue(L, %d);\n", a + 1);
-            emit_loadk(B, p, b);
+            emit_loadk(B, p, b, str_encrypt, seed);
             add_fmt(B, "        int res = lua_compare(L, -2, -1, LUA_OPEQ);\n");
             add_fmt(B, "        lua_pop(L, 2);\n");
             add_fmt(B, "        if (res != %d) goto Label_%d;\n", k, pc + 1 + 2);
@@ -927,7 +994,7 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             int c = GETARG_C(i);
             add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1); // table
             add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1); // key
-            if (TESTARG_k(i)) emit_loadk(B, p, c); // value K
+            if (TESTARG_k(i)) emit_loadk(B, p, c, str_encrypt, seed); // value K
             else add_fmt(B, "    lua_pushvalue(L, %d);\n", c + 1); // value R
             add_fmt(B, "    lua_settable(L, -3);\n");
             add_fmt(B, "    lua_pop(L, 1);\n");
@@ -940,9 +1007,14 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
             TValue *k = &p->k[c];
             if (ttisstring(k)) {
-                add_fmt(B, "    lua_getfield(L, -1, ");
-                emit_quoted_string(B, getstr(tsvalue(k)), tsslen(tsvalue(k)));
-                add_fmt(B, ");\n");
+                if (str_encrypt) {
+                    emit_encrypted_string_push(B, getstr(tsvalue(k)), tsslen(tsvalue(k)), seed);
+                    add_fmt(B, "    lua_gettable(L, -2);\n");
+                } else {
+                    add_fmt(B, "    lua_getfield(L, -1, ");
+                    emit_quoted_string(B, getstr(tsvalue(k)), tsslen(tsvalue(k)));
+                    add_fmt(B, ");\n");
+                }
             } else {
                 add_fmt(B, "    lua_pushnil(L);\n"); // Should not happen for GETFIELD
             }
@@ -955,13 +1027,19 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             int b = GETARG_B(i);
             int c = GETARG_C(i);
             add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1); // table
-            if (TESTARG_k(i)) emit_loadk(B, p, c); // value K
+            if (TESTARG_k(i)) emit_loadk(B, p, c, str_encrypt, seed); // value K
             else add_fmt(B, "    lua_pushvalue(L, %d);\n", c + 1); // value R
             TValue *k = &p->k[b];
             if (ttisstring(k)) {
-                add_fmt(B, "    lua_setfield(L, -2, ");
-                emit_quoted_string(B, getstr(tsvalue(k)), tsslen(tsvalue(k)));
-                add_fmt(B, ");\n");
+                if (str_encrypt) {
+                    emit_encrypted_string_push(B, getstr(tsvalue(k)), tsslen(tsvalue(k)), seed);
+                    add_fmt(B, "    lua_insert(L, -2);\n");
+                    add_fmt(B, "    lua_settable(L, -3);\n");
+                } else {
+                    add_fmt(B, "    lua_setfield(L, -2, ");
+                    emit_quoted_string(B, getstr(tsvalue(k)), tsslen(tsvalue(k)));
+                    add_fmt(B, ");\n");
+                }
             } else {
                 add_fmt(B, "    lua_pop(L, 1);\n"); // pop value
             }
@@ -983,7 +1061,7 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             int b = GETARG_B(i);
             int c = GETARG_C(i);
             add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1); // table
-            if (TESTARG_k(i)) emit_loadk(B, p, c); // value K
+            if (TESTARG_k(i)) emit_loadk(B, p, c, str_encrypt, seed); // value K
             else add_fmt(B, "    lua_pushvalue(L, %d);\n", c + 1); // value R
             add_fmt(B, "    lua_seti(L, -2, %d);\n", b);
             add_fmt(B, "    lua_pop(L, 1);\n");
@@ -1140,7 +1218,7 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
 
         case OP_NEWCLASS: {
             int bx = GETARG_Bx(i);
-            emit_loadk(B, p, bx);
+            emit_loadk(B, p, bx, str_encrypt, seed);
             add_fmt(B, "    lua_newclass(L, lua_tostring(L, -1));\n");
             add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
             add_fmt(B, "    lua_pop(L, 1);\n");
@@ -1156,7 +1234,7 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
         case OP_SETMETHOD: {
             int b = GETARG_B(i);
             int c = GETARG_C(i);
-            emit_loadk(B, p, b);
+            emit_loadk(B, p, b, str_encrypt, seed);
             add_fmt(B, "    lua_setmethod(L, %d, lua_tostring(L, -1), %d);\n", a + 1, c + 1);
             add_fmt(B, "    lua_pop(L, 1);\n");
             break;
@@ -1165,7 +1243,7 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
         case OP_SETSTATIC: {
             int b = GETARG_B(i);
             int c = GETARG_C(i);
-            emit_loadk(B, p, b);
+            emit_loadk(B, p, b, str_encrypt, seed);
             add_fmt(B, "    lua_setstatic(L, %d, lua_tostring(L, -1), %d);\n", a + 1, c + 1);
             add_fmt(B, "    lua_pop(L, 1);\n");
             break;
@@ -1175,7 +1253,7 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             int b = GETARG_B(i);
             int c = GETARG_C(i);
             add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
-            emit_loadk(B, p, c);
+            emit_loadk(B, p, c, str_encrypt, seed);
             add_fmt(B, "    lua_getsuper(L, -2, lua_tostring(L, -1));\n", a + 1);
             add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
             add_fmt(B, "    lua_pop(L, 2);\n");
@@ -1200,7 +1278,7 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             int b = GETARG_B(i);
             int c = GETARG_C(i);
             add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
-            emit_loadk(B, p, c);
+            emit_loadk(B, p, c, str_encrypt, seed);
             add_fmt(B, "    lua_getprop(L, -2, lua_tostring(L, -1));\n");
             add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
             add_fmt(B, "    lua_pop(L, 2);\n");
@@ -1211,8 +1289,8 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             int b = GETARG_B(i);
             int c = GETARG_C(i);
             add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1);
-            emit_loadk(B, p, b);
-            if (TESTARG_k(i)) emit_loadk(B, p, c);
+            emit_loadk(B, p, b, str_encrypt, seed);
+            if (TESTARG_k(i)) emit_loadk(B, p, c, str_encrypt, seed);
             else add_fmt(B, "    lua_pushvalue(L, %d);\n", c + 1);
             add_fmt(B, "    lua_setprop(L, -3, lua_tostring(L, -2), -1);\n");
             add_fmt(B, "    lua_pop(L, 3);\n");
@@ -1268,7 +1346,7 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             int b = GETARG_B(i);
             int c = GETARG_C(i);
             add_fmt(B, "    lua_pushvalue(L, %d); /* type */\n", b + 1);
-            emit_loadk(B, p, c); /* name */
+            emit_loadk(B, p, c, str_encrypt, seed); /* name */
             add_fmt(B, "    lua_checktype(L, %d, lua_tostring(L, -1));\n", a + 1);
             add_fmt(B, "    lua_pop(L, 2);\n");
             break;
@@ -1286,7 +1364,7 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             int b = GETARG_B(i);
             int k = GETARG_k(i);
             add_fmt(B, "    {\n");
-            emit_loadk(B, p, b); // Push type name K[B]
+            emit_loadk(B, p, b, str_encrypt, seed); // Push type name K[B]
             add_fmt(B, "        int res = lua_is(L, %d, lua_tostring(L, -1));\n", a + 1);
             add_fmt(B, "        lua_pop(L, 1);\n");
             add_fmt(B, "        if (res != %d) goto Label_%d;\n", k, pc + 1 + 2);
@@ -1296,7 +1374,7 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
 
         case OP_NEWNAMESPACE: {
             int bx = GETARG_Bx(i);
-            emit_loadk(B, p, bx);
+            emit_loadk(B, p, bx, str_encrypt, seed);
             add_fmt(B, "    lua_newnamespace(L, lua_tostring(L, -1));\n");
             add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
             add_fmt(B, "    lua_pop(L, 1);\n");
@@ -1311,7 +1389,7 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
 
         case OP_NEWSUPER: {
             int bx = GETARG_Bx(i);
-            emit_loadk(B, p, bx);
+            emit_loadk(B, p, bx, str_encrypt, seed);
             add_fmt(B, "    lua_newsuperstruct(L, lua_tostring(L, -1));\n");
             add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
             add_fmt(B, "    lua_pop(L, 1);\n");
@@ -1340,7 +1418,7 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
         case OP_ADDMETHOD: {
             int b = GETARG_B(i);
             int c = GETARG_C(i);
-            emit_loadk(B, p, b); // method name
+            emit_loadk(B, p, b, str_encrypt, seed); // method name
             add_fmt(B, "    lua_addmethod(L, %d, lua_tostring(L, -1), %d);\n", a + 1, c);
             add_fmt(B, "    lua_pop(L, 1);\n");
             break;
@@ -1360,7 +1438,7 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
 
         case OP_ERRNNIL: {
             int bx = GETARG_Bx(i);
-            emit_loadk(B, p, bx - 1); // global name
+            emit_loadk(B, p, bx - 1, str_encrypt, seed); // global name
             add_fmt(B, "    lua_errnnil(L, %d, lua_tostring(L, -1));\n", a + 1);
             add_fmt(B, "    lua_pop(L, 1);\n");
             break;
@@ -1433,7 +1511,7 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
     }
 }
 
-static void process_proto(luaL_Buffer *B, Proto *p, int id, ProtoInfo *protos, int proto_count, int use_pure_c) {
+static void process_proto(luaL_Buffer *B, Proto *p, int id, ProtoInfo *protos, int proto_count, int use_pure_c, int str_encrypt, int seed) {
     add_fmt(B, "\n/* Proto %d */\n", id);
     add_fmt(B, "static int function_%d(lua_State *L) {\n", id);
 
@@ -1446,7 +1524,7 @@ static void process_proto(luaL_Buffer *B, Proto *p, int id, ProtoInfo *protos, i
 
     // Iterate instructions
     for (int i = 0; i < p->sizecode; i++) {
-        emit_instruction(B, p, i, p->code[i], protos, proto_count, use_pure_c);
+        emit_instruction(B, p, i, p->code[i], protos, proto_count, use_pure_c, str_encrypt, seed);
     }
 
     // Fallback return if no return op
@@ -1529,6 +1607,10 @@ static int tcc_compile(lua_State *L) {
              if (!lua_isnil(L, -1)) seed = (int)lua_tointeger(L, -1);
              else seed = (int)time(NULL);
              lua_pop(L, 1);
+
+             if (lua_gettop(L) >= 3) {
+                 modname = luaL_checkstring(L, 3);
+             }
         } else if (lua_type(L, 2) == LUA_TBOOLEAN) {
             use_pure_c = lua_toboolean(L, 2);
         } else {
@@ -1589,7 +1671,9 @@ static int tcc_compile(lua_State *L) {
     // Apply obfuscation if requested
     int obfuscate_flags = provided_flags;
     if (flatten) obfuscate_flags |= OBFUSCATE_CFF;
-    if (str_encrypt) obfuscate_flags |= OBFUSCATE_STR_ENCRYPT;
+    // Note: We do NOT enable OBFUSCATE_STR_ENCRYPT here for luaO_flatten if str_encrypt is set,
+    // because we handle string encryption explicitly during C code generation in ltcc.c.
+    // if (str_encrypt) obfuscate_flags |= OBFUSCATE_STR_ENCRYPT;
 
     if (obfuscate_flags != 0) {
         for (int i = 0; i < count; i++) {
@@ -1656,7 +1740,7 @@ static int tcc_compile(lua_State *L) {
 
     // Implementations
     for (int i = 0; i < count; i++) {
-        process_proto(&B, protos[i].p, protos[i].id, protos, count, use_pure_c);
+        process_proto(&B, protos[i].p, protos[i].id, protos, count, use_pure_c, str_encrypt, seed);
     }
 
     // Main entry point
