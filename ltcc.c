@@ -1457,6 +1457,40 @@ static void process_proto(luaL_Buffer *B, Proto *p, int id, ProtoInfo *protos, i
 }
 
 
+static int tcc_compute_flags(lua_State *L) {
+    if (lua_type(L, 1) != LUA_TTABLE) {
+        lua_pushinteger(L, 0);
+        return 1;
+    }
+    int flags = 0;
+
+    struct { const char *name; int flag; } options[] = {
+        {"flatten", OBFUSCATE_CFF},
+        {"block_shuffle", OBFUSCATE_BLOCK_SHUFFLE},
+        {"bogus_blocks", OBFUSCATE_BOGUS_BLOCKS},
+        {"state_encode", OBFUSCATE_STATE_ENCODE},
+        {"nested_dispatcher", OBFUSCATE_NESTED_DISPATCHER},
+        {"opaque_predicates", OBFUSCATE_OPAQUE_PREDICATES},
+        {"func_interleave", OBFUSCATE_FUNC_INTERLEAVE},
+        {"vm_protect", OBFUSCATE_VM_PROTECT},
+        {"binary_dispatcher", OBFUSCATE_BINARY_DISPATCHER},
+        {"random_nop", OBFUSCATE_RANDOM_NOP},
+        {"string_encryption", OBFUSCATE_STR_ENCRYPT},
+        {NULL, 0}
+    };
+
+    for (int i = 0; options[i].name; i++) {
+        lua_getfield(L, 1, options[i].name);
+        if (lua_toboolean(L, -1)) {
+            flags |= options[i].flag;
+        }
+        lua_pop(L, 1);
+    }
+
+    lua_pushinteger(L, flags);
+    return 1;
+}
+
 static int tcc_compile(lua_State *L) {
     size_t len;
     const char *code = luaL_checklstring(L, 1, &len);
@@ -1466,6 +1500,7 @@ static int tcc_compile(lua_State *L) {
     int flatten = 0;
     int str_encrypt = 0;
     int seed = 0;
+    int provided_flags = 0;
 
     if (lua_gettop(L) >= 2) {
         if (lua_type(L, 2) == LUA_TTABLE) {
@@ -1484,6 +1519,10 @@ static int tcc_compile(lua_State *L) {
 
              lua_getfield(L, 2, "string_encryption");
              if (!lua_isnil(L, -1)) str_encrypt = lua_toboolean(L, -1);
+             lua_pop(L, 1);
+
+             lua_getfield(L, 2, "flags");
+             if (!lua_isnil(L, -1)) provided_flags = (int)lua_tointeger(L, -1);
              lua_pop(L, 1);
 
              lua_getfield(L, 2, "seed");
@@ -1510,6 +1549,10 @@ static int tcc_compile(lua_State *L) {
 
                      lua_getfield(L, 3, "string_encryption");
                      if (!lua_isnil(L, -1)) str_encrypt = lua_toboolean(L, -1);
+                     lua_pop(L, 1);
+
+                     lua_getfield(L, 3, "flags");
+                     if (!lua_isnil(L, -1)) provided_flags = (int)lua_tointeger(L, -1);
                      lua_pop(L, 1);
 
                      lua_getfield(L, 3, "seed");
@@ -1544,7 +1587,7 @@ static int tcc_compile(lua_State *L) {
     collect_protos(p, &count, &protos, &capacity);
 
     // Apply obfuscation if requested
-    int obfuscate_flags = 0;
+    int obfuscate_flags = provided_flags;
     if (flatten) obfuscate_flags |= OBFUSCATE_CFF;
     if (str_encrypt) obfuscate_flags |= OBFUSCATE_STR_ENCRYPT;
 
@@ -1645,6 +1688,7 @@ static int tcc_compile(lua_State *L) {
 
 static const luaL_Reg tcc_lib[] = {
     {"compile", tcc_compile},
+    {"compute_flags", tcc_compute_flags},
     {NULL, NULL}
 };
 
