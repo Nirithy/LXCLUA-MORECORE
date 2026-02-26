@@ -205,6 +205,9 @@ static void checkclosemth (lua_State *L, StkId level) {
 */
 static void prepcallclosemth (lua_State *L, StkId level, TStatus status,
                                             int yy) {
+  ptrdiff_t levelrel = savestack(L, level);
+  luaD_checkstack(L, 4);  /* ensure space for 'callclosemethod' */
+  level = restorestack(L, levelrel);
   TValue *uv = s2v(level);  /* value being closed */
   TValue *errobj;
   

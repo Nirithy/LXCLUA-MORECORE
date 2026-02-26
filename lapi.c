@@ -263,7 +263,7 @@ LUA_API void lua_closeslot (lua_State *L, int idx) {
   StkId level;
   lua_lock(L);
   level = index2stack(L, idx);
-  api_check(L, hastocloseCfunc(L->ci->nresults) && L->tbclist.p == level,
+  api_check(L, hastocloseCfunc(L->ci->nresults) && L->tbclist.p >= level,
      "no variable to close at given level");
   level = luaF_close(L, level, CLOSEKTOP, 0);
   setnilvalue(s2v(level));
