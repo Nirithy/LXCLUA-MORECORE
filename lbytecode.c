@@ -341,41 +341,58 @@ static int bytecode_dump (lua_State *L) {
   if (p->flag & PF_LOCKED) {
     return luaL_error(L, "function is locked");
   }
+
+  luaL_Buffer b;
+  char buf[256];
   int i;
-  printf("\nBytecode Dump: %d instructions\n", p->sizecode);
+
+  luaL_buffinit(L, &b);
+
+  snprintf(buf, sizeof(buf), "\nBytecode Dump: %d instructions\n", p->sizecode);
+  luaL_addstring(&b, buf);
+
   for (i = 0; i < p->sizecode; i++) {
     Instruction inst = p->code[i];
     OpCode op = GET_OPCODE(inst);
     enum OpMode mode = getOpMode(op);
     const char *name = (op < NUM_OPCODES && opnames[op]) ? opnames[op] : "UNKNOWN";
 
-    printf("%4d\t%-12s", i + 1, name);
+    snprintf(buf, sizeof(buf), "%4d\t%-12s", i + 1, name);
+    luaL_addstring(&b, buf);
 
     switch (mode) {
       case iABC:
-        printf("\t%d %d %d", GETARG_A(inst), GETARG_B(inst), GETARG_C(inst));
-        if (GETARG_k(inst)) printf(" k");
+        snprintf(buf, sizeof(buf), "\t%d %d %d", GETARG_A(inst), GETARG_B(inst), GETARG_C(inst));
+        luaL_addstring(&b, buf);
+        if (GETARG_k(inst)) luaL_addstring(&b, " k");
         break;
       case ivABC:
-        printf("\t%d %d %d", GETARG_A(inst), GETARG_vB(inst), GETARG_vC(inst));
-        if (GETARG_k(inst)) printf(" k");
+        snprintf(buf, sizeof(buf), "\t%d %d %d", GETARG_A(inst), GETARG_vB(inst), GETARG_vC(inst));
+        luaL_addstring(&b, buf);
+        if (GETARG_k(inst)) luaL_addstring(&b, " k");
         break;
       case iABx:
-        printf("\t%d %d", GETARG_A(inst), GETARG_Bx(inst));
+        snprintf(buf, sizeof(buf), "\t%d %d", GETARG_A(inst), GETARG_Bx(inst));
+        luaL_addstring(&b, buf);
         break;
       case iAsBx:
-        printf("\t%d %d", GETARG_A(inst), GETARG_sBx(inst));
+        snprintf(buf, sizeof(buf), "\t%d %d", GETARG_A(inst), GETARG_sBx(inst));
+        luaL_addstring(&b, buf);
         break;
       case iAx:
-        printf("\t%d", GETARG_Ax(inst));
+        snprintf(buf, sizeof(buf), "\t%d", GETARG_Ax(inst));
+        luaL_addstring(&b, buf);
         break;
       case isJ:
-        printf("\t%d", GETARG_sJ(inst));
+        snprintf(buf, sizeof(buf), "\t%d", GETARG_sJ(inst));
+        luaL_addstring(&b, buf);
         break;
     }
-    printf("\n");
+    luaL_addstring(&b, "\n");
   }
-  return 0;
+
+  luaL_pushresult(&b);
+  return 1;
 }
 
 /* NEW FUNCTIONS */

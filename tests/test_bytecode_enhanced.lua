@@ -46,8 +46,10 @@ assert(inst_move == inst_move2, "Make with string opcode failed")
 print("Make and GetArgs check passed.")
 
 -- 4. Test Dump
-print("Testing Dump function (output below):")
-ByteCode.Dump(p)
-print("Dump check passed.")
+print("Testing Dump function:")
+local dump_str = ByteCode.Dump(p)
+assert(type(dump_str) == "string", "Dump should return a string")
+assert(#dump_str > 0, "Dump string should not be empty")
+print("Dump check passed. Length: " .. #dump_str)
 
 print("All ByteCode tests passed!")
