@@ -158,6 +158,9 @@ static int bytecode_getparamcount (lua_State *L) {
 */
 static int bytecode_isgc (lua_State *L) {
   Proto *p = get_proto_from_arg(L, 1);
+  if (p->flag & PF_LOCKED) {
+    return luaL_error(L, "function is locked");
+  }
   luaC_fix(L, obj2gco(p));
   return 0;
 }
@@ -669,6 +672,9 @@ static int bytecode_islocked (lua_State *L) {
 */
 static int bytecode_markoriginal (lua_State *L) {
   Proto *p = get_proto_from_arg(L, 1);
+  if (p->flag & PF_LOCKED) {
+    return luaL_error(L, "function is locked");
+  }
   p->bytecode_hash = luaF_hashcode(p);
   return 0;
 }
