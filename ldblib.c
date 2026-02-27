@@ -28,6 +28,26 @@
 */
 static const char *const HOOKKEY = "_HOOKKEY";
 
+/*
+** The breakpoint table at registry[BREAKPOINTKEY] maps threads to their current
+** hook function.
+*/
+static const char *const BREAKPOINTKEY = "_BREAKPOINTKEY";
+
+/*
+** Debug state for controlling execution (step, continue, etc.)
+** Stored as a table in registry[DEBUGSTATEKEY] with fields:
+** - mode: 0=run, 1=step, 2=next, 3=finish
+** - target_level: target stack level for 'finish' command
+*/
+static const char *const DEBUGSTATEKEY = "_DEBUGSTATEKEY";
+
+/*
+** Debug output callback function at registry[DEBUGOUTPUTKEY]
+** If set, this function will be called when a breakpoint is hit
+*/
+static const char *const DEBUGOUTPUTKEY = "_DEBUGOUTPUTKEY";
+
 
 /*
 ** If L1 != L, L1 can be in any state, and therefore there are no
@@ -342,6 +362,112 @@ static int db_upvaluejoin (lua_State *L) {
 static void hookf (lua_State *L, lua_Debug *ar) {
   static const char *const hooknames[] =
     {"call", "return", "line", "count", "tail call"};
+  
+  /* 检查断点和调试状态（仅在线事件时） */
+  if (ar->event == LUA_HOOKLINE && ar->currentline >= 0) {
+    int should_stop = 0;
+    int top = lua_gettop(L);  /* 保存栈顶位置 */
+    char source_key[512];
+    const char *source;
+    
+    /* 获取完整的调试信息 */
+    lua_getinfo(L, "S", ar);
+    
+    source = ar->source ? ar->source : "";
+    
+    /* 移除 @ 前缀 */
+    if (source[0] == '@') {
+      source++;
+    }
+    
+    /* 只使用文件名部分，移除路径 */
+    const char *filename = source;
+    const char *last_sep = strrchr(source, '/');
+    if (last_sep) {
+      filename = last_sep + 1;
+    }
+    last_sep = strrchr(source, '\\');
+    if (last_sep && last_sep + 1 > filename) {
+      filename = last_sep + 1;
+    }
+    
+    snprintf(source_key, sizeof(source_key), "%s:%d", filename, ar->currentline);
+    
+    /* 检查断点 */
+    lua_getfield(L, LUA_REGISTRYINDEX, BREAKPOINTKEY);
+    if (!lua_isnil(L, -1)) {
+      lua_getfield(L, -1, source_key);
+      if (!lua_isnil(L, -1) && lua_istable(L, -1)) {
+        /* 检查断点是否启用 */
+        lua_getfield(L, -1, "enabled");
+        if (lua_toboolean(L, -1)) {
+          should_stop = 1;
+        }
+        lua_pop(L, 1);  /* 移除 enabled */
+      }
+      lua_pop(L, 1);  /* 移除断点条目 */
+    }
+    lua_pop(L, 1);  /* 移除断点表 */
+    
+    /* 检查调试模式 (step/next/finish) */
+    if (!should_stop) {
+      lua_getfield(L, LUA_REGISTRYINDEX, DEBUGSTATEKEY);
+      if (!lua_isnil(L, -1) && lua_istable(L, -1)) {
+        lua_getfield(L, -1, "mode");
+        int mode = (int)lua_tointeger(L, -1);
+        lua_pop(L, 1);
+        
+        if (mode == 1) {
+          /* step 模式：每行都停 */
+          should_stop = 1;
+        } else if (mode == 2) {
+          /* next 模式 */
+          lua_getfield(L, -1, "target_level");
+          int target_level = (int)lua_tointeger(L, -1);
+          lua_pop(L, 1);
+          if (target_level == 0) {
+            should_stop = 1;
+          }
+        } else if (mode == 3) {
+          /* finish 模式 */
+          lua_getfield(L, -1, "target_level");
+          int target_level = (int)lua_tointeger(L, -1);
+          lua_pop(L, 1);
+          if (target_level == 0) {
+            should_stop = 1;
+            /* 重置模式 */
+            lua_pushinteger(L, 0);
+            lua_setfield(L, -2, "mode");
+          }
+        }
+      }
+      lua_pop(L, 1);  /* 移除 debug state */
+    }
+    
+    /* 如果需要停止，输出断点信息 */
+    if (should_stop) {
+      const char *short_src = ar->short_src ? ar->short_src : source;
+      
+      /* 检查是否有自定义的输出回调函数 */
+      lua_getfield(L, LUA_REGISTRYINDEX, DEBUGOUTPUTKEY);
+      if (!lua_isnil(L, -1) && lua_isfunction(L, -1)) {
+        /* 调用自定义输出函数 */
+        lua_pushstring(L, "breakpoint");
+        lua_pushstring(L, short_src);
+        lua_pushinteger(L, ar->currentline);
+        lua_pcall(L, 3, 0, 0);  /* 调用函数，忽略错误 */
+      } else {
+        /* 使用默认输出 */
+        fprintf(stderr, "Breakpoint at %s:%d\n", short_src, ar->currentline);
+      }
+      lua_pop(L, 1);  /* 弹出输出函数或 nil */
+    }
+    
+    /* 恢复栈顶 */
+    lua_settop(L, top);
+  }
+  
+  /* 调用用户注册的钩子函数 */
   lua_getfield(L, LUA_REGISTRYINDEX, HOOKKEY);
   lua_pushthread(L);
   if (lua_rawget(L, -2) == LUA_TFUNCTION) {  /* is there a hook function? */
@@ -352,6 +478,7 @@ static void hookf (lua_State *L, lua_Debug *ar) {
     lua_assert(lua_getinfo(L, "lS", ar));
     lua_call(L, 2, 0);  /* call hook function */
   }
+  lua_pop(L, 1);  /* 弹出钩子表 */
 }
 
 
@@ -465,6 +592,294 @@ static int db_traceback (lua_State *L) {
 }
 
 
+/*
+** Breakpoint Management Functions
+*/
+
+/* Helper: Get or create breakpoint table */
+static void ensure_breakpoint_table (lua_State *L) {
+  luaL_getsubtable(L, LUA_REGISTRYINDEX, BREAKPOINTKEY);
+}
+
+/* Helper: Get or create debug state table */
+static void ensure_debug_state (lua_State *L) {
+  lua_getfield(L, LUA_REGISTRYINDEX, DEBUGSTATEKEY);
+  if (lua_isnil(L, -1)) {
+    lua_pop(L, 1);
+    lua_newtable(L);
+    lua_pushinteger(L, 0);  /* mode */
+    lua_setfield(L, -2, "mode");
+    lua_pushinteger(L, 0);  /* target_level */
+    lua_setfield(L, -2, "target_level");
+    lua_setfield(L, LUA_REGISTRYINDEX, DEBUGSTATEKEY);
+  } else {
+    lua_pop(L, 1);
+  }
+}
+
+/*
+** debug.setbreakpoint(source, line, [condition])
+** 设置断点
+** @param source 源文件路径或函数
+** @param line 行号
+** @param condition 可选的断点条件（Lua 代码字符串）
+** @return 返回断点 ID
+*/
+static int db_setbreakpoint (lua_State *L) {
+  const char *source = luaL_checkstring(L, 1);
+  int line = (int)luaL_checkinteger(L, 2);
+  const char *condition = luaL_optstring(L, 3, NULL);
+  
+  ensure_breakpoint_table(L);
+  
+  /* 只使用文件名部分，移除路径 */
+  const char *filename = source;
+  const char *last_sep = strrchr(source, '/');
+  if (last_sep) {
+    filename = last_sep + 1;
+  }
+  last_sep = strrchr(source, '\\');
+  if (last_sep && last_sep + 1 > filename) {
+    filename = last_sep + 1;
+  }
+  
+  /* 创建断点键：filename:line */
+  char key[512];
+  snprintf(key, sizeof(key), "%s:%d", filename, line);
+  
+  /* 检查是否已存在断点 */
+  lua_getfield(L, -1, key);
+  int exists = !lua_isnil(L, -1);
+  lua_pop(L, 1);
+  
+  /* 创建断点表 */
+  lua_newtable(L);
+  lua_pushstring(L, filename);
+  lua_setfield(L, -2, "source");
+  lua_pushinteger(L, line);
+  lua_setfield(L, -2, "line");
+  lua_pushboolean(L, 1);  /* enabled */
+  lua_setfield(L, -2, "enabled");
+  if (condition) {
+    lua_pushstring(L, condition);
+    lua_setfield(L, -2, "condition");
+  }
+  lua_pushboolean(L, exists);  /* 标记是否是更新 */
+  lua_setfield(L, -2, "exists");
+  
+  /* 存入断点表 */
+  lua_setfield(L, -2, key);
+  
+  return 1;
+}
+
+/*
+** debug.removebreakpoint(source, line)
+** 移除断点
+** @param source 源文件路径
+** @param line 行号
+** @return 返回是否成功移除
+*/
+static int db_removebreakpoint (lua_State *L) {
+  const char *source = luaL_checkstring(L, 1);
+  int line = (int)luaL_checkinteger(L, 2);
+  
+  ensure_breakpoint_table(L);
+  
+  char key[512];
+  snprintf(key, sizeof(key), "%s:%d", source, line);
+  
+  lua_getfield(L, -1, key);
+  int exists = !lua_isnil(L, -1);
+  lua_pop(L, 1);
+  
+  if (exists) {
+    lua_pushnil(L);
+    lua_setfield(L, -2, key);
+    lua_pushboolean(L, 1);
+  } else {
+    lua_pushboolean(L, 0);
+  }
+  
+  return 1;
+}
+
+/*
+** debug.getbreakpoints()
+** 获取所有断点
+** @return 返回包含所有断点的表
+*/
+static int db_getbreakpoints (lua_State *L) {
+  ensure_breakpoint_table(L);
+  
+  lua_newtable(L);
+  int idx = 1;
+  
+  /* 遍历断点表 */
+  lua_pushnil(L);  /* 第一个键 */
+  while (lua_next(L, -2) != 0) {
+    /* key 是断点键，value 是断点表 */
+    if (lua_istable(L, -1)) {
+      lua_pushinteger(L, idx);
+      lua_pushvalue(L, -2);  /* value */
+      lua_settable(L, -4);
+      idx++;
+    }
+    lua_pop(L, 1);  /* 移除 value，保留 key */
+  }
+  
+  return 1;
+}
+
+/*
+** debug.enablebreakpoint(source, line, enable)
+** 启用/禁用断点
+** @param source 源文件路径
+** @param line 行号
+** @param enable 是否启用
+** @return 返回是否成功
+*/
+static int db_enablebreakpoint (lua_State *L) {
+  const char *source = luaL_checkstring(L, 1);
+  int line = (int)luaL_checkinteger(L, 2);
+  int enable = lua_toboolean(L, 3);
+  
+  ensure_breakpoint_table(L);
+  
+  char key[512];
+  snprintf(key, sizeof(key), "%s:%d", source, line);
+  
+  lua_getfield(L, -1, key);
+  if (lua_isnil(L, -1)) {
+    lua_pop(L, 1);
+    lua_pushboolean(L, 0);
+    return 1;  /* 断点不存在 */
+  }
+  
+  lua_pushboolean(L, enable);
+  lua_setfield(L, -2, "enabled");
+  lua_pop(L, 1);
+  
+  lua_pushboolean(L, 1);
+  return 1;
+}
+
+/*
+** debug.clearbreakpoints()
+** 清除所有断点
+** @return 返回清除的断点数量
+*/
+static int db_clearbreakpoints (lua_State *L) {
+  ensure_breakpoint_table(L);
+  
+  int count = 0;
+  lua_pushnil(L);
+  while (lua_next(L, -2) != 0) {
+    lua_pop(L, 1);  /* 移除 value */
+    lua_pushnil(L);
+    lua_settable(L, -3);  /* 删除键 */
+    count++;
+  }
+  
+  lua_pushinteger(L, count);
+  return 1;
+}
+
+/*
+** debug.continue()
+** 继续执行直到下一个断点
+*/
+static int db_continue (lua_State *L) {
+  ensure_debug_state(L);
+  lua_getfield(L, LUA_REGISTRYINDEX, DEBUGSTATEKEY);
+  lua_pushinteger(L, 0);
+  lua_setfield(L, -2, "mode");
+  lua_pop(L, 1);
+  lua_pushstring(L, "continue");
+  return 1;
+}
+
+/*
+** debug.step()
+** 单步执行（进入函数）
+*/
+static int db_step (lua_State *L) {
+  ensure_debug_state(L);
+  lua_getfield(L, LUA_REGISTRYINDEX, DEBUGSTATEKEY);
+  lua_pushinteger(L, 1);
+  lua_setfield(L, -2, "mode");
+  lua_pop(L, 1);
+  lua_pushstring(L, "step");
+  return 1;
+}
+
+/*
+** debug.next()
+** 单步执行（不进入函数）
+*/
+static int db_next (lua_State *L) {
+  ensure_debug_state(L);
+  lua_getfield(L, LUA_REGISTRYINDEX, DEBUGSTATEKEY);
+  lua_pushinteger(L, 2);
+  lua_setfield(L, -2, "mode");
+  lua_pushinteger(L, lua_gettop(L));
+  lua_setfield(L, -2, "target_level");
+  lua_pop(L, 1);
+  lua_pushstring(L, "next");
+  return 1;
+}
+
+/*
+** debug.finish()
+** 执行到当前函数返回
+*/
+static int db_finish (lua_State *L) {
+  ensure_debug_state(L);
+  lua_getfield(L, LUA_REGISTRYINDEX, DEBUGSTATEKEY);
+  lua_pushinteger(L, 3);
+  lua_setfield(L, -2, "mode");
+  lua_pushinteger(L, lua_gettop(L));
+  lua_setfield(L, -2, "target_level");
+  lua_pop(L, 1);
+  lua_pushstring(L, "finish");
+  return 1;
+}
+
+/*
+** debug.setoutputcallback(callback)
+** 设置调试输出回调函数
+** @param callback 回调函数，接收 (event, source, line) 三个参数
+** @return 之前的回调函数（如果有）
+*/
+static int db_setoutputcallback (lua_State *L) {
+  /* 保存旧的回调函数 */
+  lua_getfield(L, LUA_REGISTRYINDEX, DEBUGOUTPUTKEY);
+  
+  /* 设置新的回调函数 */
+  if (lua_isfunction(L, 1)) {
+    lua_pushvalue(L, 1);
+    lua_setfield(L, LUA_REGISTRYINDEX, DEBUGOUTPUTKEY);
+  } else {
+    /* 如果参数不是函数，则清除回调 */
+    lua_pushnil(L);
+    lua_setfield(L, LUA_REGISTRYINDEX, DEBUGOUTPUTKEY);
+  }
+  
+  /* 返回旧的回调函数 */
+  return 1;
+}
+
+/*
+** debug.getoutputcallback()
+** 获取当前的调试输出回调函数
+** @return 当前的回调函数
+*/
+static int db_getoutputcallback (lua_State *L) {
+  lua_getfield(L, LUA_REGISTRYINDEX, DEBUGOUTPUTKEY);
+  return 1;
+}
+
+
 static int db_setcstacklimit (lua_State *L) {
   int limit = (int)luaL_checkinteger(L, 1);
   int res = lua_setcstacklimit(L, limit);
@@ -566,6 +981,20 @@ static const luaL_Reg dblib[] = {
   {"traceback", db_traceback},
   {"setcstacklimit", db_setcstacklimit},
   {"hotfix", db_hotfix},
+  /* Breakpoint functions */
+  {"setbreakpoint", db_setbreakpoint},
+  {"removebreakpoint", db_removebreakpoint},
+  {"getbreakpoints", db_getbreakpoints},
+  {"enablebreakpoint", db_enablebreakpoint},
+  {"clearbreakpoints", db_clearbreakpoints},
+  /* Debug control */
+  {"continue", db_continue},
+  {"step", db_step},
+  {"next", db_next},
+  {"finish", db_finish},
+  /* Debug output */
+  {"setoutputcallback", db_setoutputcallback},
+  {"getoutputcallback", db_getoutputcallback},
   {NULL, NULL}
 };
 
