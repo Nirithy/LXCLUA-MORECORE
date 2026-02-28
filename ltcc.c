@@ -125,6 +125,69 @@ static int my_rand(unsigned int *seed) {
     return *seed;
 }
 
+/* Helper to generate a random C-safe name based on seed */
+static void get_random_name(char *out, size_t len, unsigned int *seed) {
+    static const char chars[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    for (size_t i = 0; i < len - 1; i++) {
+        out[i] = chars[my_rand(seed) % (sizeof(chars) - 1)];
+    }
+    out[len - 1] = '\0';
+}
+
+/* Helper to format string and add to buffer */
+static void add_fmt(luaL_Buffer *B, const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    char buffer[4096];
+    vsnprintf(buffer, sizeof(buffer), fmt, args);
+    va_end(args);
+    luaL_addstring(B, buffer);
+}
+
+/* Helper to get an obfuscated integer expression as a string */
+static const char *obf_int(int val, unsigned int *seed, int obfuscate) {
+    static char bufs[16][128];
+    static int idx = 0;
+    char *buf = bufs[idx];
+    idx = (idx + 1) % 16;
+    if (!obfuscate) {
+        snprintf(buf, 128, "%d", val);
+    } else {
+        int r = my_rand(seed) % 0x7FFF;
+        int op = my_rand(seed) % 4;
+        switch (op) {
+            case 0: snprintf(buf, 128, "((%d + %d) - %d)", val, r, r); break;
+            case 1: snprintf(buf, 128, "((%d - %d) + %d)", val, r, r); break;
+            case 2: snprintf(buf, 128, "((%d ^ %d) ^ %d)", val, r, r); break;
+            case 3: snprintf(buf, 128, "((%d * 2) - %d)", val, val); break;
+        }
+    }
+    return buf;
+}
+
+/* Helper to emit harmless junk code */
+static void emit_junk_code(luaL_Buffer *B, unsigned int *seed) {
+    int op = my_rand(seed) % 5;
+    char name[10];
+    get_random_name(name, sizeof(name), seed);
+    switch (op) {
+        case 0: add_fmt(B, "    int %s = %d;\n", name, my_rand(seed) % 100); break;
+        case 1: add_fmt(B, "    if (%d == %d) { /* dummy */ }\n", my_rand(seed) % 10, my_rand(seed) % 10); break;
+        case 2: add_fmt(B, "    { int %s = %d; %s++; }\n", name, my_rand(seed) % 100, name); break;
+        case 3: add_fmt(B, "    (void)%d;\n", my_rand(seed)); break;
+        case 4: add_fmt(B, "    { int x = %d; int y = x * 2; (void)y; }\n", my_rand(seed) % 10); break;
+    }
+}
+
+static void get_label_name(char *out, size_t len, int label_idx, unsigned int seed, int obfuscate) {
+    if (obfuscate) {
+        unsigned int label_seed = seed + label_idx + 1000000;
+        get_random_name(out, len, &label_seed);
+    } else {
+        snprintf(out, len, "Label_%d", label_idx);
+    }
+}
+
 LUA_API void *lua_tcc_get_interface(lua_State *L, int seed) {
     /* Allocate array of function pointers */
     void **iface = (void **)lua_newuserdatauv(L, tcc_api_count * sizeof(void *), 0);
@@ -152,34 +215,29 @@ LUA_API void *lua_tcc_get_interface(lua_State *L, int seed) {
     return iface;
 }
 
-
-/* Helper to format string and add to buffer */
-static void add_fmt(luaL_Buffer *B, const char *fmt, ...) {
-    va_list args;
-    va_start(args, fmt);
-    char buffer[4096];
-    vsnprintf(buffer, sizeof(buffer), fmt, args);
-    va_end(args);
-    luaL_addstring(B, buffer);
-}
-
 /* Recursive function to collect all protos and assign IDs */
 typedef struct ProtoInfo {
     Proto *p;
     int id;
+    char name[16];
 } ProtoInfo;
 
-static void collect_protos(Proto *p, int *count, ProtoInfo **list, int *capacity) {
+static void collect_protos(Proto *p, int *count, ProtoInfo **list, int *capacity, unsigned int *seed, int obfuscate) {
     if (*count >= *capacity) {
         *capacity *= 2;
         *list = (ProtoInfo *)realloc(*list, *capacity * sizeof(ProtoInfo));
     }
     (*list)[*count].p = p;
     (*list)[*count].id = *count;
+    if (obfuscate) {
+        get_random_name((*list)[*count].name, sizeof((*list)[*count].name), seed);
+    } else {
+        snprintf((*list)[*count].name, sizeof((*list)[*count].name), "function_%d", *count);
+    }
     (*count)++;
 
     for (int i = 0; i < p->sizep; i++) {
-        collect_protos(p->p[i], count, list, capacity);
+        collect_protos(p->p[i], count, list, capacity, seed, obfuscate);
     }
 }
 
@@ -236,18 +294,19 @@ static void emit_quoted_string(luaL_Buffer *B, const char *s, size_t len) {
 }
 
 /* Emit code to push a constant */
-static void emit_loadk(luaL_Buffer *B, Proto *p, int k_index, int str_encrypt, int seed) {
+static void emit_loadk(luaL_Buffer *B, Proto *p, int k_index, int str_encrypt, int seed, int obfuscate) {
     TValue *k = &p->k[k_index];
+    unsigned int obf_seed = seed + k_index;
     switch (ttype(k)) {
         case LUA_TNIL:
             add_fmt(B, "    lua_pushnil(L);\n");
             break;
         case LUA_TBOOLEAN:
-            add_fmt(B, "    lua_pushboolean(L, %d);\n", !l_isfalse(k));
+            add_fmt(B, "    lua_pushboolean(L, %s);\n", obf_int(!l_isfalse(k), &obf_seed, obfuscate));
             break;
         case LUA_TNUMBER:
             if (ttisinteger(k)) {
-                add_fmt(B, "    lua_pushinteger(L, %lld);\n", (long long)ivalue(k));
+                add_fmt(B, "    lua_pushinteger(L, %s);\n", obf_int((int)ivalue(k), &obf_seed, obfuscate));
             } else {
                 add_fmt(B, "    lua_pushnumber(L, %f);\n", fltvalue(k));
             }
@@ -259,7 +318,7 @@ static void emit_loadk(luaL_Buffer *B, Proto *p, int k_index, int str_encrypt, i
             } else {
                 add_fmt(B, "    lua_pushlstring(L, ");
                 emit_quoted_string(B, getstr(ts), tsslen(ts));
-                add_fmt(B, ", %llu);\n", (unsigned long long)tsslen(ts));
+                add_fmt(B, ", %s);\n", obf_int((int)tsslen(ts), &obf_seed, obfuscate));
             }
             break;
         }
@@ -269,17 +328,21 @@ static void emit_loadk(luaL_Buffer *B, Proto *p, int k_index, int str_encrypt, i
     }
 }
 
-static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, ProtoInfo *protos, int proto_count, int use_pure_c, int str_encrypt, int seed) {
+static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, ProtoInfo *protos, int proto_count, int use_pure_c, int str_encrypt, int seed, int obfuscate) {
     OpCode op = GET_OPCODE(i);
     int a = GETARG_A(i);
 
-    add_fmt(B, "    Label_%d: /* %s */\n", pc + 1, opnames[op]);
+    char label_name[16];
+    get_label_name(label_name, sizeof(label_name), pc + 1, seed, obfuscate);
+    add_fmt(B, "    %s: /* %s */\n", label_name, opnames[op]);
+
+    unsigned int obf_seed = (unsigned int)seed + pc;
 
     switch (op) {
         case OP_MOVE: {
             int b = GETARG_B(i);
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
-            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(b + 1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             break;
         }
         case OP_LOADK: {
@@ -288,61 +351,64 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             if (ttisstring(k)) {
                  if (str_encrypt) {
                      emit_encrypted_string_push(B, getstr(tsvalue(k)), tsslen(tsvalue(k)), seed);
-                     add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+                     add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
                  } else {
-                     add_fmt(B, "    lua_tcc_loadk_str(L, %d, ", a + 1);
+                     add_fmt(B, "    lua_tcc_loadk_str(L, %s, ", obf_int(a + 1, &obf_seed, obfuscate));
                      emit_quoted_string(B, getstr(tsvalue(k)), tsslen(tsvalue(k)));
                      add_fmt(B, ");\n");
                  }
             } else if (ttisinteger(k)) {
-                 add_fmt(B, "    lua_tcc_loadk_int(L, %d, %lld);\n", a + 1, (long long)ivalue(k));
+                 add_fmt(B, "    lua_tcc_loadk_int(L, %s, %lld);\n", obf_int(a + 1, &obf_seed, obfuscate), (long long)ivalue(k));
             } else if (ttisnumber(k)) {
-                 add_fmt(B, "    lua_tcc_loadk_flt(L, %d, %f);\n", a + 1, fltvalue(k));
+                 add_fmt(B, "    lua_tcc_loadk_flt(L, %s, %f);\n", obf_int(a + 1, &obf_seed, obfuscate), fltvalue(k));
             } else {
-                 emit_loadk(B, p, bx, str_encrypt, seed);
-                 add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+                 emit_loadk(B, p, bx, str_encrypt, seed, obfuscate);
+                 add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             }
             break;
         }
         case OP_LOADI: {
             int sbx = GETARG_sBx(i);
-            add_fmt(B, "    lua_tcc_loadk_int(L, %d, %d);\n", a + 1, sbx);
+            add_fmt(B, "    lua_tcc_loadk_int(L, %s, %d);\n", obf_int(a + 1, &obf_seed, obfuscate), sbx);
             break;
         }
          case OP_LOADF: {
             int sbx = GETARG_sBx(i);
-            add_fmt(B, "    lua_tcc_loadk_flt(L, %d, (lua_Number)%d);\n", a + 1, sbx);
+            add_fmt(B, "    lua_tcc_loadk_flt(L, %s, (lua_Number)%d);\n", obf_int(a + 1, &obf_seed, obfuscate), sbx);
             break;
         }
         case OP_LOADNIL: {
             int b = GETARG_B(i);
-            add_fmt(B, "    for (int i = 0; i <= %d; i++) {\n", b);
+            add_fmt(B, "    for (int i = 0; i <= %s; i++) {\n", obf_int(b, &obf_seed, obfuscate));
             add_fmt(B, "        lua_pushnil(L);\n");
-            add_fmt(B, "        lua_replace(L, %d + i);\n", a + 1);
+            add_fmt(B, "        lua_replace(L, %s + i);\n", obf_int(a + 1, &obf_seed, obfuscate));
             add_fmt(B, "    }\n");
             break;
         }
         case OP_LOADFALSE:
             add_fmt(B, "    lua_pushboolean(L, 0);\n");
-            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             break;
-        case OP_LFALSESKIP:
-            add_fmt(B, "    if (!lua_toboolean(L, %d)) {\n", a + 1);
-            add_fmt(B, "        goto Label_%d;\n", pc + 1 + 2);
+        case OP_LFALSESKIP: {
+            char target_label[16];
+            get_label_name(target_label, sizeof(target_label), pc + 1 + 2, seed, obfuscate);
+            add_fmt(B, "    if (!lua_toboolean(L, %s)) {\n", obf_int(a + 1, &obf_seed, obfuscate));
+            add_fmt(B, "        goto %s;\n", target_label);
             add_fmt(B, "    } else {\n");
             add_fmt(B, "        lua_pushboolean(L, 0);\n");
-            add_fmt(B, "        lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "        lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             add_fmt(B, "    }\n");
             break;
+        }
         case OP_LOADTRUE:
             add_fmt(B, "    lua_pushboolean(L, 1);\n");
-            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             break;
 
         case OP_GETUPVAL: {
             int b = GETARG_B(i);
-            add_fmt(B, "    lua_pushvalue(L, lua_upvalueindex(%d));\n", b + 1);
-            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "    lua_pushvalue(L, lua_upvalueindex(%s));\n", obf_int(b + 1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             break;
         }
         case OP_LOADKX: {
@@ -352,25 +418,25 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
                 if (ttisstring(k)) {
                      if (str_encrypt) {
                          emit_encrypted_string_push(B, getstr(tsvalue(k)), tsslen(tsvalue(k)), seed);
-                         add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+                         add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
                      } else {
-                         add_fmt(B, "    lua_tcc_loadk_str(L, %d, ", a + 1);
+                         add_fmt(B, "    lua_tcc_loadk_str(L, %s, ", obf_int(a + 1, &obf_seed, obfuscate));
                          emit_quoted_string(B, getstr(tsvalue(k)), tsslen(tsvalue(k)));
                          add_fmt(B, ");\n");
                      }
                 } else if (ttisinteger(k)) {
-                     add_fmt(B, "    lua_tcc_loadk_int(L, %d, %lld);\n", a + 1, (long long)ivalue(k));
+                     add_fmt(B, "    lua_tcc_loadk_int(L, %s, %lld);\n", obf_int(a + 1, &obf_seed, obfuscate), (long long)ivalue(k));
                 } else {
-                     emit_loadk(B, p, ax, str_encrypt, seed);
-                     add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+                     emit_loadk(B, p, ax, str_encrypt, seed, obfuscate);
+                     add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
                 }
             }
             break;
         }
         case OP_SETUPVAL: {
             int b = GETARG_B(i);
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1);
-            add_fmt(B, "    lua_replace(L, lua_upvalueindex(%d));\n", b + 1);
+            add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_replace(L, lua_upvalueindex(%s));\n", obf_int(b + 1, &obf_seed, obfuscate));
             break;
         }
         case OP_GETTABUP: { // R[A] := UpValue[B][K[C]]
@@ -380,20 +446,20 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             if (ttisstring(k)) {
                  if (str_encrypt) {
                      emit_encrypted_string_push(B, getstr(tsvalue(k)), tsslen(tsvalue(k)), seed);
-                     add_fmt(B, "    lua_getfield(L, lua_upvalueindex(%d), lua_tostring(L, -1));\n", b + 1);
-                     add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
-                     add_fmt(B, "    lua_pop(L, 1);\n"); // pop decrypted key
+                     add_fmt(B, "    lua_getfield(L, lua_upvalueindex(%s), lua_tostring(L, %s));\n", obf_int(b + 1, &obf_seed, obfuscate), obf_int(-1, &obf_seed, obfuscate));
+                     add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
+                     add_fmt(B, "    lua_pop(L, %s);\n", obf_int(1, &obf_seed, obfuscate)); // pop decrypted key
                  } else {
-                     add_fmt(B, "    lua_tcc_gettabup(L, %d, ", b + 1);
+                     add_fmt(B, "    lua_tcc_gettabup(L, %s, ", obf_int(b + 1, &obf_seed, obfuscate));
                      emit_quoted_string(B, getstr(tsvalue(k)), tsslen(tsvalue(k)));
-                     add_fmt(B, ", %d);\n", a + 1);
+                     add_fmt(B, ", %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
                  }
             } else {
-                 add_fmt(B, "    lua_pushvalue(L, lua_upvalueindex(%d));\n", b + 1); // table
-                 emit_loadk(B, p, c, str_encrypt, seed); // key
-                 add_fmt(B, "    lua_gettable(L, -2);\n");
-                 add_fmt(B, "    lua_replace(L, %d);\n", a + 1); // result to R[A]
-                 add_fmt(B, "    lua_pop(L, 1);\n"); // pop table
+                 add_fmt(B, "    lua_pushvalue(L, lua_upvalueindex(%s));\n", obf_int(b + 1, &obf_seed, obfuscate)); // table
+                 emit_loadk(B, p, c, str_encrypt, seed, obfuscate); // key
+                 add_fmt(B, "    lua_gettable(L, %s);\n", obf_int(-2, &obf_seed, obfuscate));
+                 add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate)); // result to R[A]
+                 add_fmt(B, "    lua_pop(L, %s);\n", obf_int(1, &obf_seed, obfuscate)); // pop table
             }
             break;
         }
@@ -407,34 +473,34 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
                     emit_encrypted_string_push(B, getstr(tsvalue(k)), tsslen(tsvalue(k)), seed);
                     // RK(C)
                     if (TESTARG_k(i)) {
-                        emit_loadk(B, p, c, str_encrypt, seed);
+                        emit_loadk(B, p, c, str_encrypt, seed, obfuscate);
                     } else {
-                        add_fmt(B, "    lua_pushvalue(L, %d);\n", c + 1);
+                        add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(c + 1, &obf_seed, obfuscate));
                     }
-                    add_fmt(B, "    lua_setfield(L, lua_upvalueindex(%d), lua_tostring(L, -2));\n", a + 1);
-                    add_fmt(B, "    lua_pop(L, 1);\n"); // pop decrypted key
+                    add_fmt(B, "    lua_setfield(L, lua_upvalueindex(%s), lua_tostring(L, %s));\n", obf_int(a + 1, &obf_seed, obfuscate), obf_int(-2, &obf_seed, obfuscate));
+                    add_fmt(B, "    lua_pop(L, %s);\n", obf_int(1, &obf_seed, obfuscate)); // pop decrypted key
                 } else {
                     // RK(C)
                     if (TESTARG_k(i)) {
-                        emit_loadk(B, p, c, str_encrypt, seed);
+                        emit_loadk(B, p, c, str_encrypt, seed, obfuscate);
                     } else {
-                        add_fmt(B, "    lua_pushvalue(L, %d);\n", c + 1);
+                        add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(c + 1, &obf_seed, obfuscate));
                     }
-                    add_fmt(B, "    lua_tcc_settabup(L, %d, ", a + 1);
+                    add_fmt(B, "    lua_tcc_settabup(L, %s, ", obf_int(a + 1, &obf_seed, obfuscate));
                     emit_quoted_string(B, getstr(tsvalue(k)), tsslen(tsvalue(k)));
-                    add_fmt(B, ", -1);\n");
+                    add_fmt(B, ", %s);\n", obf_int(-1, &obf_seed, obfuscate));
                 }
             } else {
-                add_fmt(B, "    lua_pushvalue(L, lua_upvalueindex(%d));\n", a + 1); // table
-                emit_loadk(B, p, b, str_encrypt, seed); // key
+                add_fmt(B, "    lua_pushvalue(L, lua_upvalueindex(%s));\n", obf_int(a + 1, &obf_seed, obfuscate)); // table
+                emit_loadk(B, p, b, str_encrypt, seed, obfuscate); // key
                 // RK(C)
                 if (TESTARG_k(i)) {
-                    emit_loadk(B, p, c, str_encrypt, seed);
+                    emit_loadk(B, p, c, str_encrypt, seed, obfuscate);
                 } else {
-                    add_fmt(B, "    lua_pushvalue(L, %d);\n", c + 1);
+                    add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(c + 1, &obf_seed, obfuscate));
                 }
-                add_fmt(B, "    lua_settable(L, -3);\n");
-                add_fmt(B, "    lua_pop(L, 1);\n"); // pop table
+                add_fmt(B, "    lua_settable(L, %s);\n", obf_int(-3, &obf_seed, obfuscate));
+                add_fmt(B, "    lua_pop(L, %s);\n", obf_int(1, &obf_seed, obfuscate)); // pop table
             }
             break;
         }
@@ -463,16 +529,16 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
                 else if (op == OP_SHR) { op_str = ">>"; is_int = 1; }
 
                 if (is_pow) {
-                    add_fmt(B, "    lua_pushnumber(L, pow(lua_tonumber(L, %d), lua_tonumber(L, %d)));\n", b + 1, c + 1);
+                    add_fmt(B, "    lua_pushnumber(L, pow(lua_tonumber(L, %s), lua_tonumber(L, %s)));\n", obf_int(b + 1, &obf_seed, obfuscate), obf_int(c + 1, &obf_seed, obfuscate));
                 } else if (is_int) {
-                    add_fmt(B, "    lua_pushinteger(L, (lua_Integer)lua_tointeger(L, %d) %s (lua_Integer)lua_tointeger(L, %d));\n", b + 1, op_str, c + 1);
+                    add_fmt(B, "    lua_pushinteger(L, (lua_Integer)lua_tointeger(L, %s) %s (lua_Integer)lua_tointeger(L, %s));\n", obf_int(b + 1, &obf_seed, obfuscate), op_str, obf_int(c + 1, &obf_seed, obfuscate));
                 } else {
-                    add_fmt(B, "    lua_pushnumber(L, (lua_Number)lua_tonumber(L, %d) %s (lua_Number)lua_tonumber(L, %d));\n", b + 1, op_str, c + 1);
+                    add_fmt(B, "    lua_pushnumber(L, (lua_Number)lua_tonumber(L, %s) %s (lua_Number)lua_tonumber(L, %s));\n", obf_int(b + 1, &obf_seed, obfuscate), op_str, obf_int(c + 1, &obf_seed, obfuscate));
                 }
-                add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+                add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             } else {
-                add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
-                add_fmt(B, "    lua_pushvalue(L, %d);\n", c + 1);
+                add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(b + 1, &obf_seed, obfuscate));
+                add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(c + 1, &obf_seed, obfuscate));
                 int op_enum = -1;
                 if (op == OP_ADD) op_enum = LUA_OPADD;
                 else if (op == OP_SUB) op_enum = LUA_OPSUB;
@@ -487,8 +553,8 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
                 else if (op == OP_SHL) op_enum = LUA_OPSHL;
                 else if (op == OP_SHR) op_enum = LUA_OPSHR;
 
-                add_fmt(B, "    lua_arith(L, %d);\n", op_enum);
-                add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+                add_fmt(B, "    lua_arith(L, %s);\n", obf_int(op_enum, &obf_seed, obfuscate));
+                add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             }
             break;
         }
@@ -520,16 +586,16 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
                 else snprintf(k_str, sizeof(k_str), "0");
 
                 if (is_pow) {
-                     add_fmt(B, "    lua_pushnumber(L, pow(lua_tonumber(L, %d), %s));\n", b + 1, k_str);
+                     add_fmt(B, "    lua_pushnumber(L, pow(lua_tonumber(L, %s), %s));\n", obf_int(b + 1, &obf_seed, obfuscate), k_str);
                 } else if (is_int) {
-                     add_fmt(B, "    lua_pushinteger(L, (lua_Integer)lua_tointeger(L, %d) %s (lua_Integer)%s);\n", b + 1, op_str, k_str);
+                     add_fmt(B, "    lua_pushinteger(L, (lua_Integer)lua_tointeger(L, %s) %s (lua_Integer)%s);\n", obf_int(b + 1, &obf_seed, obfuscate), op_str, k_str);
                 } else {
-                     add_fmt(B, "    lua_pushnumber(L, (lua_Number)lua_tonumber(L, %d) %s (lua_Number)%s);\n", b + 1, op_str, k_str);
+                     add_fmt(B, "    lua_pushnumber(L, (lua_Number)lua_tonumber(L, %s) %s (lua_Number)%s);\n", obf_int(b + 1, &obf_seed, obfuscate), op_str, k_str);
                 }
-                add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+                add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             } else {
-                add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
-                emit_loadk(B, p, c, str_encrypt, seed);
+                add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(b + 1, &obf_seed, obfuscate));
+                emit_loadk(B, p, c, str_encrypt, seed, obfuscate);
                 int op_enum = -1;
                 if (op == OP_ADDK) op_enum = LUA_OPADD;
                 else if (op == OP_SUBK) op_enum = LUA_OPSUB;
@@ -542,8 +608,8 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
                 else if (op == OP_BORK) op_enum = LUA_OPBOR;
                 else if (op == OP_BXORK) op_enum = LUA_OPBXOR;
 
-                add_fmt(B, "    lua_arith(L, %d);\n", op_enum);
-                add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+                add_fmt(B, "    lua_arith(L, %s);\n", obf_int(op_enum, &obf_seed, obfuscate));
+                add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             }
             break;
         }
@@ -551,33 +617,33 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
         case OP_SELF: {
             int b = GETARG_B(i);
             int c = GETARG_C(i);
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
-            add_fmt(B, "    lua_pushvalue(L, -1);\n");
-            add_fmt(B, "    lua_replace(L, %d);\n", a + 2);
+            add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(b + 1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(-1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 2, &obf_seed, obfuscate));
             if (TESTARG_k(i)) {
                  TValue *k = &p->k[c];
                  if (ttisstring(k)) {
                       if (str_encrypt) {
                           emit_encrypted_string_push(B, getstr(tsvalue(k)), tsslen(tsvalue(k)), seed);
-                          add_fmt(B, "    lua_gettable(L, -2);\n");
+                          add_fmt(B, "    lua_gettable(L, %s);\n", obf_int(-2, &obf_seed, obfuscate));
                       } else {
-                          add_fmt(B, "    lua_getfield(L, -1, ");
+                          add_fmt(B, "    lua_getfield(L, %s, ", obf_int(-1, &obf_seed, obfuscate));
                           emit_quoted_string(B, getstr(tsvalue(k)), tsslen(tsvalue(k)));
                           add_fmt(B, ");\n");
                       }
-                      add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
-                      add_fmt(B, "    lua_pop(L, 1);\n");
+                      add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
+                      add_fmt(B, "    lua_pop(L, %s);\n", obf_int(1, &obf_seed, obfuscate));
                  } else {
-                      emit_loadk(B, p, c, str_encrypt, seed);
-                      add_fmt(B, "    lua_gettable(L, -2);\n");
-                      add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
-                      add_fmt(B, "    lua_pop(L, 1);\n");
+                      emit_loadk(B, p, c, str_encrypt, seed, obfuscate);
+                      add_fmt(B, "    lua_gettable(L, %s);\n", obf_int(-2, &obf_seed, obfuscate));
+                      add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
+                      add_fmt(B, "    lua_pop(L, %s);\n", obf_int(1, &obf_seed, obfuscate));
                  }
             } else {
-                add_fmt(B, "    lua_pushvalue(L, %d);\n", c + 1);
-                add_fmt(B, "    lua_gettable(L, -2);\n");
-                add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
-                add_fmt(B, "    lua_pop(L, 1);\n");
+                add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(c + 1, &obf_seed, obfuscate));
+                add_fmt(B, "    lua_gettable(L, %s);\n", obf_int(-2, &obf_seed, obfuscate));
+                add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
+                add_fmt(B, "    lua_pop(L, %s);\n", obf_int(1, &obf_seed, obfuscate));
             }
             break;
         }
@@ -586,13 +652,13 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
              int b = GETARG_B(i);
              int sc = GETARG_sC(i);
              if (use_pure_c) {
-                 add_fmt(B, "    lua_pushinteger(L, (lua_Integer)lua_tointeger(L, %d) + %d);\n", b + 1, sc);
-                 add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+                 add_fmt(B, "    lua_pushinteger(L, (lua_Integer)lua_tointeger(L, %s) + %d);\n", obf_int(b + 1, &obf_seed, obfuscate), sc);
+                 add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
              } else {
-                 add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
-                 add_fmt(B, "    lua_pushinteger(L, %d);\n", sc);
-                 add_fmt(B, "    lua_arith(L, LUA_OPADD);\n");
-                 add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+                 add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(b + 1, &obf_seed, obfuscate));
+                 add_fmt(B, "    lua_pushinteger(L, %s);\n", obf_int(sc, &obf_seed, obfuscate));
+                 add_fmt(B, "    lua_arith(L, %s);\n", obf_int(LUA_OPADD, &obf_seed, obfuscate));
+                 add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
              }
              break;
         }
@@ -601,13 +667,13 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
              int b = GETARG_B(i);
              int sc = GETARG_sC(i);
              if (use_pure_c) {
-                 add_fmt(B, "    lua_pushinteger(L, (lua_Integer)%d << (lua_Integer)lua_tointeger(L, %d));\n", sc, b + 1);
-                 add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+                 add_fmt(B, "    lua_pushinteger(L, (lua_Integer)%s << (lua_Integer)lua_tointeger(L, %s));\n", obf_int(sc, &obf_seed, obfuscate), obf_int(b + 1, &obf_seed, obfuscate));
+                 add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
              } else {
-                 add_fmt(B, "    lua_pushinteger(L, %d);\n", sc);
-                 add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
-                 add_fmt(B, "    lua_arith(L, LUA_OPSHL);\n");
-                 add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+                 add_fmt(B, "    lua_pushinteger(L, %s);\n", obf_int(sc, &obf_seed, obfuscate));
+                 add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(b + 1, &obf_seed, obfuscate));
+                 add_fmt(B, "    lua_arith(L, %s);\n", obf_int(LUA_OPSHL, &obf_seed, obfuscate));
+                 add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
              }
              break;
         }
@@ -616,13 +682,13 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
              int b = GETARG_B(i);
              int sc = GETARG_sC(i);
              if (use_pure_c) {
-                 add_fmt(B, "    lua_pushinteger(L, (lua_Integer)lua_tointeger(L, %d) >> %d);\n", b + 1, sc);
-                 add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+                 add_fmt(B, "    lua_pushinteger(L, (lua_Integer)lua_tointeger(L, %s) >> %s);\n", obf_int(b + 1, &obf_seed, obfuscate), obf_int(sc, &obf_seed, obfuscate));
+                 add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
              } else {
-                 add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
-                 add_fmt(B, "    lua_pushinteger(L, %d);\n", sc);
-                 add_fmt(B, "    lua_arith(L, LUA_OPSHR);\n");
-                 add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+                 add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(b + 1, &obf_seed, obfuscate));
+                 add_fmt(B, "    lua_pushinteger(L, %s);\n", obf_int(sc, &obf_seed, obfuscate));
+                 add_fmt(B, "    lua_arith(L, %s);\n", obf_int(LUA_OPSHR, &obf_seed, obfuscate));
+                 add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
              }
              break;
         }
@@ -630,12 +696,12 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
         case OP_UNM: {
             int b = GETARG_B(i);
             if (use_pure_c) {
-                add_fmt(B, "    lua_pushnumber(L, -(lua_Number)lua_tonumber(L, %d));\n", b + 1);
-                add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+                add_fmt(B, "    lua_pushnumber(L, -(lua_Number)lua_tonumber(L, %s));\n", obf_int(b + 1, &obf_seed, obfuscate));
+                add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             } else {
-                add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
+                add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(b + 1, &obf_seed, obfuscate));
                 add_fmt(B, "    lua_arith(L, LUA_OPUNM);\n");
-                add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+                add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             }
             break;
         }
@@ -643,12 +709,12 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
         case OP_BNOT: {
             int b = GETARG_B(i);
             if (use_pure_c) {
-                add_fmt(B, "    lua_pushinteger(L, ~(lua_Integer)lua_tointeger(L, %d));\n", b + 1);
-                add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+                add_fmt(B, "    lua_pushinteger(L, ~(lua_Integer)lua_tointeger(L, %s));\n", obf_int(b + 1, &obf_seed, obfuscate));
+                add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             } else {
-                add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
+                add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(b + 1, &obf_seed, obfuscate));
                 add_fmt(B, "    lua_arith(L, LUA_OPBNOT);\n");
-                add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+                add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             }
             break;
         }
@@ -662,18 +728,18 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             add_fmt(B, "    {\n");
             if (b != 0) {
                 if (c == 0) add_fmt(B, "    int s = lua_gettop(L);\n");
-                add_fmt(B, "    lua_tcc_push_args(L, %d, %d); /* func + args */\n", a + 1, nargs + 1);
-                add_fmt(B, "    lua_call(L, %d, %d);\n", nargs, nresults);
+                add_fmt(B, "    lua_tcc_push_args(L, %s, %s); /* func + args */\n", obf_int(a + 1, &obf_seed, obfuscate), obf_int(nargs + 1, &obf_seed, obfuscate));
+                add_fmt(B, "    lua_call(L, %s, %s);\n", obf_int(nargs, &obf_seed, obfuscate), obf_int(nresults, &obf_seed, obfuscate));
                 if (c != 0) {
-                     add_fmt(B, "    lua_tcc_store_results(L, %d, %d);\n", a + 1, nresults);
+                     add_fmt(B, "    lua_tcc_store_results(L, %s, %s);\n", obf_int(a + 1, &obf_seed, obfuscate), obf_int(nresults, &obf_seed, obfuscate));
                 } else {
                      add_fmt(B, "    {\n");
                      add_fmt(B, "        int nres = lua_gettop(L) - s;\n");
                      add_fmt(B, "        for (int k = 0; k < nres; k++) {\n");
                      add_fmt(B, "            lua_pushvalue(L, s + 1 + k);\n");
-                     add_fmt(B, "            lua_replace(L, %d + k);\n", a + 1);
+                     add_fmt(B, "            lua_replace(L, %s + k);\n", obf_int(a + 1, &obf_seed, obfuscate));
                      add_fmt(B, "        }\n");
-                     add_fmt(B, "        lua_settop(L, %d + nres);\n", a);
+                     add_fmt(B, "        lua_settop(L, %s + nres);\n", obf_int(a, &obf_seed, obfuscate));
                      add_fmt(B, "    }\n");
                 }
             } else {
@@ -681,25 +747,25 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
                  if (p->is_vararg) {
                      add_fmt(B, "    if (vtab_idx == lua_gettop(L)) {\n");
                      add_fmt(B, "        int r = luaL_ref(L, LUA_REGISTRYINDEX);\n");
-                     add_fmt(B, "        lua_call(L, lua_gettop(L) - %d, %d);\n", a + 1, nresults);
+                     add_fmt(B, "        lua_call(L, lua_gettop(L) - %s, %d);\n", obf_int(a + 1, &obf_seed, obfuscate), nresults);
                      add_fmt(B, "        lua_rawgeti(L, LUA_REGISTRYINDEX, r);\n");
                      add_fmt(B, "        luaL_unref(L, LUA_REGISTRYINDEX, r);\n");
                      add_fmt(B, "        vtab_idx = lua_gettop(L);\n");
                      add_fmt(B, "    } else {\n");
-                     add_fmt(B, "        lua_call(L, lua_gettop(L) - %d, %d);\n", a + 1, nresults);
+                     add_fmt(B, "        lua_call(L, lua_gettop(L) - %s, %d);\n", obf_int(a + 1, &obf_seed, obfuscate), nresults);
                      add_fmt(B, "    }\n");
                  } else {
-                     add_fmt(B, "    lua_call(L, lua_gettop(L) - %d, %d);\n", a + 1, nresults);
+                     add_fmt(B, "    lua_call(L, lua_gettop(L) - %s, %d);\n", obf_int(a + 1, &obf_seed, obfuscate), nresults);
                  }
                  /* If fixed results (C!=0), restore stack frame size if needed */
                  if (c != 0) {
                       if (p->is_vararg) {
                           add_fmt(B, "    lua_pushvalue(L, vtab_idx);\n");
-                          add_fmt(B, "    lua_replace(L, %d);\n", p->maxstacksize + 1);
-                          add_fmt(B, "    vtab_idx = %d;\n", p->maxstacksize + 1);
-                          add_fmt(B, "    lua_settop(L, %d);\n", p->maxstacksize + 1);
+                          add_fmt(B, "    lua_replace(L, %s);\n", obf_int(p->maxstacksize + 1, &obf_seed, obfuscate));
+                          add_fmt(B, "    vtab_idx = %s;\n", obf_int(p->maxstacksize + 1, &obf_seed, obfuscate));
+                          add_fmt(B, "    lua_settop(L, %s);\n", obf_int(p->maxstacksize + 1, &obf_seed, obfuscate));
                       } else {
-                          add_fmt(B, "    lua_settop(L, %d);\n", p->maxstacksize);
+                          add_fmt(B, "    lua_settop(L, %s);\n", obf_int(p->maxstacksize, &obf_seed, obfuscate));
                       }
                  }
             }
@@ -713,16 +779,16 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             int nargs = (b == 0) ? -1 : (b - 1);
 
             if (b != 0) {
-                add_fmt(B, "    lua_tcc_push_args(L, %d, %d); /* func + args */\n", a + 1, nargs + 1);
-                add_fmt(B, "    lua_call(L, %d, LUA_MULTRET);\n", nargs);
-                add_fmt(B, "    return lua_gettop(L) - %d;\n", p->maxstacksize + (p->is_vararg ? 1 : 0));
+                add_fmt(B, "    lua_tcc_push_args(L, %s, %s); /* func + args */\n", obf_int(a + 1, &obf_seed, obfuscate), obf_int(nargs + 1, &obf_seed, obfuscate));
+                add_fmt(B, "    lua_call(L, %s, %s);\n", obf_int(nargs, &obf_seed, obfuscate), obf_int(LUA_MULTRET, &obf_seed, obfuscate));
+                add_fmt(B, "    return lua_gettop(L) - %s;\n", obf_int(p->maxstacksize + (p->is_vararg ? 1 : 0), &obf_seed, obfuscate));
             } else {
                  /* Variable number of arguments from stack (B=0) */
                  if (p->is_vararg) {
-                     add_fmt(B, "    if (vtab_idx == lua_gettop(L)) lua_settop(L, lua_gettop(L) - 1);\n");
+                     add_fmt(B, "    if (vtab_idx == lua_gettop(L)) lua_settop(L, lua_gettop(L) - %s);\n", obf_int(1, &obf_seed, obfuscate));
                  }
-                 add_fmt(B, "    lua_call(L, lua_gettop(L) - %d, LUA_MULTRET);\n", a + 1);
-                 add_fmt(B, "    return lua_gettop(L) - %d;\n", a);
+                 add_fmt(B, "    lua_call(L, lua_gettop(L) - %s, LUA_MULTRET);\n", obf_int(a + 1, &obf_seed, obfuscate));
+                 add_fmt(B, "    return lua_gettop(L) - %s;\n", obf_int(a, &obf_seed, obfuscate));
             }
             break;
         }
@@ -732,26 +798,26 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             int nret = (b == 0) ? -1 : (b - 1);
 
             if (nret > 0) {
-                add_fmt(B, "    lua_tcc_push_args(L, %d, %d);\n", a + 1, nret);
-                add_fmt(B, "    return %d;\n", nret);
+                add_fmt(B, "    lua_tcc_push_args(L, %s, %s);\n", obf_int(a + 1, &obf_seed, obfuscate), obf_int(nret, &obf_seed, obfuscate));
+                add_fmt(B, "    return %s;\n", obf_int(nret, &obf_seed, obfuscate));
             } else if (nret == 0) {
-                add_fmt(B, "    return 0;\n");
+                add_fmt(B, "    return %s;\n", obf_int(0, &obf_seed, obfuscate));
             } else {
                  if (p->is_vararg) {
-                     add_fmt(B, "    if (vtab_idx == lua_gettop(L)) lua_settop(L, lua_gettop(L) - 1);\n");
+                     add_fmt(B, "    if (vtab_idx == lua_gettop(L)) lua_settop(L, lua_gettop(L) - %s);\n", obf_int(1, &obf_seed, obfuscate));
                  }
-                 add_fmt(B, "    return lua_gettop(L) - %d;\n", a);
+                 add_fmt(B, "    return lua_gettop(L) - %s;\n", obf_int(a, &obf_seed, obfuscate));
             }
             break;
         }
 
         case OP_RETURN0:
-            add_fmt(B, "    return 0;\n");
+            add_fmt(B, "    return %s;\n", obf_int(0, &obf_seed, obfuscate));
             break;
 
         case OP_RETURN1:
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1);
-            add_fmt(B, "    return 1;\n");
+            add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
+            add_fmt(B, "    return %s;\n", obf_int(1, &obf_seed, obfuscate));
             break;
 
         case OP_CLOSURE: { // R[A] := closure(KPROTO[Bx])
@@ -762,14 +828,14 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             for (int k = 0; k < child->sizeupvalues; k++) {
                  Upvaldesc *uv = &child->upvalues[k];
                  if (uv->instack) {
-                     add_fmt(B, "    lua_pushvalue(L, %d); /* upval %d (local) */\n", uv->idx + 1, k);
+                     add_fmt(B, "    lua_pushvalue(L, %s); /* upval %d (local) */\n", obf_int(uv->idx + 1, &obf_seed, obfuscate), k);
                  } else {
-                     add_fmt(B, "    lua_pushvalue(L, lua_upvalueindex(%d)); /* upval %d (upval) */\n", uv->idx + 1, k);
+                     add_fmt(B, "    lua_pushvalue(L, lua_upvalueindex(%s)); /* upval %d (upval) */\n", obf_int(uv->idx + 1, &obf_seed, obfuscate), k);
                  }
             }
 
-            add_fmt(B, "    lua_pushcclosure(L, function_%d, %d);\n", child_id, child->sizeupvalues);
-            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "    lua_pushcclosure(L, %s, %s);\n", protos[child_id].name, obf_int(child->sizeupvalues, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             break;
         }
 
@@ -781,32 +847,36 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             for (int k = 0; k < child->sizeupvalues; k++) {
                  Upvaldesc *uv = &child->upvalues[k];
                  if (uv->instack) {
-                     add_fmt(B, "    lua_pushvalue(L, %d); /* upval %d (local) */\n", uv->idx + 1, k);
+                     add_fmt(B, "    lua_pushvalue(L, %s); /* upval %d (local) */\n", obf_int(uv->idx + 1, &obf_seed, obfuscate), k);
                  } else {
-                     add_fmt(B, "    lua_pushvalue(L, lua_upvalueindex(%d)); /* upval %d (upval) */\n", uv->idx + 1, k);
+                     add_fmt(B, "    lua_pushvalue(L, lua_upvalueindex(%s)); /* upval %d (upval) */\n", obf_int(uv->idx + 1, &obf_seed, obfuscate), k);
                  }
             }
 
-            add_fmt(B, "    lua_pushcclosure(L, function_%d, %d); /* concept */\n", child_id, child->sizeupvalues);
-            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "    lua_pushcclosure(L, %s, %s); /* concept */\n", protos[child_id].name, obf_int(child->sizeupvalues, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             break;
         }
 
         case OP_JMP: {
             int sj = GETARG_sJ(i);
-            add_fmt(B, "    goto Label_%d;\n", pc + 1 + sj + 1);
+            char target_label[16];
+            get_label_name(target_label, sizeof(target_label), pc + 1 + sj + 1, seed, obfuscate);
+            add_fmt(B, "    goto %s;\n", target_label);
             break;
         }
 
         case OP_EQ: { // if ((R[A] == R[B]) ~= k) then pc++
             int b = GETARG_B(i);
             int k = GETARG_k(i);
+            char target_label[16];
+            get_label_name(target_label, sizeof(target_label), pc + 1 + 2, seed, obfuscate);
             add_fmt(B, "    {\n");
-            add_fmt(B, "        lua_pushvalue(L, %d);\n", a + 1);
-            add_fmt(B, "        lua_pushvalue(L, %d);\n", b + 1);
-            add_fmt(B, "        int res = lua_compare(L, -2, -1, LUA_OPEQ);\n");
-            add_fmt(B, "        lua_pop(L, 2);\n");
-            add_fmt(B, "        if (res != %d) goto Label_%d;\n", k, pc + 1 + 2);
+            add_fmt(B, "        lua_pushvalue(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
+            add_fmt(B, "        lua_pushvalue(L, %s);\n", obf_int(b + 1, &obf_seed, obfuscate));
+            add_fmt(B, "        int res = lua_compare(L, %s, %s, %s);\n", obf_int(-2, &obf_seed, obfuscate), obf_int(-1, &obf_seed, obfuscate), obf_int(LUA_OPEQ, &obf_seed, obfuscate));
+            add_fmt(B, "        lua_pop(L, %s);\n", obf_int(2, &obf_seed, obfuscate));
+            add_fmt(B, "        if (res != %s) goto %s;\n", obf_int(k, &obf_seed, obfuscate), target_label);
             add_fmt(B, "    }\n");
             break;
         }
@@ -814,12 +884,14 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
         case OP_LT: {
             int b = GETARG_B(i);
             int k = GETARG_k(i);
+            char target_label[16];
+            get_label_name(target_label, sizeof(target_label), pc + 1 + 2, seed, obfuscate);
             add_fmt(B, "    {\n");
-            add_fmt(B, "        lua_pushvalue(L, %d);\n", a + 1);
-            add_fmt(B, "        lua_pushvalue(L, %d);\n", b + 1);
-            add_fmt(B, "        int res = lua_compare(L, -2, -1, LUA_OPLT);\n");
-            add_fmt(B, "        lua_pop(L, 2);\n");
-            add_fmt(B, "        if (res != %d) goto Label_%d;\n", k, pc + 1 + 2);
+            add_fmt(B, "        lua_pushvalue(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
+            add_fmt(B, "        lua_pushvalue(L, %s);\n", obf_int(b + 1, &obf_seed, obfuscate));
+            add_fmt(B, "        int res = lua_compare(L, %s, %s, %s);\n", obf_int(-2, &obf_seed, obfuscate), obf_int(-1, &obf_seed, obfuscate), obf_int(LUA_OPLT, &obf_seed, obfuscate));
+            add_fmt(B, "        lua_pop(L, %s);\n", obf_int(2, &obf_seed, obfuscate));
+            add_fmt(B, "        if (res != %s) goto %s;\n", obf_int(k, &obf_seed, obfuscate), target_label);
             add_fmt(B, "    }\n");
             break;
         }
@@ -827,12 +899,14 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
         case OP_LE: {
             int b = GETARG_B(i);
             int k = GETARG_k(i);
+            char target_label[16];
+            get_label_name(target_label, sizeof(target_label), pc + 1 + 2, seed, obfuscate);
             add_fmt(B, "    {\n");
-            add_fmt(B, "        lua_pushvalue(L, %d);\n", a + 1);
-            add_fmt(B, "        lua_pushvalue(L, %d);\n", b + 1);
-            add_fmt(B, "        int res = lua_compare(L, -2, -1, LUA_OPLE);\n");
-            add_fmt(B, "        lua_pop(L, 2);\n");
-            add_fmt(B, "        if (res != %d) goto Label_%d;\n", k, pc + 1 + 2);
+            add_fmt(B, "        lua_pushvalue(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
+            add_fmt(B, "        lua_pushvalue(L, %s);\n", obf_int(b + 1, &obf_seed, obfuscate));
+            add_fmt(B, "        int res = lua_compare(L, %s, %s, %s);\n", obf_int(-2, &obf_seed, obfuscate), obf_int(-1, &obf_seed, obfuscate), obf_int(LUA_OPLE, &obf_seed, obfuscate));
+            add_fmt(B, "        lua_pop(L, %s);\n", obf_int(2, &obf_seed, obfuscate));
+            add_fmt(B, "        if (res != %s) goto %s;\n", obf_int(k, &obf_seed, obfuscate), target_label);
             add_fmt(B, "    }\n");
             break;
         }
@@ -840,12 +914,14 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
         case OP_EQK: {
             int b = GETARG_B(i);
             int k = GETARG_k(i);
+            char target_label[16];
+            get_label_name(target_label, sizeof(target_label), pc + 1 + 2, seed, obfuscate);
             add_fmt(B, "    {\n");
-            add_fmt(B, "        lua_pushvalue(L, %d);\n", a + 1);
-            emit_loadk(B, p, b, str_encrypt, seed);
-            add_fmt(B, "        int res = lua_compare(L, -2, -1, LUA_OPEQ);\n");
-            add_fmt(B, "        lua_pop(L, 2);\n");
-            add_fmt(B, "        if (res != %d) goto Label_%d;\n", k, pc + 1 + 2);
+            add_fmt(B, "        lua_pushvalue(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
+            emit_loadk(B, p, b, str_encrypt, seed, obfuscate);
+            add_fmt(B, "        int res = lua_compare(L, %s, %s, %s);\n", obf_int(-2, &obf_seed, obfuscate), obf_int(-1, &obf_seed, obfuscate), obf_int(LUA_OPEQ, &obf_seed, obfuscate));
+            add_fmt(B, "        lua_pop(L, %s);\n", obf_int(2, &obf_seed, obfuscate));
+            add_fmt(B, "        if (res != %s) goto %s;\n", obf_int(k, &obf_seed, obfuscate), target_label);
             add_fmt(B, "    }\n");
             break;
         }
@@ -853,12 +929,14 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
         case OP_EQI: {
             int sb = GETARG_sB(i);
             int k = GETARG_k(i);
+            char target_label[16];
+            get_label_name(target_label, sizeof(target_label), pc + 1 + 2, seed, obfuscate);
             add_fmt(B, "    {\n");
-            add_fmt(B, "        lua_pushvalue(L, %d);\n", a + 1);
-            add_fmt(B, "        lua_pushinteger(L, %d);\n", sb);
-            add_fmt(B, "        int res = lua_compare(L, -2, -1, LUA_OPEQ);\n");
-            add_fmt(B, "        lua_pop(L, 2);\n");
-            add_fmt(B, "        if (res != %d) goto Label_%d;\n", k, pc + 1 + 2);
+            add_fmt(B, "        lua_pushvalue(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
+            add_fmt(B, "        lua_pushinteger(L, %s);\n", obf_int(sb, &obf_seed, obfuscate));
+            add_fmt(B, "        int res = lua_compare(L, %s, %s, %s);\n", obf_int(-2, &obf_seed, obfuscate), obf_int(-1, &obf_seed, obfuscate), obf_int(LUA_OPEQ, &obf_seed, obfuscate));
+            add_fmt(B, "        lua_pop(L, %s);\n", obf_int(2, &obf_seed, obfuscate));
+            add_fmt(B, "        if (res != %s) goto %s;\n", obf_int(k, &obf_seed, obfuscate), target_label);
             add_fmt(B, "    }\n");
             break;
         }
@@ -866,12 +944,14 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
         case OP_LTI: {
             int sb = GETARG_sB(i);
             int k = GETARG_k(i);
+            char target_label[16];
+            get_label_name(target_label, sizeof(target_label), pc + 1 + 2, seed, obfuscate);
             add_fmt(B, "    {\n");
-            add_fmt(B, "        lua_pushvalue(L, %d);\n", a + 1);
-            add_fmt(B, "        lua_pushinteger(L, %d);\n", sb);
-            add_fmt(B, "        int res = lua_compare(L, -2, -1, LUA_OPLT);\n");
-            add_fmt(B, "        lua_pop(L, 2);\n");
-            add_fmt(B, "        if (res != %d) goto Label_%d;\n", k, pc + 1 + 2);
+            add_fmt(B, "        lua_pushvalue(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
+            add_fmt(B, "        lua_pushinteger(L, %s);\n", obf_int(sb, &obf_seed, obfuscate));
+            add_fmt(B, "        int res = lua_compare(L, %s, %s, %s);\n", obf_int(-2, &obf_seed, obfuscate), obf_int(-1, &obf_seed, obfuscate), obf_int(LUA_OPLT, &obf_seed, obfuscate));
+            add_fmt(B, "        lua_pop(L, %s);\n", obf_int(2, &obf_seed, obfuscate));
+            add_fmt(B, "        if (res != %s) goto %s;\n", obf_int(k, &obf_seed, obfuscate), target_label);
             add_fmt(B, "    }\n");
             break;
         }
@@ -879,12 +959,14 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
         case OP_LEI: {
             int sb = GETARG_sB(i);
             int k = GETARG_k(i);
+            char target_label[16];
+            get_label_name(target_label, sizeof(target_label), pc + 1 + 2, seed, obfuscate);
             add_fmt(B, "    {\n");
-            add_fmt(B, "        lua_pushvalue(L, %d);\n", a + 1);
-            add_fmt(B, "        lua_pushinteger(L, %d);\n", sb);
-            add_fmt(B, "        int res = lua_compare(L, -2, -1, LUA_OPLE);\n");
-            add_fmt(B, "        lua_pop(L, 2);\n");
-            add_fmt(B, "        if (res != %d) goto Label_%d;\n", k, pc + 1 + 2);
+            add_fmt(B, "        lua_pushvalue(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
+            add_fmt(B, "        lua_pushinteger(L, %s);\n", obf_int(sb, &obf_seed, obfuscate));
+            add_fmt(B, "        int res = lua_compare(L, %s, %s, %s);\n", obf_int(-2, &obf_seed, obfuscate), obf_int(-1, &obf_seed, obfuscate), obf_int(LUA_OPLE, &obf_seed, obfuscate));
+            add_fmt(B, "        lua_pop(L, %s);\n", obf_int(2, &obf_seed, obfuscate));
+            add_fmt(B, "        if (res != %s) goto %s;\n", obf_int(k, &obf_seed, obfuscate), target_label);
             add_fmt(B, "    }\n");
             break;
         }
@@ -892,12 +974,14 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
         case OP_GTI: {
             int sb = GETARG_sB(i);
             int k = GETARG_k(i);
+            char target_label[16];
+            get_label_name(target_label, sizeof(target_label), pc + 1 + 2, seed, obfuscate);
             add_fmt(B, "    {\n");
-            add_fmt(B, "        lua_pushinteger(L, %d);\n", sb);
-            add_fmt(B, "        lua_pushvalue(L, %d);\n", a + 1);
-            add_fmt(B, "        int res = lua_compare(L, -2, -1, LUA_OPLT);\n");
-            add_fmt(B, "        lua_pop(L, 2);\n");
-            add_fmt(B, "        if (res != %d) goto Label_%d;\n", k, pc + 1 + 2);
+            add_fmt(B, "        lua_pushinteger(L, %s);\n", obf_int(sb, &obf_seed, obfuscate));
+            add_fmt(B, "        lua_pushvalue(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
+            add_fmt(B, "        int res = lua_compare(L, %s, %s, %s);\n", obf_int(-2, &obf_seed, obfuscate), obf_int(-1, &obf_seed, obfuscate), obf_int(LUA_OPLT, &obf_seed, obfuscate));
+            add_fmt(B, "        lua_pop(L, %s);\n", obf_int(2, &obf_seed, obfuscate));
+            add_fmt(B, "        if (res != %s) goto %s;\n", obf_int(k, &obf_seed, obfuscate), target_label);
             add_fmt(B, "    }\n");
             break;
         }
@@ -905,12 +989,14 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
         case OP_GEI: {
             int sb = GETARG_sB(i);
             int k = GETARG_k(i);
+            char target_label[16];
+            get_label_name(target_label, sizeof(target_label), pc + 1 + 2, seed, obfuscate);
             add_fmt(B, "    {\n");
-            add_fmt(B, "        lua_pushinteger(L, %d);\n", sb);
-            add_fmt(B, "        lua_pushvalue(L, %d);\n", a + 1);
-            add_fmt(B, "        int res = lua_compare(L, -2, -1, LUA_OPLE);\n");
-            add_fmt(B, "        lua_pop(L, 2);\n");
-            add_fmt(B, "        if (res != %d) goto Label_%d;\n", k, pc + 1 + 2);
+            add_fmt(B, "        lua_pushinteger(L, %s);\n", obf_int(sb, &obf_seed, obfuscate));
+            add_fmt(B, "        lua_pushvalue(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
+            add_fmt(B, "        int res = lua_compare(L, %s, %s, %s);\n", obf_int(-2, &obf_seed, obfuscate), obf_int(-1, &obf_seed, obfuscate), obf_int(LUA_OPLE, &obf_seed, obfuscate));
+            add_fmt(B, "        lua_pop(L, %s);\n", obf_int(2, &obf_seed, obfuscate));
+            add_fmt(B, "        if (res != %s) goto %s;\n", obf_int(k, &obf_seed, obfuscate), target_label);
             add_fmt(B, "    }\n");
             break;
         }
@@ -920,26 +1006,26 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             int nneeded = GETARG_C(i) - 1;
 
             if (nneeded >= 0) {
-                add_fmt(B, "    if (%d + %d >= vtab_idx) {\n", a + 1, nneeded);
-                add_fmt(B, "        lua_settop(L, %d + %d);\n", a + 1, nneeded);
+                add_fmt(B, "    if (%s + %s >= vtab_idx) {\n", obf_int(a + 1, &obf_seed, obfuscate), obf_int(nneeded, &obf_seed, obfuscate));
+                add_fmt(B, "        lua_settop(L, %s + %s);\n", obf_int(a + 1, &obf_seed, obfuscate), obf_int(nneeded, &obf_seed, obfuscate));
                 add_fmt(B, "        lua_pushvalue(L, vtab_idx);\n");
-                add_fmt(B, "        lua_replace(L, %d + %d);\n", a + 1, nneeded);
-                add_fmt(B, "        vtab_idx = %d + %d;\n", a + 1, nneeded);
+                add_fmt(B, "        lua_replace(L, %s + %s);\n", obf_int(a + 1, &obf_seed, obfuscate), obf_int(nneeded, &obf_seed, obfuscate));
+                add_fmt(B, "        vtab_idx = %s + %s;\n", obf_int(a + 1, &obf_seed, obfuscate), obf_int(nneeded, &obf_seed, obfuscate));
                 add_fmt(B, "    }\n");
-                add_fmt(B, "    for (int i=0; i<%d; i++) {\n", nneeded);
-                add_fmt(B, "        lua_rawgeti(L, vtab_idx, i+1);\n");
-                add_fmt(B, "        lua_replace(L, %d + i);\n", a + 1);
+                add_fmt(B, "    for (int i=0; i<%s; i++) {\n", obf_int(nneeded, &obf_seed, obfuscate));
+                add_fmt(B, "        lua_rawgeti(L, vtab_idx, i+%s);\n", obf_int(1, &obf_seed, obfuscate));
+                add_fmt(B, "        lua_replace(L, %s + i);\n", obf_int(a + 1, &obf_seed, obfuscate));
                 add_fmt(B, "    }\n");
             } else {
                 add_fmt(B, "    {\n");
                 add_fmt(B, "        int nvar = (int)lua_rawlen(L, vtab_idx);\n");
-                add_fmt(B, "        lua_settop(L, %d + nvar);\n", a + 1);
+                add_fmt(B, "        lua_settop(L, %s + nvar);\n", obf_int(a + 1, &obf_seed, obfuscate));
                 add_fmt(B, "        lua_pushvalue(L, vtab_idx);\n");
-                add_fmt(B, "        lua_replace(L, %d + nvar);\n", a + 1);
-                add_fmt(B, "        vtab_idx = %d + nvar;\n", a + 1);
+                add_fmt(B, "        lua_replace(L, %s + nvar);\n", obf_int(a + 1, &obf_seed, obfuscate));
+                add_fmt(B, "        vtab_idx = %s + nvar;\n", obf_int(a + 1, &obf_seed, obfuscate));
                 add_fmt(B, "        for (int i=1; i<=nvar; i++) {\n");
                 add_fmt(B, "            lua_rawgeti(L, vtab_idx, i);\n");
-                add_fmt(B, "            lua_replace(L, %d + i - 1);\n", a + 1);
+                add_fmt(B, "            lua_replace(L, %s + i - %s);\n", obf_int(a + 1, &obf_seed, obfuscate), obf_int(1, &obf_seed, obfuscate));
                 add_fmt(B, "        }\n");
                 add_fmt(B, "    }\n");
             }
@@ -948,8 +1034,8 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
 
         case OP_GETVARG: {
             int c = GETARG_C(i);
-            add_fmt(B, "    lua_rawgeti(L, vtab_idx, lua_tointeger(L, %d));\n", c + 1);
-            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "    lua_rawgeti(L, vtab_idx, lua_tointeger(L, %s));\n", obf_int(c + 1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             break;
         }
 
@@ -973,98 +1059,98 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
                 }
             }
             int nhash = (b > 0) ? (1 << (b - 1)) : 0;
-            add_fmt(B, "    lua_createtable(L, %d, %d);\n", c, nhash);
-            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "    lua_createtable(L, %s, %s);\n", obf_int(c, &obf_seed, obfuscate), obf_int(nhash, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             break;
         }
 
         case OP_GETTABLE: {
             int b = GETARG_B(i);
             int c = GETARG_C(i);
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", c + 1);
-            add_fmt(B, "    lua_gettable(L, -2);\n");
-            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
-            add_fmt(B, "    lua_pop(L, 1);\n");
+            add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(b + 1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(c + 1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_gettable(L, %s);\n", obf_int(-2, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_pop(L, %s);\n", obf_int(1, &obf_seed, obfuscate));
             break;
         }
 
         case OP_SETTABLE: {
             int b = GETARG_B(i);
             int c = GETARG_C(i);
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1); // table
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1); // key
-            if (TESTARG_k(i)) emit_loadk(B, p, c, str_encrypt, seed); // value K
-            else add_fmt(B, "    lua_pushvalue(L, %d);\n", c + 1); // value R
-            add_fmt(B, "    lua_settable(L, -3);\n");
-            add_fmt(B, "    lua_pop(L, 1);\n");
+            add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate)); // table
+            add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(b + 1, &obf_seed, obfuscate)); // key
+            if (TESTARG_k(i)) emit_loadk(B, p, c, str_encrypt, seed, obfuscate); // value K
+            else add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(c + 1, &obf_seed, obfuscate)); // value R
+            add_fmt(B, "    lua_settable(L, %s);\n", obf_int(-3, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_pop(L, %s);\n", obf_int(1, &obf_seed, obfuscate));
             break;
         }
 
         case OP_GETFIELD: {
             int b = GETARG_B(i);
             int c = GETARG_C(i);
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
+            add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(b + 1, &obf_seed, obfuscate));
             TValue *k = &p->k[c];
             if (ttisstring(k)) {
                 if (str_encrypt) {
                     emit_encrypted_string_push(B, getstr(tsvalue(k)), tsslen(tsvalue(k)), seed);
-                    add_fmt(B, "    lua_gettable(L, -2);\n");
+                    add_fmt(B, "    lua_gettable(L, %s);\n", obf_int(-2, &obf_seed, obfuscate));
                 } else {
-                    add_fmt(B, "    lua_getfield(L, -1, ");
+                    add_fmt(B, "    lua_getfield(L, %s, ", obf_int(-1, &obf_seed, obfuscate));
                     emit_quoted_string(B, getstr(tsvalue(k)), tsslen(tsvalue(k)));
                     add_fmt(B, ");\n");
                 }
             } else {
                 add_fmt(B, "    lua_pushnil(L);\n"); // Should not happen for GETFIELD
             }
-            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
-            add_fmt(B, "    lua_pop(L, 1);\n");
+            add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_pop(L, %s);\n", obf_int(1, &obf_seed, obfuscate));
             break;
         }
 
         case OP_SETFIELD: {
             int b = GETARG_B(i);
             int c = GETARG_C(i);
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1); // table
-            if (TESTARG_k(i)) emit_loadk(B, p, c, str_encrypt, seed); // value K
-            else add_fmt(B, "    lua_pushvalue(L, %d);\n", c + 1); // value R
+            add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate)); // table
+            if (TESTARG_k(i)) emit_loadk(B, p, c, str_encrypt, seed, obfuscate); // value K
+            else add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(c + 1, &obf_seed, obfuscate)); // value R
             TValue *k = &p->k[b];
             if (ttisstring(k)) {
                 if (str_encrypt) {
                     emit_encrypted_string_push(B, getstr(tsvalue(k)), tsslen(tsvalue(k)), seed);
-                    add_fmt(B, "    lua_insert(L, -2);\n");
-                    add_fmt(B, "    lua_settable(L, -3);\n");
+                    add_fmt(B, "    lua_insert(L, %s);\n", obf_int(-2, &obf_seed, obfuscate));
+                    add_fmt(B, "    lua_settable(L, %s);\n", obf_int(-3, &obf_seed, obfuscate));
                 } else {
-                    add_fmt(B, "    lua_setfield(L, -2, ");
+                    add_fmt(B, "    lua_setfield(L, %s, ", obf_int(-2, &obf_seed, obfuscate));
                     emit_quoted_string(B, getstr(tsvalue(k)), tsslen(tsvalue(k)));
                     add_fmt(B, ");\n");
                 }
             } else {
-                add_fmt(B, "    lua_pop(L, 1);\n"); // pop value
+                add_fmt(B, "    lua_pop(L, %s);\n", obf_int(1, &obf_seed, obfuscate)); // pop value
             }
-            add_fmt(B, "    lua_pop(L, 1);\n"); // pop table
+            add_fmt(B, "    lua_pop(L, %s);\n", obf_int(1, &obf_seed, obfuscate)); // pop table
             break;
         }
 
         case OP_GETI: {
             int b = GETARG_B(i);
             int c = GETARG_C(i);
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
-            add_fmt(B, "    lua_geti(L, -1, %d);\n", c);
-            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
-            add_fmt(B, "    lua_pop(L, 1);\n");
+            add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(b + 1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_geti(L, %s, %d);\n", obf_int(-1, &obf_seed, obfuscate), c);
+            add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_pop(L, %s);\n", obf_int(1, &obf_seed, obfuscate));
             break;
         }
 
         case OP_SETI: {
             int b = GETARG_B(i);
             int c = GETARG_C(i);
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1); // table
-            if (TESTARG_k(i)) emit_loadk(B, p, c, str_encrypt, seed); // value K
-            else add_fmt(B, "    lua_pushvalue(L, %d);\n", c + 1); // value R
-            add_fmt(B, "    lua_seti(L, -2, %d);\n", b);
-            add_fmt(B, "    lua_pop(L, 1);\n");
+            add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate)); // table
+            if (TESTARG_k(i)) emit_loadk(B, p, c, str_encrypt, seed, obfuscate); // value K
+            else add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(c + 1, &obf_seed, obfuscate)); // value R
+            add_fmt(B, "    lua_seti(L, %s, %d);\n", obf_int(-2, &obf_seed, obfuscate), b);
+            add_fmt(B, "    lua_pop(L, %s);\n", obf_int(1, &obf_seed, obfuscate));
             break;
         }
 
@@ -1079,32 +1165,32 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             }
 
             add_fmt(B, "    {\n");
-            add_fmt(B, "        int n = %d;\n", n);
+            add_fmt(B, "        int n = %s;\n", obf_int(n, &obf_seed, obfuscate));
             add_fmt(B, "        if (n == 0) {\n");
             if (p->is_vararg) {
                 add_fmt(B, "            if (vtab_idx == lua_gettop(L)) {\n");
-                add_fmt(B, "                n = lua_gettop(L) - %d - 1;\n", a + 1);
+                add_fmt(B, "                n = lua_gettop(L) - %s - %s;\n", obf_int(a + 1, &obf_seed, obfuscate), obf_int(1, &obf_seed, obfuscate));
                 add_fmt(B, "            } else {\n");
-                add_fmt(B, "                n = lua_gettop(L) - %d;\n", a + 1);
+                add_fmt(B, "                n = lua_gettop(L) - %s;\n", obf_int(a + 1, &obf_seed, obfuscate));
                 add_fmt(B, "            }\n");
             } else {
-                add_fmt(B, "            n = lua_gettop(L) - %d;\n", a + 1);
+                add_fmt(B, "            n = lua_gettop(L) - %s;\n", obf_int(a + 1, &obf_seed, obfuscate));
             }
             add_fmt(B, "        }\n");
-            add_fmt(B, "        lua_pushvalue(L, %d); /* table */\n", a + 1);
+            add_fmt(B, "        lua_pushvalue(L, %s); /* table */\n", obf_int(a + 1, &obf_seed, obfuscate));
             add_fmt(B, "        for (int j = 1; j <= n; j++) {\n");
-            add_fmt(B, "            lua_pushvalue(L, %d + j);\n", a + 1);
-        add_fmt(B, "            lua_seti(L, -2, %d + j);\n", c);
+            add_fmt(B, "            lua_pushvalue(L, %s + j);\n", obf_int(a + 1, &obf_seed, obfuscate));
+        add_fmt(B, "            lua_seti(L, %s, %d + j);\n", obf_int(-2, &obf_seed, obfuscate), c);
             add_fmt(B, "        }\n");
-            add_fmt(B, "        lua_pop(L, 1);\n");
+            add_fmt(B, "        lua_pop(L, %s);\n", obf_int(1, &obf_seed, obfuscate));
             if (n == 0) {
                  if (p->is_vararg) {
                       add_fmt(B, "    lua_pushvalue(L, vtab_idx);\n");
-                      add_fmt(B, "    lua_replace(L, %d);\n", p->maxstacksize + 1);
-                      add_fmt(B, "    vtab_idx = %d;\n", p->maxstacksize + 1);
-                      add_fmt(B, "    lua_settop(L, %d);\n", p->maxstacksize + 1);
+                      add_fmt(B, "    lua_replace(L, %s);\n", obf_int(p->maxstacksize + 1, &obf_seed, obfuscate));
+                      add_fmt(B, "    vtab_idx = %s;\n", obf_int(p->maxstacksize + 1, &obf_seed, obfuscate));
+                      add_fmt(B, "    lua_settop(L, %s);\n", obf_int(p->maxstacksize + 1, &obf_seed, obfuscate));
                  } else {
-                      add_fmt(B, "    lua_settop(L, %d);\n", p->maxstacksize);
+                      add_fmt(B, "    lua_settop(L, %s);\n", obf_int(p->maxstacksize, &obf_seed, obfuscate));
                  }
             }
             add_fmt(B, "    }\n");
@@ -1113,47 +1199,51 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
 
         case OP_FORPREP: {
             int bx = GETARG_Bx(i);
+            char target_label[16];
+            get_label_name(target_label, sizeof(target_label), pc + 1 + bx + 1, seed, obfuscate);
             add_fmt(B, "    {\n");
-            add_fmt(B, "        if (lua_isinteger(L, %d) && lua_isinteger(L, %d)) {\n", a + 1, a + 3);
-            add_fmt(B, "            lua_Integer step = lua_tointeger(L, %d);\n", a + 3);
-            add_fmt(B, "            lua_Integer init = lua_tointeger(L, %d);\n", a + 1);
+            add_fmt(B, "        if (lua_isinteger(L, %s) && lua_isinteger(L, %s)) {\n", obf_int(a + 1, &obf_seed, obfuscate), obf_int(a + 3, &obf_seed, obfuscate));
+            add_fmt(B, "            lua_Integer step = lua_tointeger(L, %s);\n", obf_int(a + 3, &obf_seed, obfuscate));
+            add_fmt(B, "            lua_Integer init = lua_tointeger(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             add_fmt(B, "            lua_pushinteger(L, init - step);\n");
-            add_fmt(B, "            lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "            lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             add_fmt(B, "        } else {\n");
-            add_fmt(B, "            lua_Number step = lua_tonumber(L, %d);\n", a + 3);
-            add_fmt(B, "            lua_Number init = lua_tonumber(L, %d);\n", a + 1);
+            add_fmt(B, "            lua_Number step = lua_tonumber(L, %s);\n", obf_int(a + 3, &obf_seed, obfuscate));
+            add_fmt(B, "            lua_Number init = lua_tonumber(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             add_fmt(B, "            lua_pushnumber(L, init - step);\n");
-            add_fmt(B, "            lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "            lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             add_fmt(B, "        }\n");
-            add_fmt(B, "        goto Label_%d;\n", pc + 1 + bx + 1);
+            add_fmt(B, "        goto %s;\n", target_label);
             add_fmt(B, "    }\n");
             break;
         }
 
         case OP_FORLOOP: {
             int bx = GETARG_Bx(i);
+            char target_label[16];
+            get_label_name(target_label, sizeof(target_label), pc + 2 - bx, seed, obfuscate);
             add_fmt(B, "    {\n");
-            add_fmt(B, "        if (lua_isinteger(L, %d)) {\n", a + 3);
-            add_fmt(B, "            lua_Integer step = lua_tointeger(L, %d);\n", a + 3);
-            add_fmt(B, "            lua_Integer limit = lua_tointeger(L, %d);\n", a + 2);
-            add_fmt(B, "            lua_Integer idx = lua_tointeger(L, %d) + step;\n", a + 1);
+            add_fmt(B, "        if (lua_isinteger(L, %s)) {\n", obf_int(a + 3, &obf_seed, obfuscate));
+            add_fmt(B, "            lua_Integer step = lua_tointeger(L, %s);\n", obf_int(a + 3, &obf_seed, obfuscate));
+            add_fmt(B, "            lua_Integer limit = lua_tointeger(L, %s);\n", obf_int(a + 2, &obf_seed, obfuscate));
+            add_fmt(B, "            lua_Integer idx = lua_tointeger(L, %s) + step;\n", obf_int(a + 1, &obf_seed, obfuscate));
             add_fmt(B, "            lua_pushinteger(L, idx);\n");
-            add_fmt(B, "            lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "            lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             add_fmt(B, "            if ((step > 0) ? (idx <= limit) : (idx >= limit)) {\n");
             add_fmt(B, "                lua_pushinteger(L, idx);\n");
-            add_fmt(B, "                lua_replace(L, %d);\n", a + 4);
-            add_fmt(B, "                goto Label_%d;\n", pc + 2 - bx);
+            add_fmt(B, "                lua_replace(L, %s);\n", obf_int(a + 4, &obf_seed, obfuscate));
+            add_fmt(B, "                goto %s;\n", target_label);
             add_fmt(B, "            }\n");
             add_fmt(B, "        } else {\n");
-            add_fmt(B, "            lua_Number step = lua_tonumber(L, %d);\n", a + 3);
-            add_fmt(B, "            lua_Number limit = lua_tonumber(L, %d);\n", a + 2);
-            add_fmt(B, "            lua_Number idx = lua_tonumber(L, %d) + step;\n", a + 1);
+            add_fmt(B, "            lua_Number step = lua_tonumber(L, %s);\n", obf_int(a + 3, &obf_seed, obfuscate));
+            add_fmt(B, "            lua_Number limit = lua_tonumber(L, %s);\n", obf_int(a + 2, &obf_seed, obfuscate));
+            add_fmt(B, "            lua_Number idx = lua_tonumber(L, %s) + step;\n", obf_int(a + 1, &obf_seed, obfuscate));
             add_fmt(B, "            lua_pushnumber(L, idx);\n");
-            add_fmt(B, "            lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "            lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             add_fmt(B, "            if ((step > 0) ? (idx <= limit) : (idx >= limit)) {\n");
             add_fmt(B, "                lua_pushnumber(L, idx);\n");
-            add_fmt(B, "                lua_replace(L, %d);\n", a + 4);
-            add_fmt(B, "                goto Label_%d;\n", pc + 2 - bx);
+            add_fmt(B, "                lua_replace(L, %s);\n", obf_int(a + 4, &obf_seed, obfuscate));
+            add_fmt(B, "                goto %s;\n", target_label);
             add_fmt(B, "            }\n");
             add_fmt(B, "        }\n");
             add_fmt(B, "    }\n");
@@ -1162,101 +1252,111 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
 
         case OP_TFORPREP: {
             int bx = GETARG_Bx(i);
-            add_fmt(B, "    lua_toclose(L, %d);\n", a + 3 + 1);
-            add_fmt(B, "    goto Label_%d;\n", pc + 1 + bx + 1);
+            char target_label[16];
+            get_label_name(target_label, sizeof(target_label), pc + 1 + bx + 1, seed, obfuscate);
+            add_fmt(B, "    lua_toclose(L, %s);\n", obf_int(a + 3 + 1, &obf_seed, obfuscate));
+            add_fmt(B, "    goto %s;\n", target_label);
             break;
         }
 
         case OP_TFORCALL: {
             int c = GETARG_C(i);
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1);
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 2);
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 3);
-            add_fmt(B, "    lua_call(L, 2, %d);\n", c);
+            add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(a + 2, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(a + 3, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_call(L, %s, %s);\n", obf_int(2, &obf_seed, obfuscate), obf_int(c, &obf_seed, obfuscate));
             for (int k = c; k >= 1; k--) {
-                add_fmt(B, "    lua_replace(L, %d);\n", a + 4 + k);
+                add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 4 + k, &obf_seed, obfuscate));
             }
             break;
         }
 
         case OP_TFORLOOP: {
             int bx = GETARG_Bx(i);
-            add_fmt(B, "    if (!lua_isnil(L, %d)) {\n", a + 5);
-            add_fmt(B, "        lua_pushvalue(L, %d);\n", a + 5);
-            add_fmt(B, "        lua_replace(L, %d);\n", a + 3);
-            add_fmt(B, "        goto Label_%d;\n", pc + 2 - bx);
+            char target_label[16];
+            get_label_name(target_label, sizeof(target_label), pc + 2 - bx, seed, obfuscate);
+            add_fmt(B, "    if (!lua_isnil(L, %s)) {\n", obf_int(a + 5, &obf_seed, obfuscate));
+            add_fmt(B, "        lua_pushvalue(L, %s);\n", obf_int(a + 5, &obf_seed, obfuscate));
+            add_fmt(B, "        lua_replace(L, %s);\n", obf_int(a + 3, &obf_seed, obfuscate));
+            add_fmt(B, "        goto %s;\n", target_label);
             add_fmt(B, "    }\n");
             break;
         }
 
         case OP_TEST: {
             int k = GETARG_k(i);
-            add_fmt(B, "    if (lua_toboolean(L, %d) != %d) goto Label_%d;\n", a + 1, k, pc + 1 + 2);
+            char target_label[16];
+            get_label_name(target_label, sizeof(target_label), pc + 1 + 2, seed, obfuscate);
+            add_fmt(B, "    if (lua_toboolean(L, %s) != %d) goto %s;\n", obf_int(a + 1, &obf_seed, obfuscate), k, target_label);
             break;
         }
 
         case OP_TESTSET: {
             int b = GETARG_B(i);
             int k = GETARG_k(i);
-            add_fmt(B, "    if (lua_toboolean(L, %d) != %d) goto Label_%d;\n", b + 1, k, pc + 1 + 2);
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
-            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+            char target_label[16];
+            get_label_name(target_label, sizeof(target_label), pc + 1 + 2, seed, obfuscate);
+            add_fmt(B, "    if (lua_toboolean(L, %s) != %d) goto %s;\n", obf_int(b + 1, &obf_seed, obfuscate), k, target_label);
+            add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(b + 1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             break;
         }
 
         case OP_TESTNIL: {
             int b = GETARG_B(i);
             int k = GETARG_k(i);
-            add_fmt(B, "    if (lua_isnil(L, %d) == %d) goto Label_%d;\n", b + 1, k, pc + 1 + 2);
+            char target_label[16];
+            get_label_name(target_label, sizeof(target_label), pc + 1 + 2, seed, obfuscate);
+            add_fmt(B, "    if (lua_isnil(L, %s) == %d) goto %s;\n", obf_int(b + 1, &obf_seed, obfuscate), k, target_label);
             int a = GETARG_A(i);
             if (a != MAXARG_A) {
-                 add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
-                 add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+                 add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(b + 1, &obf_seed, obfuscate));
+                 add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             }
             break;
         }
 
         case OP_NEWCLASS: {
             int bx = GETARG_Bx(i);
-            emit_loadk(B, p, bx, str_encrypt, seed);
-            add_fmt(B, "    lua_newclass(L, lua_tostring(L, -1));\n");
-            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
-            add_fmt(B, "    lua_pop(L, 1);\n");
+            emit_loadk(B, p, bx, str_encrypt, seed, obfuscate);
+            add_fmt(B, "    lua_newclass(L, lua_tostring(L, %s));\n", obf_int(-1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_pop(L, %s);\n", obf_int(1, &obf_seed, obfuscate));
             break;
         }
 
         case OP_INHERIT: {
             int b = GETARG_B(i);
-            add_fmt(B, "    lua_inherit(L, %d, %d);\n", a + 1, b + 1);
+            add_fmt(B, "    lua_inherit(L, %s, %s);\n", obf_int(a + 1, &obf_seed, obfuscate), obf_int(b + 1, &obf_seed, obfuscate));
             break;
         }
 
         case OP_SETMETHOD: {
             int b = GETARG_B(i);
             int c = GETARG_C(i);
-            emit_loadk(B, p, b, str_encrypt, seed);
-            add_fmt(B, "    lua_setmethod(L, %d, lua_tostring(L, -1), %d);\n", a + 1, c + 1);
-            add_fmt(B, "    lua_pop(L, 1);\n");
+            emit_loadk(B, p, b, str_encrypt, seed, obfuscate);
+            add_fmt(B, "    lua_setmethod(L, %s, lua_tostring(L, %s), %s);\n", obf_int(a + 1, &obf_seed, obfuscate), obf_int(-1, &obf_seed, obfuscate), obf_int(c + 1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_pop(L, %s);\n", obf_int(1, &obf_seed, obfuscate));
             break;
         }
 
         case OP_SETSTATIC: {
             int b = GETARG_B(i);
             int c = GETARG_C(i);
-            emit_loadk(B, p, b, str_encrypt, seed);
-            add_fmt(B, "    lua_setstatic(L, %d, lua_tostring(L, -1), %d);\n", a + 1, c + 1);
-            add_fmt(B, "    lua_pop(L, 1);\n");
+            emit_loadk(B, p, b, str_encrypt, seed, obfuscate);
+            add_fmt(B, "    lua_setstatic(L, %s, lua_tostring(L, %s), %s);\n", obf_int(a + 1, &obf_seed, obfuscate), obf_int(-1, &obf_seed, obfuscate), obf_int(c + 1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_pop(L, %s);\n", obf_int(1, &obf_seed, obfuscate));
             break;
         }
 
         case OP_GETSUPER: {
             int b = GETARG_B(i);
             int c = GETARG_C(i);
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
-            emit_loadk(B, p, c, str_encrypt, seed);
-            add_fmt(B, "    lua_getsuper(L, -2, lua_tostring(L, -1));\n", a + 1);
-            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
-            add_fmt(B, "    lua_pop(L, 2);\n");
+            add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(b + 1, &obf_seed, obfuscate));
+            emit_loadk(B, p, c, str_encrypt, seed, obfuscate);
+            add_fmt(B, "    lua_getsuper(L, %s, lua_tostring(L, %s));\n", obf_int(-2, &obf_seed, obfuscate), obf_int(-1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_pop(L, %s);\n", obf_int(2, &obf_seed, obfuscate));
             break;
         }
 
@@ -1264,64 +1364,66 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             int b = GETARG_B(i);
             int c = GETARG_C(i);
             int nargs = c - 1;
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
+            add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(b + 1, &obf_seed, obfuscate));
             for (int k = 0; k < nargs; k++) {
-                add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1 + k);
+                add_fmt(B, "    lua_pushvalue(L, %s + k);\n", obf_int(a + 1, &obf_seed, obfuscate));
             }
-            add_fmt(B, "    lua_newobject(L, -%d, %d);\n", nargs + 1, nargs);
-            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
-            add_fmt(B, "    lua_pop(L, 1);\n");
+            add_fmt(B, "    lua_newobject(L, -%s, %d);\n", obf_int(nargs + 1, &obf_seed, obfuscate), nargs);
+            add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_pop(L, %s);\n", obf_int(1, &obf_seed, obfuscate));
             break;
         }
 
         case OP_GETPROP: {
             int b = GETARG_B(i);
             int c = GETARG_C(i);
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
-            emit_loadk(B, p, c, str_encrypt, seed);
-            add_fmt(B, "    lua_getprop(L, -2, lua_tostring(L, -1));\n");
-            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
-            add_fmt(B, "    lua_pop(L, 2);\n");
+            add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(b + 1, &obf_seed, obfuscate));
+            emit_loadk(B, p, c, str_encrypt, seed, obfuscate);
+            add_fmt(B, "    lua_getprop(L, %s, lua_tostring(L, %s));\n", obf_int(-2, &obf_seed, obfuscate), obf_int(-1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_pop(L, %s);\n", obf_int(2, &obf_seed, obfuscate));
             break;
         }
 
         case OP_SETPROP: {
             int b = GETARG_B(i);
             int c = GETARG_C(i);
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1);
-            emit_loadk(B, p, b, str_encrypt, seed);
-            if (TESTARG_k(i)) emit_loadk(B, p, c, str_encrypt, seed);
-            else add_fmt(B, "    lua_pushvalue(L, %d);\n", c + 1);
-            add_fmt(B, "    lua_setprop(L, -3, lua_tostring(L, -2), -1);\n");
-            add_fmt(B, "    lua_pop(L, 3);\n");
+            add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
+            emit_loadk(B, p, b, str_encrypt, seed, obfuscate);
+            if (TESTARG_k(i)) emit_loadk(B, p, c, str_encrypt, seed, obfuscate);
+            else add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(c + 1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_setprop(L, %s, lua_tostring(L, %s), %s);\n", obf_int(-3, &obf_seed, obfuscate), obf_int(-2, &obf_seed, obfuscate), obf_int(-1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_pop(L, %s);\n", obf_int(3, &obf_seed, obfuscate));
             break;
         }
 
         case OP_INSTANCEOF: {
             int b = GETARG_B(i);
             int k = GETARG_k(i);
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1);
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
-            add_fmt(B, "    if (lua_instanceof(L, -2, -1) != %d) goto Label_%d;\n", k, pc + 1 + 2);
-            add_fmt(B, "    lua_pop(L, 2);\n");
+            char target_label[16];
+            get_label_name(target_label, sizeof(target_label), pc + 1 + 2, seed, obfuscate);
+            add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(b + 1, &obf_seed, obfuscate));
+            add_fmt(B, "    if (lua_instanceof(L, %s, %s) != %d) goto %s;\n", obf_int(-2, &obf_seed, obfuscate), obf_int(-1, &obf_seed, obfuscate), k, target_label);
+            add_fmt(B, "    lua_pop(L, %s);\n", obf_int(2, &obf_seed, obfuscate));
             break;
         }
 
         case OP_IMPLEMENT: {
             int b = GETARG_B(i);
-            add_fmt(B, "    lua_implement(L, %d, %d);\n", a + 1, b + 1);
+            add_fmt(B, "    lua_implement(L, %s, %s);\n", obf_int(a + 1, &obf_seed, obfuscate), obf_int(b + 1, &obf_seed, obfuscate));
             break;
         }
 
         case OP_ASYNCWRAP: {
             int b = GETARG_B(i);
             add_fmt(B, "    lua_getglobal(L, \"__async_wrap\");\n");
-            add_fmt(B, "    if (lua_isfunction(L, -1)) {\n");
-            add_fmt(B, "        lua_pushvalue(L, %d);\n", b + 1);
-            add_fmt(B, "        lua_call(L, 1, 1);\n");
-            add_fmt(B, "        lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "    if (lua_isfunction(L, %s)) {\n", obf_int(-1, &obf_seed, obfuscate));
+            add_fmt(B, "        lua_pushvalue(L, %s);\n", obf_int(b + 1, &obf_seed, obfuscate));
+            add_fmt(B, "        lua_call(L, %s, %s);\n", obf_int(1, &obf_seed, obfuscate), obf_int(1, &obf_seed, obfuscate));
+            add_fmt(B, "        lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             add_fmt(B, "    } else {\n");
-            add_fmt(B, "        lua_pop(L, 1);\n");
+            add_fmt(B, "        lua_pop(L, %s);\n", obf_int(1, &obf_seed, obfuscate));
             add_fmt(B, "        luaL_error(L, \"__async_wrap not found\");\n");
             add_fmt(B, "    }\n");
             break;
@@ -1330,14 +1432,14 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
         case OP_GENERICWRAP: {
             int b = GETARG_B(i);
             add_fmt(B, "    lua_getglobal(L, \"__generic_wrap\");\n");
-            add_fmt(B, "    if (lua_isfunction(L, -1)) {\n");
-            add_fmt(B, "        lua_pushvalue(L, %d);\n", b + 1);
-            add_fmt(B, "        lua_pushvalue(L, %d);\n", b + 2);
-            add_fmt(B, "        lua_pushvalue(L, %d);\n", b + 3);
-            add_fmt(B, "        lua_call(L, 3, 1);\n");
-            add_fmt(B, "        lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "    if (lua_isfunction(L, %s)) {\n", obf_int(-1, &obf_seed, obfuscate));
+            add_fmt(B, "        lua_pushvalue(L, %s);\n", obf_int(b + 1, &obf_seed, obfuscate));
+            add_fmt(B, "        lua_pushvalue(L, %s);\n", obf_int(b + 2, &obf_seed, obfuscate));
+            add_fmt(B, "        lua_pushvalue(L, %s);\n", obf_int(b + 3, &obf_seed, obfuscate));
+            add_fmt(B, "        lua_call(L, %s, %s);\n", obf_int(3, &obf_seed, obfuscate), obf_int(1, &obf_seed, obfuscate));
+            add_fmt(B, "        lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             add_fmt(B, "    } else {\n");
-            add_fmt(B, "        lua_pop(L, 1);\n");
+            add_fmt(B, "        lua_pop(L, %s);\n", obf_int(1, &obf_seed, obfuscate));
             add_fmt(B, "    }\n");
             break;
         }
@@ -1345,107 +1447,109 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
         case OP_CHECKTYPE: {
             int b = GETARG_B(i);
             int c = GETARG_C(i);
-            add_fmt(B, "    lua_pushvalue(L, %d); /* type */\n", b + 1);
-            emit_loadk(B, p, c, str_encrypt, seed); /* name */
-            add_fmt(B, "    lua_checktype(L, %d, lua_tostring(L, -1));\n", a + 1);
-            add_fmt(B, "    lua_pop(L, 2);\n");
+            add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(b + 1, &obf_seed, obfuscate));
+            emit_loadk(B, p, c, str_encrypt, seed, obfuscate); /* name */
+            add_fmt(B, "    lua_checktype(L, %s, lua_tostring(L, %s));\n", obf_int(a + 1, &obf_seed, obfuscate), obf_int(-1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_pop(L, %s);\n", obf_int(2, &obf_seed, obfuscate));
             break;
         }
 
         case OP_SPACESHIP: {
             int b = GETARG_B(i);
             int c = GETARG_C(i);
-            add_fmt(B, "    lua_pushinteger(L, lua_spaceship(L, %d, %d));\n", b + 1, c + 1);
-            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "    lua_pushinteger(L, lua_spaceship(L, %s, %s));\n", obf_int(b + 1, &obf_seed, obfuscate), obf_int(c + 1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             break;
         }
 
         case OP_IS: {
             int b = GETARG_B(i);
             int k = GETARG_k(i);
+            char target_label[16];
+            get_label_name(target_label, sizeof(target_label), pc + 1 + 2, seed, obfuscate);
             add_fmt(B, "    {\n");
-            emit_loadk(B, p, b, str_encrypt, seed); // Push type name K[B]
-            add_fmt(B, "        int res = lua_is(L, %d, lua_tostring(L, -1));\n", a + 1);
-            add_fmt(B, "        lua_pop(L, 1);\n");
-            add_fmt(B, "        if (res != %d) goto Label_%d;\n", k, pc + 1 + 2);
+            emit_loadk(B, p, b, str_encrypt, seed, obfuscate); // Push type name K[B]
+            add_fmt(B, "        int res = lua_is(L, %s, lua_tostring(L, %s));\n", obf_int(a + 1, &obf_seed, obfuscate), obf_int(-1, &obf_seed, obfuscate));
+            add_fmt(B, "        lua_pop(L, %s);\n", obf_int(1, &obf_seed, obfuscate));
+            add_fmt(B, "        if (res != %s) goto %s;\n", obf_int(k, &obf_seed, obfuscate), target_label);
             add_fmt(B, "    }\n");
             break;
         }
 
         case OP_NEWNAMESPACE: {
             int bx = GETARG_Bx(i);
-            emit_loadk(B, p, bx, str_encrypt, seed);
-            add_fmt(B, "    lua_newnamespace(L, lua_tostring(L, -1));\n");
-            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
-            add_fmt(B, "    lua_pop(L, 1);\n");
+            emit_loadk(B, p, bx, str_encrypt, seed, obfuscate);
+            add_fmt(B, "    lua_newnamespace(L, lua_tostring(L, %s));\n", obf_int(-1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_pop(L, %s);\n", obf_int(1, &obf_seed, obfuscate));
             break;
         }
 
         case OP_LINKNAMESPACE: {
             int b = GETARG_B(i);
-            add_fmt(B, "    lua_linknamespace(L, %d, %d);\n", a + 1, b + 1);
+            add_fmt(B, "    lua_linknamespace(L, %s, %s);\n", obf_int(a + 1, &obf_seed, obfuscate), obf_int(b + 1, &obf_seed, obfuscate));
             break;
         }
 
         case OP_NEWSUPER: {
             int bx = GETARG_Bx(i);
-            emit_loadk(B, p, bx, str_encrypt, seed);
-            add_fmt(B, "    lua_newsuperstruct(L, lua_tostring(L, -1));\n");
-            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
-            add_fmt(B, "    lua_pop(L, 1);\n");
+            emit_loadk(B, p, bx, str_encrypt, seed, obfuscate);
+            add_fmt(B, "    lua_newsuperstruct(L, lua_tostring(L, %s));\n", obf_int(-1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_pop(L, %s);\n", obf_int(1, &obf_seed, obfuscate));
             break;
         }
 
         case OP_SETSUPER: {
             int b = GETARG_B(i);
             int c = GETARG_C(i);
-            add_fmt(B, "    lua_setsuper(L, %d, %d, %d);\n", a + 1, b + 1, c + 1);
+            add_fmt(B, "    lua_setsuper(L, %s, %s, %s);\n", obf_int(a + 1, &obf_seed, obfuscate), obf_int(b + 1, &obf_seed, obfuscate), obf_int(c + 1, &obf_seed, obfuscate));
             break;
         }
 
         case OP_SLICE: {
             int b = GETARG_B(i);
-            add_fmt(B, "    lua_slice(L, %d, %d, %d, %d);\n", b + 1, b + 2, b + 3, b + 4);
-            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "    lua_slice(L, %s, %s, %s, %s);\n", obf_int(b + 1, &obf_seed, obfuscate), obf_int(b + 2, &obf_seed, obfuscate), obf_int(b + 3, &obf_seed, obfuscate), obf_int(b + 4, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             break;
         }
 
         case OP_SETIFACEFLAG: {
-            add_fmt(B, "    lua_setifaceflag(L, %d);\n", a + 1);
+            add_fmt(B, "    lua_setifaceflag(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             break;
         }
 
         case OP_ADDMETHOD: {
             int b = GETARG_B(i);
             int c = GETARG_C(i);
-            emit_loadk(B, p, b, str_encrypt, seed); // method name
-            add_fmt(B, "    lua_addmethod(L, %d, lua_tostring(L, -1), %d);\n", a + 1, c);
-            add_fmt(B, "    lua_pop(L, 1);\n");
+            emit_loadk(B, p, b, str_encrypt, seed, obfuscate); // method name
+            add_fmt(B, "    lua_addmethod(L, %s, lua_tostring(L, %s), %s);\n", obf_int(a + 1, &obf_seed, obfuscate), obf_int(-1, &obf_seed, obfuscate), obf_int(c, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_pop(L, %s);\n", obf_int(1, &obf_seed, obfuscate));
             break;
         }
 
         case OP_GETCMDS: {
             add_fmt(B, "    lua_getcmds(L);\n");
-            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             break;
         }
 
         case OP_GETOPS: {
             add_fmt(B, "    lua_getops(L);\n");
-            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             break;
         }
 
         case OP_ERRNNIL: {
             int bx = GETARG_Bx(i);
-            emit_loadk(B, p, bx - 1, str_encrypt, seed); // global name
-            add_fmt(B, "    lua_errnnil(L, %d, lua_tostring(L, -1));\n", a + 1);
-            add_fmt(B, "    lua_pop(L, 1);\n");
+            emit_loadk(B, p, bx - 1, str_encrypt, seed, obfuscate); // global name
+            add_fmt(B, "    lua_errnnil(L, %s, lua_tostring(L, %s));\n", obf_int(a + 1, &obf_seed, obfuscate), obf_int(-1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_pop(L, %s);\n", obf_int(1, &obf_seed, obfuscate));
             break;
         }
 
         case OP_TBC: {
-            add_fmt(B, "    lua_toclose(L, %d);\n", a + 1);
+            add_fmt(B, "    lua_toclose(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             break;
         }
 
@@ -1453,50 +1557,50 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
             int b = GETARG_B(i);
             int c = GETARG_C(i);
             add_fmt(B, "    lua_createtable(L, 2, 0);\n");
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
-            add_fmt(B, "    lua_rawseti(L, -2, 1);\n");
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", c + 1);
-            add_fmt(B, "    lua_rawseti(L, -2, 2);\n");
-            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(b + 1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_rawseti(L, %s, 1);\n", obf_int(-2, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(c + 1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_rawseti(L, %s, 2);\n", obf_int(-2, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             break;
         }
 
         case OP_IN: {
             int b = GETARG_B(i);
             int c = GETARG_C(i);
-            add_fmt(B, "    lua_pushinteger(L, lua_tcc_in(L, %d, %d));\n", b + 1, c + 1);
-            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "    lua_pushinteger(L, lua_tcc_in(L, %s, %s));\n", obf_int(b + 1, &obf_seed, obfuscate), obf_int(c + 1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             break;
         }
 
         case OP_NOT: {
             int b = GETARG_B(i);
-            add_fmt(B, "    lua_pushboolean(L, !lua_toboolean(L, %d));\n", b + 1);
-            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "    lua_pushboolean(L, !lua_toboolean(L, %s));\n", obf_int(b + 1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             break;
         }
 
         case OP_LEN: {
             int b = GETARG_B(i);
-            add_fmt(B, "    lua_pushvalue(L, %d);\n", b + 1);
-            add_fmt(B, "    lua_len(L, -1);\n");
-            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
-            add_fmt(B, "    lua_pop(L, 1);\n");
+            add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(b + 1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_len(L, %s);\n", obf_int(-1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_pop(L, %s);\n", obf_int(1, &obf_seed, obfuscate));
             break;
         }
 
         case OP_CONCAT: {
             int b = GETARG_B(i);
             for (int k = 0; k < b; k++) {
-                add_fmt(B, "    lua_pushvalue(L, %d);\n", a + 1 + k);
+                add_fmt(B, "    lua_pushvalue(L, %s);\n", obf_int(a + 1 + k, &obf_seed, obfuscate));
             }
-            add_fmt(B, "    lua_concat(L, %d);\n", b);
-            add_fmt(B, "    lua_replace(L, %d);\n", a + 1);
+            add_fmt(B, "    lua_concat(L, %s);\n", obf_int(b, &obf_seed, obfuscate));
+            add_fmt(B, "    lua_replace(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             break;
         }
 
         case OP_CLOSE: {
-            add_fmt(B, "    lua_closeslot(L, %d);\n", a + 1);
+            add_fmt(B, "    lua_closeslot(L, %s);\n", obf_int(a + 1, &obf_seed, obfuscate));
             break;
         }
 
@@ -1515,25 +1619,45 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
     }
 }
 
-static void process_proto(luaL_Buffer *B, Proto *p, int id, ProtoInfo *protos, int proto_count, int use_pure_c, int str_encrypt, int seed) {
+static void process_proto(luaL_Buffer *B, Proto *p, int id, ProtoInfo *protos, int proto_count, int use_pure_c, int str_encrypt, int seed, int obfuscate) {
+    char L_name[16] = "L";
+    char vtab_name[16] = "vtab_idx";
+    unsigned int obf_seed = (unsigned int)seed + id;
+
+    if (obfuscate) {
+        get_random_name(L_name, sizeof(L_name), &obf_seed);
+        get_random_name(vtab_name, sizeof(vtab_name), &obf_seed);
+    }
+
     add_fmt(B, "\n/* Proto %d */\n", id);
-    add_fmt(B, "static int function_%d(lua_State *L) {\n", id);
+    add_fmt(B, "static int %s(lua_State *%s) {\n", protos[id].name, L_name);
+
+    if (obfuscate) {
+        add_fmt(B, "#define L %s\n", L_name);
+        add_fmt(B, "#define vtab_idx %s\n", vtab_name);
+    }
 
     if (p->is_vararg) {
-        add_fmt(B, "    int vtab_idx = %d;\n", p->maxstacksize + 1);
-        add_fmt(B, "    lua_tcc_prologue(L, %d, %d);\n", p->numparams, p->maxstacksize);
+        add_fmt(B, "    int %s = %s;\n", vtab_name, obf_int(p->maxstacksize + 1, &obf_seed, obfuscate));
+        add_fmt(B, "    lua_tcc_prologue(%s, %s, %s);\n", L_name, obf_int(p->numparams, &obf_seed, obfuscate), obf_int(p->maxstacksize, &obf_seed, obfuscate));
     } else {
-        add_fmt(B, "    lua_settop(L, %d); /* Max Stack Size */\n", p->maxstacksize);
+        add_fmt(B, "    lua_settop(%s, %s); /* Max Stack Size */\n", L_name, obf_int(p->maxstacksize, &obf_seed, obfuscate));
     }
 
     // Iterate instructions
     for (int i = 0; i < p->sizecode; i++) {
-        emit_instruction(B, p, i, p->code[i], protos, proto_count, use_pure_c, str_encrypt, seed);
+        if (obfuscate && (my_rand(&obf_seed) % 4 == 0)) emit_junk_code(B, &obf_seed);
+        emit_instruction(B, p, i, p->code[i], protos, proto_count, use_pure_c, str_encrypt, seed, obfuscate);
+    }
+
+    if (obfuscate) {
+        add_fmt(B, "#undef L\n");
+        add_fmt(B, "#undef vtab_idx\n");
     }
 
     // Fallback return if no return op
-    if (p->sizecode == 0 || GET_OPCODE(p->code[p->sizecode-1]) != OP_RETURN && GET_OPCODE(p->code[p->sizecode-1]) != OP_RETURN0 && GET_OPCODE(p->code[p->sizecode-1]) != OP_RETURN1) {
-        add_fmt(B, "    return 0;\n");
+    if (p->sizecode == 0 || (GET_OPCODE(p->code[p->sizecode-1]) != OP_RETURN && GET_OPCODE(p->code[p->sizecode-1]) != OP_RETURN0 && GET_OPCODE(p->code[p->sizecode-1]) != OP_RETURN1)) {
+        add_fmt(B, "    return %s;\n", obf_int(0, &obf_seed, obfuscate));
     }
     add_fmt(B, "}\n");
 }
@@ -1708,11 +1832,13 @@ static int tcc_compile(lua_State *L) {
     }
     Proto *p = cl->p;
 
+    unsigned int obf_seed = (unsigned int)seed;
+
     // Collect all protos
     int capacity = 16;
     int count = 0;
     ProtoInfo *protos = (ProtoInfo *)malloc(capacity * sizeof(ProtoInfo));
-    collect_protos(p, &count, &protos, &capacity);
+    collect_protos(p, &count, &protos, &capacity, &obf_seed, obfuscate);
 
     // Apply obfuscation if requested
     int obfuscate_flags = provided_flags;
@@ -1764,9 +1890,13 @@ static int tcc_compile(lua_State *L) {
 
         /* Emit macros mapping original names to shuffled locations */
         int counter = 0;
+        char obf_name[16];
         #define X(name, ret, args) \
+            get_random_name(obf_name, sizeof(obf_name), &useed); \
             add_fmt(&B, "#undef %s\n", #name); \
-            add_fmt(&B, "#define %s(...) ((%s (*) %s)api->f[%d])(__VA_ARGS__)\n", #name, #ret, #args, indices[counter++]);
+            add_fmt(&B, "#define %s(...) ((%s (*) %s)api->f[%d])(__VA_ARGS__)\n", obf_name, #ret, #args, indices[counter]); \
+            add_fmt(&B, "#define %s %s\n", #name, obf_name); \
+            counter++;
 
         #include "ltcc_api_list.h"
         #undef X
@@ -1781,12 +1911,12 @@ static int tcc_compile(lua_State *L) {
 
     // Forward declarations
     for (int i = 0; i < count; i++) {
-        add_fmt(&B, "static int function_%d(lua_State *L);\n", protos[i].id);
+        add_fmt(&B, "static int %s(lua_State *L);\n", protos[i].name);
     }
 
     // Implementations
     for (int i = 0; i < count; i++) {
-        process_proto(&B, protos[i].p, protos[i].id, protos, count, use_pure_c, str_encrypt, seed);
+        process_proto(&B, protos[i].p, protos[i].id, protos, count, use_pure_c, str_encrypt, seed, obfuscate);
     }
 
     // Main entry point
@@ -1802,9 +1932,9 @@ static int tcc_compile(lua_State *L) {
          for (int k = 1; k < p->sizeupvalues; k++) {
              add_fmt(&B, "    lua_pushnil(L);\n");
          }
-         add_fmt(&B, "    lua_pushcclosure(L, function_0, %d);\n", p->sizeupvalues);
+         add_fmt(&B, "    lua_pushcclosure(L, %s, %d);\n", protos[0].name, p->sizeupvalues);
     } else {
-         add_fmt(&B, "    lua_pushcfunction(L, function_0);\n");
+         add_fmt(&B, "    lua_pushcfunction(L, %s);\n", protos[0].name);
     }
 
     add_fmt(&B, "    lua_call(L, 0, 1);\n");
