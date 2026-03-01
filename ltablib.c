@@ -187,8 +187,16 @@ static int tconst (lua_State *L) {
 
 static int tinsert (lua_State *L) {
   lua_Integer pos;  /* where to insert new element */
-  lua_Integer e = aux_getn(L, 1, TAB_RW);
+  lua_Integer e;
+
+  if (lua_gettop(L) == 3) {
+      pos = luaL_checkinteger(L, 2);
+  }
+
+  lua_locktable(L, 1);
+  e = aux_getn(L, 1, TAB_RW);
   e = luaL_intop(+, e, 1);  /* first empty element */
+
   switch (lua_gettop(L)) {
     case 2: {  /* called with only 2 arguments */
       pos = e;  /* insert new element at the end */
@@ -196,21 +204,21 @@ static int tinsert (lua_State *L) {
     }
     case 3: {
       lua_Integer i;
-      pos = luaL_checkinteger(L, 2);  /* 2nd argument is the position */
-      /* check whether 'pos' is in [1, e] */
-      luaL_argcheck(L, (lua_Unsigned)pos - 1u < (lua_Unsigned)e, 2,
-                       "position out of bounds");
+      if (!((lua_Unsigned)pos - 1u < (lua_Unsigned)e)) { lua_unlocktable(L, 1); return luaL_argerror(L, 2, "position out of bounds"); }
       for (i = e; i > pos; i--) {  /* move up elements */
-        lua_geti(L, 1, i - 1);
-        lua_seti(L, 1, i);  /* t[i] = t[i - 1] */
+        lua_rawgeti(L, 1, i - 1);
+        lua_rawseti(L, 1, i);  /* t[i] = t[i - 1] */
       }
       break;
     }
     default: {
+      lua_unlocktable(L, 1);
       return luaL_error(L, "'insert' 参数数量错误");
     }
   }
-  lua_seti(L, 1, pos);  /* t[pos] = v */
+  lua_pushvalue(L, -1);
+  lua_rawseti(L, 1, pos);  /* t[pos] = v */
+  lua_unlocktable(L, 1);
   return 0;
 }
 
@@ -218,17 +226,22 @@ static int tinsert (lua_State *L) {
 static int tremove (lua_State *L) {
   lua_Integer size = aux_getn(L, 1, TAB_RW);
   lua_Integer pos = luaL_optinteger(L, 2, size);
-  if (pos != size)  /* validate 'pos' if given */
-    /* check whether 'pos' is in [1, size + 1] */
-    luaL_argcheck(L, (lua_Unsigned)pos - 1u <= (lua_Unsigned)size, 2,
-                     "position out of bounds");
-  lua_geti(L, 1, pos);  /* result = t[pos] */
+
+  lua_locktable(L, 1);
+  size = aux_getn(L, 1, TAB_RW);
+  if (lua_gettop(L) <= 1) { pos = size; }
+
+  if (pos != size) { /* validate 'pos' if given */
+    if (!((lua_Unsigned)pos - 1u <= (lua_Unsigned)size)) { lua_unlocktable(L, 1); return luaL_argerror(L, 2, "position out of bounds"); }
+  }
+  lua_rawgeti(L, 1, pos);  /* result = t[pos] */
   for ( ; pos < size; pos++) {
-    lua_geti(L, 1, pos + 1);
-    lua_seti(L, 1, pos);  /* t[pos] = t[pos + 1] */
+    lua_rawgeti(L, 1, pos + 1);
+    lua_rawseti(L, 1, pos);  /* t[pos] = t[pos + 1] */
   }
   lua_pushnil(L);
-  lua_seti(L, 1, pos);  /* remove entry t[pos] */
+  lua_rawseti(L, 1, pos);  /* remove entry t[pos] */
+  lua_unlocktable(L, 1);
   return 1;
 }
 

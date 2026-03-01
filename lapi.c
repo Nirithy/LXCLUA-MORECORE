@@ -2743,3 +2743,19 @@ LUA_API void lua_errnnil (lua_State *L, int idx, const char *msg) {
   }
   lua_unlock(L);
 }
+
+LUA_API void lua_locktable (lua_State *L, int idx) {
+  Table *t;
+  t = gettable(L, idx);
+  if (t != NULL && t->is_shared) {
+    l_rwlock_wrlock(&t->lock);
+  }
+}
+
+LUA_API void lua_unlocktable (lua_State *L, int idx) {
+  Table *t;
+  t = gettable(L, idx);
+  if (t != NULL && t->is_shared) {
+    l_rwlock_unlock(&t->lock);
+  }
+}

@@ -552,3 +552,11 @@ void luaE_warnerror (lua_State *L, const char *where) {
   luaE_warning(L, msg, 1);
   luaE_warning(L, ")", 0);
 }
+
+void luaE_lock (lua_State *L) {
+  l_mutex_lock(&G(L)->lock);
+}
+
+void luaE_unlock (lua_State *L) {
+  l_mutex_unlock(&G(L)->lock);
+}

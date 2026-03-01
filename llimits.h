@@ -320,8 +320,10 @@ typedef l_uint64 Instruction;
 ** ('lua_lock') and leaves the core ('lua_unlock')
 */
 #if !defined(lua_lock)
-#define lua_lock(L)	((void) 0)
-#define lua_unlock(L)	((void) 0)
+LUAI_FUNC void luaE_lock (lua_State *L);
+LUAI_FUNC void luaE_unlock (lua_State *L);
+#define lua_lock(L)	luaE_lock(L)
+#define lua_unlock(L)	luaE_unlock(L)
 #endif
 
 /*
