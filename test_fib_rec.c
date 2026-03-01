@@ -15,7 +15,7 @@ static int function_0(lua_State *L) {
     lua_createtable(L, 0, 0);
     lua_replace(L, 1);
     Label_3: /* EXTRAARG */
-    /* NOP/EXTRAARG */
+    /* EXTRAARG */
     Label_4: /* CLOSURE */
     lua_pushvalue(L, 1); /* upval 0 (local) */
     lua_pushcclosure(L, function_1, 1);
@@ -34,7 +34,7 @@ static int function_0(lua_State *L) {
     lua_tcc_loadk_int(L, 3, 10);
     Label_8: /* TAILCALL */
     lua_tcc_push_args(L, 2, 2); /* func + args */
-    lua_call(L, 1, LUA_MULTRET);
+    lua_call(L, 1, -1);
     return lua_gettop(L) - 4;
     Label_9: /* RETURN */
     if (vtab_idx == lua_gettop(L)) lua_settop(L, lua_gettop(L) - 1);
@@ -50,7 +50,7 @@ static int function_1(lua_State *L) {
     {
         lua_pushvalue(L, 1);
         lua_pushinteger(L, 2);
-        int res = lua_compare(L, -2, -1, LUA_OPLT);
+        int res = lua_compare(L, -2, -1, 1);
         lua_pop(L, 2);
         if (res != 0) goto Label_3;
     }
@@ -64,7 +64,7 @@ static int function_1(lua_State *L) {
     Label_5: /* ADDI */
     lua_pushvalue(L, 1);
     lua_pushinteger(L, -1);
-    lua_arith(L, LUA_OPADD);
+    lua_arith(L, 0);
     lua_replace(L, 3);
     Label_6: /* MMBINI */
     /* MMBIN: ignored as lua_arith handles it */
@@ -79,7 +79,7 @@ static int function_1(lua_State *L) {
     Label_9: /* ADDI */
     lua_pushvalue(L, 1);
     lua_pushinteger(L, -2);
-    lua_arith(L, LUA_OPADD);
+    lua_arith(L, 0);
     lua_replace(L, 4);
     Label_10: /* MMBINI */
     /* MMBIN: ignored as lua_arith handles it */
