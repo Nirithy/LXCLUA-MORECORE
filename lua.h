@@ -251,6 +251,8 @@ LUA_API lua_State *(lua_newstate) (lua_Alloc f, void *ud, unsigned seed);
  * @param L The Lua state to close.
  */
 LUA_API void       (lua_close) (lua_State *L);
+LUA_API void (lua_locktable) (lua_State *L, int idx);
+LUA_API void (lua_unlocktable) (lua_State *L, int idx);
 
 /**
  * @brief Creates a new thread, pushes it on the stack, and returns a pointer to a lua_State that represents this new thread.
