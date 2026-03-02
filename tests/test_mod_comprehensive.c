@@ -15,6 +15,7 @@ static int function_9(lua_State *L);
 
 /* Proto 0 */
 static int function_0(lua_State *L) {
+    int vtab_idx = 4;
     lua_tcc_prologue(L, 0, 3);
     Label_1: /* VARARGPREP */
     /* VARARGPREP: adjust varargs if needed */
@@ -162,7 +163,7 @@ static int function_0(lua_State *L) {
     lua_createtable(L, 0, 8);
     lua_replace(L, 1);
     Label_40: /* EXTRAARG */
-    /* NOP/EXTRAARG */
+    /* EXTRAARG */
     Label_41: /* GETTABUP */
     lua_tcc_gettabup(L, 1, "test_math", 2);
     Label_42: /* SETFIELD */
@@ -225,7 +226,7 @@ static int function_1(lua_State *L) {
     Label_5: /* ADDI */
     lua_pushvalue(L, 3);
     lua_pushinteger(L, -5);
-    lua_arith(L, LUA_OPADD);
+    lua_arith(L, 0);
     lua_replace(L, 3);
     Label_6: /* MMBINI */
     /* MMBIN: ignored as lua_arith handles it */
@@ -281,14 +282,14 @@ static int function_1(lua_State *L) {
     Label_21: /* SHLI */
     lua_pushvalue(L, 3);
     lua_pushinteger(L, -1);
-    lua_arith(L, LUA_OPSHR);
+    lua_arith(L, 11);
     lua_replace(L, 3);
     Label_22: /* MMBINI */
     /* MMBIN: ignored as lua_arith handles it */
     Label_23: /* SHLI */
     lua_pushvalue(L, 3);
     lua_pushinteger(L, 1);
-    lua_arith(L, LUA_OPSHR);
+    lua_arith(L, 11);
     lua_replace(L, 3);
     Label_24: /* MMBINI */
     /* MMBIN: ignored as lua_arith handles it */
@@ -306,7 +307,7 @@ static int function_2(lua_State *L) {
     {
         lua_pushvalue(L, 2);
         lua_pushvalue(L, 1);
-        int res = lua_compare(L, -2, -1, LUA_OPLT);
+        int res = lua_compare(L, -2, -1, 1);
         lua_pop(L, 2);
         if (res != 0) goto Label_3;
     }
@@ -321,7 +322,7 @@ static int function_2(lua_State *L) {
     {
         lua_pushvalue(L, 1);
         lua_pushvalue(L, 2);
-        int res = lua_compare(L, -2, -1, LUA_OPLT);
+        int res = lua_compare(L, -2, -1, 1);
         lua_pop(L, 2);
         if (res != 0) goto Label_7;
     }
@@ -336,7 +337,7 @@ static int function_2(lua_State *L) {
     {
         lua_pushvalue(L, 2);
         lua_pushvalue(L, 1);
-        int res = lua_compare(L, -2, -1, LUA_OPLE);
+        int res = lua_compare(L, -2, -1, 2);
         lua_pop(L, 2);
         if (res != 0) goto Label_11;
     }
@@ -351,7 +352,7 @@ static int function_2(lua_State *L) {
     {
         lua_pushvalue(L, 1);
         lua_pushvalue(L, 2);
-        int res = lua_compare(L, -2, -1, LUA_OPLE);
+        int res = lua_compare(L, -2, -1, 2);
         lua_pop(L, 2);
         if (res != 0) goto Label_15;
     }
@@ -366,7 +367,7 @@ static int function_2(lua_State *L) {
     {
         lua_pushvalue(L, 1);
         lua_pushvalue(L, 2);
-        int res = lua_compare(L, -2, -1, LUA_OPEQ);
+        int res = lua_compare(L, -2, -1, 0);
         lua_pop(L, 2);
         if (res != 0) goto Label_19;
     }
@@ -388,12 +389,19 @@ static int function_2(lua_State *L) {
 
 /* Proto 3 */
 static int function_3(lua_State *L) {
+    int vtab_idx = 7;
     lua_tcc_prologue(L, 0, 6);
     Label_1: /* VARARGPREP */
     /* VARARGPREP: adjust varargs if needed */
     Label_2: /* VARARG */
+    if (1 + 3 >= vtab_idx) {
+        lua_settop(L, 1 + 3);
+        lua_pushvalue(L, vtab_idx);
+        lua_replace(L, 1 + 3);
+        vtab_idx = 1 + 3;
+    }
     for (int i=0; i<3; i++) {
-        lua_rawgeti(L, 7, i+1);
+        lua_rawgeti(L, vtab_idx, i+1);
         lua_replace(L, 1 + i);
     }
     Label_3: /* MOVE */
@@ -419,7 +427,7 @@ static int function_4(lua_State *L) {
     lua_createtable(L, 12, 1);
     lua_replace(L, 1);
     Label_2: /* EXTRAARG */
-    /* NOP/EXTRAARG */
+    /* EXTRAARG */
     Label_3: /* LOADI */
     lua_tcc_loadk_int(L, 2, 10);
     Label_4: /* LOADI */
@@ -434,7 +442,9 @@ static int function_4(lua_State *L) {
     Label_7: /* SETLIST */
     {
         int n = 3;
-        if (n == 0) n = lua_gettop(L) - 1;
+        if (n == 0) {
+            n = lua_gettop(L) - 1;
+        }
         lua_pushvalue(L, 1); /* table */
         for (int j = 1; j <= n; j++) {
             lua_pushvalue(L, 1 + j);
@@ -524,7 +534,7 @@ static int function_6(lua_State *L) {
     /* MMBIN: ignored as lua_arith handles it */
     Label_10: /* TAILCALL */
     lua_tcc_push_args(L, 3, 3); /* func + args */
-    lua_call(L, 2, LUA_MULTRET);
+    lua_call(L, 2, -1);
     return lua_gettop(L) - 6;
     Label_11: /* RETURN */
     return lua_gettop(L) - 2;

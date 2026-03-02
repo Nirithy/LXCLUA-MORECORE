@@ -30,7 +30,7 @@ static int function_0(lua_State *L) {
     lua_tcc_loadk_int(L, 7, 5);
     Label_9: /* TAILCALL */
     lua_tcc_push_args(L, 2, 6); /* func + args */
-    lua_call(L, 5, LUA_MULTRET);
+    lua_call(L, 5, -1);
     return lua_gettop(L) - 8;
     Label_10: /* RETURN */
     if (vtab_idx == lua_gettop(L)) lua_settop(L, lua_gettop(L) - 1);

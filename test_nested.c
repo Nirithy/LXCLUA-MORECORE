@@ -44,7 +44,7 @@ static int function_0(lua_State *L) {
     {
         lua_pushvalue(L, 6);
         lua_pushinteger(L, 0);
-        int res = lua_compare(L, -2, -1, LUA_OPEQ);
+        int res = lua_compare(L, -2, -1, 0);
         lua_pop(L, 2);
         if (res != 0) goto Label_11;
     }
@@ -75,7 +75,7 @@ static int function_0(lua_State *L) {
     {
         lua_pushvalue(L, 9);
         lua_pushinteger(L, 3);
-        int res = lua_compare(L, -2, -1, LUA_OPEQ);
+        int res = lua_compare(L, -2, -1, 0);
         lua_pop(L, 2);
         if (res != 1) goto Label_17;
     }
@@ -84,7 +84,7 @@ static int function_0(lua_State *L) {
     Label_17: /* ADDI */
     lua_pushvalue(L, 1);
     lua_pushinteger(L, 1);
-    lua_arith(L, LUA_OPADD);
+    lua_arith(L, 0);
     lua_replace(L, 1);
     Label_18: /* MMBINI */
     /* MMBIN: ignored as lua_arith handles it */

@@ -20,7 +20,7 @@ static int function_0(lua_State *L) {
     lua_replace(L, 2);
     Label_4: /* TAILCALL */
     lua_tcc_push_args(L, 2, 1); /* func + args */
-    lua_call(L, 0, LUA_MULTRET);
+    lua_call(L, 0, -1);
     return lua_gettop(L) - 3;
     Label_5: /* RETURN */
     if (vtab_idx == lua_gettop(L)) lua_settop(L, lua_gettop(L) - 1);
@@ -54,7 +54,7 @@ static int function_2(lua_State *L) {
     Label_2: /* ADDI */
     lua_pushvalue(L, 1);
     lua_pushinteger(L, 1);
-    lua_arith(L, LUA_OPADD);
+    lua_arith(L, 0);
     lua_replace(L, 1);
     Label_3: /* MMBINI */
     /* MMBIN: ignored as lua_arith handles it */

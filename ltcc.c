@@ -1619,7 +1619,7 @@ static void emit_instruction(luaL_Buffer *B, Proto *p, int pc, Instruction i, Pr
     }
 }
 
-static void process_proto(luaL_Buffer *B, Proto *p, int id, ProtoInfo *protos, int proto_count, int use_pure_c, int str_encrypt, int seed, int obfuscate) {
+static void process_proto(luaL_Buffer *B, Proto *p, int id, ProtoInfo *protos, int proto_count, int use_pure_c, int str_encrypt, int seed, int obfuscate, int inline_opt) {
     char L_name[16] = "L";
     char vtab_name[16] = "vtab_idx";
     unsigned int obf_seed = (unsigned int)seed + id;
@@ -1630,7 +1630,11 @@ static void process_proto(luaL_Buffer *B, Proto *p, int id, ProtoInfo *protos, i
     }
 
     add_fmt(B, "\n/* Proto %d */\n", id);
-    add_fmt(B, "static int %s(lua_State *%s) {\n", protos[id].name, L_name);
+    if (inline_opt) {
+        add_fmt(B, "static inline int %s(lua_State *%s) {\n", protos[id].name, L_name);
+    } else {
+        add_fmt(B, "static int %s(lua_State *%s) {\n", protos[id].name, L_name);
+    }
 
     if (obfuscate) {
         add_fmt(B, "#define L %s\n", L_name);
@@ -1707,6 +1711,7 @@ static int tcc_compile(lua_State *L) {
     int str_encrypt = 0;
     int seed = 0;
     int provided_flags = 0;
+    int inline_opt = 0;
 
     if (lua_gettop(L) >= 2) {
         if (lua_type(L, 2) == LUA_TTABLE) {
@@ -1729,6 +1734,10 @@ static int tcc_compile(lua_State *L) {
 
              lua_getfield(L, 2, "flags");
              if (!lua_isnil(L, -1)) provided_flags = (int)lua_tointeger(L, -1);
+             lua_pop(L, 1);
+
+             lua_getfield(L, 2, "inline");
+             if (!lua_isnil(L, -1)) inline_opt = lua_toboolean(L, -1);
              lua_pop(L, 1);
 
              /* Parse boolean flags from table and merge into provided_flags */
@@ -1784,6 +1793,10 @@ static int tcc_compile(lua_State *L) {
 
                      lua_getfield(L, 3, "flags");
                      if (!lua_isnil(L, -1)) provided_flags = (int)lua_tointeger(L, -1);
+                     lua_pop(L, 1);
+
+                     lua_getfield(L, 3, "inline");
+                     if (!lua_isnil(L, -1)) inline_opt = lua_toboolean(L, -1);
                      lua_pop(L, 1);
 
                      /* Parse boolean flags from table (arg 3) and merge into provided_flags */
@@ -1911,12 +1924,16 @@ static int tcc_compile(lua_State *L) {
 
     // Forward declarations
     for (int i = 0; i < count; i++) {
-        add_fmt(&B, "static int %s(lua_State *L);\n", protos[i].name);
+        if (inline_opt) {
+            add_fmt(&B, "static inline int %s(lua_State *L);\n", protos[i].name);
+        } else {
+            add_fmt(&B, "static int %s(lua_State *L);\n", protos[i].name);
+        }
     }
 
     // Implementations
     for (int i = 0; i < count; i++) {
-        process_proto(&B, protos[i].p, protos[i].id, protos, count, use_pure_c, str_encrypt, seed, obfuscate);
+        process_proto(&B, protos[i].p, protos[i].id, protos, count, use_pure_c, str_encrypt, seed, obfuscate, inline_opt);
     }
 
     // Main entry point
