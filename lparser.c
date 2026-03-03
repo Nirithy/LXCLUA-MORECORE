@@ -2877,6 +2877,34 @@ static void primaryexp (LexState *ls, expdesc *v) {
       check(ls, TK_NAME);
       kwname = ls->t.seminfo.ts;
       
+      if (strcmp(getstr(kwname), "embed") == 0) {
+         luaX_next(ls); /* skip embed */
+         if (ls->t.token != TK_STRING && ls->t.token != TK_RAWSTRING) {
+             luaX_syntaxerror(ls, "expected string literal after $embed");
+         }
+         const char *filename = getstr(ls->t.seminfo.ts);
+         FILE *f = fopen(filename, "rb");
+         if (!f) {
+             luaX_syntaxerror(ls, luaO_pushfstring(ls->L, "cannot open file '%s' for $embed", filename));
+         }
+         fseek(f, 0, SEEK_END);
+         long size = ftell(f);
+         fseek(f, 0, SEEK_SET);
+         char *buf = luaM_newvector(ls->L, size + 1, char);
+         if (size > 0 && fread(buf, 1, size, f) != (size_t)size) {
+             fclose(f);
+             luaM_freearray(ls->L, buf, size + 1);
+             luaX_syntaxerror(ls, "failed to read file for $embed");
+         }
+         fclose(f);
+         buf[size] = '\0';
+         TString *ts = luaS_newlstr(ls->L, buf, size);
+         luaM_freearray(ls->L, buf, size + 1);
+         codestring(v, ts);
+         luaX_next(ls); /* skip string */
+         return;
+      }
+
       if (strcmp(getstr(kwname), "object") == 0) {
         luaX_next(ls); /* skip 'object' */
         checknext(ls, '(');
@@ -4365,6 +4393,51 @@ static BinOpr subexpr (LexState *ls, expdesc *v, int limit) {
   BinOpr op;
   UnOpr uop;
   enterlevel(ls);
+
+  if (ls->t.token == '#' && luaX_lookahead(ls) == TK_NAME && strcmp(getstr(ls->lookahead.seminfo.ts), "embed") == 0) {
+      luaX_next(ls); /* skip '#' */
+      luaX_next(ls); /* skip 'embed' */
+      if (ls->t.token != TK_STRING && ls->t.token != TK_RAWSTRING) {
+          luaX_syntaxerror(ls, "expected string literal after #embed");
+      }
+      const char *filename = getstr(ls->t.seminfo.ts);
+      FILE *f = fopen(filename, "rb");
+      if (!f) {
+          luaX_syntaxerror(ls, luaO_pushfstring(ls->L, "cannot open file '%s' for #embed", filename));
+      }
+      fseek(f, 0, SEEK_END);
+      long size = ftell(f);
+      fseek(f, 0, SEEK_SET);
+      char *buf = luaM_newvector(ls->L, size + 1, char);
+      if (size > 0 && fread(buf, 1, size, f) != (size_t)size) {
+          fclose(f);
+          luaM_freearray(ls->L, buf, size + 1);
+          luaX_syntaxerror(ls, "failed to read file for #embed");
+      }
+      fclose(f);
+      buf[size] = '\0';
+      TString *ts = luaS_newlstr(ls->L, buf, size);
+      luaM_freearray(ls->L, buf, size + 1);
+      codestring(v, ts);
+      luaX_next(ls); /* skip string */
+
+      /* parse binary operators */
+      op = getbinopr(ls->t.token);
+      while (op != OPR_NOBINOPR && priority[op].left > limit) {
+        expdesc v2;
+        BinOpr nextop;
+        int line = ls->linenumber;
+        luaX_next(ls);  /* skip operator */
+        luaK_infix(ls->fs, op, v);
+        /* read sub-expression with higher priority */
+        nextop = subexpr(ls, &v2, priority[op].right);
+        luaK_posfix(ls->fs, op, v, &v2, line);
+        op = nextop;
+      }
+      leavelevel(ls);
+      return op;  /* return first untreated operator */
+  }
+
   uop = getunopr(ls->t.token);
   if (uop != OPR_NOUNOPR) {  /* prefix (unary) operator? */
     int line = ls->linenumber;
