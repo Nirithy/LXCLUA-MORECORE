@@ -39,8 +39,10 @@ PLATS= guess aix bsd c89 freebsd generic ios linux macosx mingw posix solaris
 LUA_A=	liblua.a
 CORE_O= lapi.o lcode.o lctype.o ldebug.o ldo.o ldump.o lfunc.o lgc.o llex.o lmem.o lobject.o lopcodes.o lparser.o lstate.o lstring.o ltable.o ltm.o lundump.o lvm.o lzio.o lobfuscate.o lthread.o lstruct.o lnamespace.o lbigint.o lsuper.o
 WASM3_O= m3_api_libc.o m3_api_meta_wasi.o m3_api_tracer.o m3_api_uvwasi.o m3_api_wasi.o m3_bind.o m3_code.o m3_compile.o m3_core.o m3_env.o m3_exec.o m3_function.o m3_info.o m3_module.o m3_parse.o
-LIB_O= lauxlib.o lbaselib.o lcorolib.o ldblib.o liolib.o lmathlib.o loadlib.o loslib.o lstrlib.o ltablib.o lutf8lib.o linit.o json_parser.o lboolib.o lbitlib.o lptrlib.o ludatalib.o lvmlib.o lclass.o ltranslator.o lsmgrlib.o logtable.o sha256.o aes.o crc.o lthreadlib.o libhttp.o lfs.o lproclib.o lvmpro.o ltcc.o lbytecode.o lwasm3.o $(WASM3_O)
-BASE_O= $(CORE_O) $(LIB_O) $(MYOBJS)
+LIB_O= lauxlib.o lbaselib.o lcorolib.o ldblib.o liolib.o lmathlib.o loadlib.o loslib.o lstrlib.o ltablib.o lutf8lib.o linit.o json_parser.o lboolib.o lbitlib.o lptrlib.o ludatalib.o lvmlib.o lclass.o ltranslator.o lsmgrlib.o logtable.o sha256.o aes.o crc.o lthreadlib.o libhttp.o lfs.o lproclib.o lvmpro.o ltcc.o lbytecode.o
+LIB_O_WASM= lwasm3.o $(WASM3_O)
+BASE_O= $(CORE_O) $(LIB_O) $(LIB_O_WASM) $(MYOBJS)
+BASE_O_WASM= $(CORE_O) $(LIB_O) $(LIB_O_WASM) $(MYOBJS)
 
 LUA_T=	lxclua
 LUA_O=	lua.o
@@ -148,25 +150,26 @@ Darwin macos macosx:
 	$(MAKE) $(ALL) SYSCFLAGS="-DLUA_USE_MACOSX -DLUA_USE_READLINE" SYSLIBS="-lreadline"
 
 mingw:
-	TMPDIR=. TMP=. TEMP=. $(MAKE) "LUA_A=lua55.dll" "LUA_T=lxclua.exe" \
-	"AR=$(CC) -shared -o" "RANLIB=strip --strip-unneeded" \
-	"SYSCFLAGS=-DLUA_BUILD_AS_DLL -DLUA_COMPAT_MATHLIB -DLUA_COMPAT_MAXN -DLUA_COMPAT_MODULE" "SYSLIBS=$(MYLIBS)" "SYSLDFLAGS=-s -lwininet -lws2_32" \
+	TMPDIR=. TMP=. TEMP=. $(MAKE) "LUA_A=liblua.a" "LUA_T=lxclua.exe" \
+	"AR=$(AR)" "RANLIB=$(RANLIB)" \
+	"SYSCFLAGS=-DLUA_COMPAT_MATHLIB -DLUA_COMPAT_MAXN -DLUA_COMPAT_MODULE" "SYSLIBS=-lwininet -lws2_32" "SYSLDFLAGS=-s" \
 	"MYOBJS=$(MYOBJS)" lxclua.exe
 	TMPDIR=. TMP=. TEMP=. $(MAKE) "LUA_A=liblua.a" "LUAC_T=luac.exe" \
-	"SYSCFLAGS=-DLUA_BUILD_AS_DLL -DLUA_COMPAT_MATHLIB -DLUA_COMPAT_MAXN -DLUA_COMPAT_MODULE" "SYSLIBS=$(MYLIBS)" "SYSLDFLAGS=-s -lwininet -lws2_32" \
+	"AR=$(AR)" "RANLIB=$(RANLIB)" \
+	"SYSCFLAGS=-DLUA_COMPAT_MATHLIB -DLUA_COMPAT_MAXN -DLUA_COMPAT_MODULE" "SYSLIBS=-lwininet -lws2_32" "SYSLDFLAGS=-s" \
 	luac.exe
-	TMPDIR=. TMP=. TEMP=. $(MAKE) "LBCDUMP_T=lbcdump.exe" "SYSLDFLAGS=-s -lwininet -lws2_32" lbcdump.exe
+	TMPDIR=. TMP=. TEMP=. $(MAKE) "LBCDUMP_T=lbcdump.exe" "SYSLDFLAGS=-s" "SYSLIBS=-lwininet -lws2_32" lbcdump.exe
 
 mingw-static:
 	TMPDIR=. TMP=. TEMP=. $(MAKE) "LUA_A=liblua.a" "LUA_T=lxclua.exe" \
 	"AR=$(AR)" "RANLIB=$(RANLIB)" \
-	"SYSCFLAGS=-DLUA_COMPAT_MATHLIB -DLUA_COMPAT_MAXN -DLUA_COMPAT_MODULE" "SYSLIBS=$(MYLIBS)" "SYSLDFLAGS=-s -lwininet -lws2_32" \
+	"SYSCFLAGS=-DLUA_COMPAT_MATHLIB -DLUA_COMPAT_MAXN -DLUA_COMPAT_MODULE" "SYSLIBS=-lwininet -lws2_32" "SYSLDFLAGS=-s" \
 	"MYOBJS=$(MYOBJS)" lxclua.exe
 	TMPDIR=. TMP=. TEMP=. $(MAKE) "LUA_A=liblua.a" "LUAC_T=luac.exe" \
 	"AR=$(AR)" "RANLIB=$(RANLIB)" \
-	"SYSCFLAGS=-DLUA_COMPAT_MATHLIB -DLUA_COMPAT_MAXN -DLUA_COMPAT_MODULE" "SYSLIBS=$(MYLIBS)" "SYSLDFLAGS=-s -lwininet -lws2_32" \
+	"SYSCFLAGS=-DLUA_COMPAT_MATHLIB -DLUA_COMPAT_MAXN -DLUA_COMPAT_MODULE" "SYSLIBS=-lwininet -lws2_32" "SYSLDFLAGS=-s" \
 	luac.exe
-	TMPDIR=. TMP=. TEMP=. $(MAKE) "LBCDUMP_T=lbcdump.exe" "SYSLDFLAGS=-s -lwininet -lws2_32" lbcdump.exe
+	TMPDIR=. TMP=. TEMP=. $(MAKE) "LBCDUMP_T=lbcdump.exe" "SYSLDFLAGS=-s" "SYSLIBS=-lwininet -lws2_32" lbcdump.exe
 
 
 posix:

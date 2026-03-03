@@ -73,7 +73,23 @@ LOCAL_SRC_FILES := \
 	lstruct.c \
 	sha256.c \
 	ltcc.c\
-	lobfuscate.c
+	lobfuscate.c \
+	lwasm3.c \
+	m3_api_libc.c \
+	m3_api_meta_wasi.c \
+	m3_api_tracer.c \
+	m3_api_uvwasi.c \
+	m3_api_wasi.c \
+	m3_bind.c \
+	m3_code.c \
+	m3_compile.c \
+	m3_core.c \
+	m3_env.c \
+	m3_exec.c \
+	m3_function.c \
+	m3_info.c \
+	m3_module.c \
+	m3_parse.c
 
 LOCAL_CFLAGS += -DLUA_DL_DLOPEN -DLUA_COMPAT_MATHLIB -DLUA_COMPAT_MAXN -DLUA_COMPAT_MODULE
 
