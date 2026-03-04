@@ -29,45 +29,9 @@
 #include "lualib.h"
 #include "llimits.h"
 
-#define STB_IMAGE_WRITE_STATIC
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#define STBIW_MALLOC(sz) malloc(sz)
-#define STBIW_REALLOC(p,newsz) realloc(p,newsz)
-#define STBIW_FREE(p) free(p)
-#include "stb_image_write.h"
-
-#include "stb_image.h"
-
 #include "aes.h"
 #include "crc.h"
 #include "sha256.h"
-
-#define STB_IMAGE_RESIZE_IMPLEMENTATION
-#include "stb_image_resize2.h"
-
-typedef struct {
-  unsigned char *data;
-  long len;
-  long max_len;
-} PngWriteContext;
-
-static void png_write_callback(void *context, void *data, int size) {
-  PngWriteContext *ctx = (PngWriteContext *)context;
-  long needed_len = ctx->len + size;
-  if (needed_len > ctx->max_len) {
-    // 动态扩展内存，确保有足够的空间
-    long new_max_len = needed_len * 2;
-    unsigned char *new_data = (unsigned char *)realloc(ctx->data, new_max_len);
-    if (!new_data) {
-      // 内存分配失败，直接返回，后续会处理错误
-      return;
-    }
-    ctx->data = new_data;
-    ctx->max_len = new_max_len;
-  }
-  memcpy(ctx->data + ctx->len, data, size);
-  ctx->len += size;
-}
 
 
 /*
@@ -1731,53 +1695,6 @@ static int str_sha256(lua_State *L) {
   return 1;
 }
 
-/*
-** Image Resize (Binary string -> Binary string)
-** Args: png_data (string), width (int), height (int)
-** Returns: resized_png_data (string)
-*/
-static int str_resize_image(lua_State *L) {
-  size_t len;
-  const char *data = luaL_checklstring(L, 1, &len);
-  int w = (int)luaL_checkinteger(L, 2);
-  int h = (int)luaL_checkinteger(L, 3);
-  
-  int iw, ih, channels;
-  unsigned char *img = stbi_load_from_memory((const unsigned char*)data, (int)len, &iw, &ih, &channels, 0);
-  if (!img) {
-    return luaL_error(L, "Failed to decode image");
-  }
-  
-  unsigned char *resized = stbir_resize_uint8_linear(img, iw, ih, 0, NULL, w, h, 0, (stbir_pixel_layout)channels);
-  stbi_image_free(img);
-  
-  if (!resized) {
-    return luaL_error(L, "Failed to resize image");
-  }
-  
-  /* Encode back to PNG */
-  PngWriteContext ctx = {0};
-  ctx.max_len = w * h * channels + 1024; /* Rough estimate */
-  ctx.data = (unsigned char *)malloc(ctx.max_len);
-  
-  if (!ctx.data) {
-    free(resized);
-    return luaL_error(L, "Memory allocation failed");
-  }
-  
-  int res = stbi_write_png_to_func(png_write_callback, &ctx, w, h, channels, resized, 0);
-  free(resized);
-  
-  if (!res) {
-    free(ctx.data);
-    return luaL_error(L, "Failed to encode resized image");
-  }
-  
-  lua_pushlstring(L, (const char*)ctx.data, ctx.len);
-  free(ctx.data);
-  return 1;
-}
-
 /* }=========================================== */
 
 
@@ -2638,216 +2555,6 @@ static int str_unpack (lua_State *L) {
 
 /* }=========================================== */
 
-#include <math.h>
-
-extern int stbi_write_png_compression_level;
-extern int stbi_write_force_png_filter;
-
-/**
- * 将文件内容转换为PNG图像数据（彩色）
- * @param L Lua状态机
- * @return 返回PNG图像数据（字符串）或错误信息
- * 参数:
- *   arg1: 文件路径 (string)
- *   arg2: 输出图像路径 (string, optional) - 如果提供则保存到文件，否则返回图像数据
- *   arg3: 图像宽度 (integer, optional, default: 256)
- */
-static int str_file2png (lua_State *L) {
-  stbi_write_png_compression_level = 0;
-  stbi_write_force_png_filter = 0;
-  const char *file_path = luaL_checkstring(L, 1);
-  const char *output_path = luaL_optstring(L, 2, NULL);
-  lua_Integer width = luaL_optinteger(L, 3, 256);
-  
-  if (width <= 0) {
-    return luaL_error(L, "图像宽度必须大于0");
-  }
-  
-  FILE *fp = fopen(file_path, "rb");
-  if (!fp) {
-    return luaL_error(L, "无法打开文件: %s", file_path);
-  }
-  
-  fseek(fp, 0, SEEK_END);
-  long file_size = ftell(fp);
-  fseek(fp, 0, SEEK_SET);
-  
-  if (file_size < 0) {
-    fclose(fp);
-    return luaL_error(L, "无法获取文件大小");
-  }
-  
-  unsigned char *file_data = (unsigned char *)malloc(file_size);
-  if (!file_data) {
-    fclose(fp);
-    return luaL_error(L, "内存分配失败");
-  }
-  
-  size_t read_size = fread(file_data, 1, file_size, fp);
-  fclose(fp);
-  
-  if (read_size != (size_t)file_size) {
-    free(file_data);
-    return luaL_error(L, "读取文件失败");
-  }
-  
-  int img_width = (int)width;
-  // 正确计算图像高度：每个字节对应一个像素，每个像素3字节RGB
-  long img_height_long = (file_size + (long)img_width - 1) / (long)img_width;
-  
-  // 确保高度不超过int的最大值，避免溢出
-  int img_height = (int)img_height_long;
-  if (img_height_long > 2147483647L) {
-    img_height = 2147483647;
-  }
-  
-  // 使用 long 类型计算内存大小，避免溢出
-  long image_data_size = (long)img_width * img_height * 3;
-  unsigned char *image_data = (unsigned char *)malloc(image_data_size);
-  if (!image_data) {
-    free(file_data);
-    return luaL_error(L, "内存分配失败");
-  }
-  
-  memset(image_data, 0x75, image_data_size); /* 0x20 ^ 0x55 = 0x75, so restored padding is space */
-  
-  // 处理所有字节，确保完整转换
-  {
-    unsigned char *dst = image_data;
-    long i = 0;
-    int pos = 0;
-    static const int channel_map[] = {0, 1, 2, 2, 1, 0, 2, 1, 0};
-    for (int y = 0; y < img_height; y++) {
-      for (int x = 0; x < img_width; x++) {
-        if (i >= file_size) goto end_file_loop;
-        dst[channel_map[pos]] = file_data[i] ^ 0x55;
-        dst += 3;
-        i++;
-        if (++pos == 9) pos = 0;
-      }
-    }
-    end_file_loop:;
-  }
-  
-  free(file_data);
-  
-  if (output_path) {
-    int result = stbi_write_png(output_path, img_width, img_height, 3, image_data, img_width * 3);
-    free(image_data);
-    
-    if (!result) {
-      return luaL_error(L, "写入PNG文件失败: %s", output_path);
-    }
-    
-    lua_pushboolean(L, 1);
-    return 1;
-  } else {
-    PngWriteContext ctx = {0};
-    // 使用 long 类型计算初始内存大小，避免溢出
-    ctx.max_len = (long)img_width * img_height * 4;
-    ctx.data = (unsigned char *)malloc(ctx.max_len);
-    
-    int result = stbi_write_png_to_func(png_write_callback, &ctx, img_width, img_height, 3, image_data, img_width * 3);
-    free(image_data);
-    
-    if (!result || ctx.len <= 0) {
-      free(ctx.data);
-      return luaL_error(L, "生成PNG数据失败");
-    }
-    
-    lua_pushlstring(L, (const char *)ctx.data, ctx.len);
-    free(ctx.data);
-    return 1;
-  }
-}
-
-/**
- * 将PNG图像数据或文件转换回原始文件
- * @param L Lua状态机
- * @return 返回1表示成功，错误返回nil+错误信息
- * 参数:
- *   arg1: PNG图像路径或PNG数据 (string)
- *   arg2: 输出文件路径 (string)
- *   arg3: 原始文件大小 (integer, optional) - 如果提供则只读取指定字节数
- */
-static int str_png2file (lua_State *L) {
-  const char *png_input = luaL_checkstring(L, 1);
-  const char *output_path = luaL_checkstring(L, 2);
-  lua_Integer original_size = luaL_optinteger(L, 3, 0);
-  
-  int img_width, img_height, img_comp;
-  unsigned char *image_data = NULL;
-  
-  const char *png_data = NULL;
-  size_t png_len = 0;
-  
-  if (lua_gettop(L) >= 1 && lua_type(L, 1) == LUA_TSTRING) {
-    const char *input = lua_tolstring(L, 1, &png_len);
-    if (png_len > 8) {
-      unsigned char png_sig[8] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
-      if (memcmp(input, png_sig, 8) == 0) {
-        image_data = stbi_load_from_memory((const unsigned char *)input, (int)png_len, &img_width, &img_height, &img_comp, STBI_rgb);
-      }
-    }
-  }
-  
-  if (!image_data) {
-    image_data = stbi_load(png_input, &img_width, &img_height, &img_comp, STBI_rgb);
-  }
-  
-  if (!image_data) {
-    return luaL_error(L, "无法加载PNG图像: %s", png_input);
-  }
-  
-  long max_bytes = (long)img_width * img_height;
-  long actual_size;
-  
-  if (original_size > 0) {
-    if (original_size > max_bytes) {
-      stbi_image_free(image_data);
-      return luaL_error(L, "原始文件大小(%ld)超过图像容量(%ld)", (long)original_size, max_bytes);
-    }
-    actual_size = (long)original_size;
-  } else {
-    actual_size = max_bytes;
-  }
-  
-  FILE *fp = fopen(output_path, "wb");
-  if (!fp) {
-    stbi_image_free(image_data);
-    return luaL_error(L, "无法创建输出文件: %s", output_path);
-  }
-  
-  {
-    long i = 0;
-    int pos = 0;
-    static const int channel_map[] = {0, 1, 2, 2, 1, 0, 2, 1, 0};
-    unsigned char *src = image_data;
-    for (int y = 0; y < img_height; y++) {
-      for (int x = 0; x < img_width; x++) {
-        unsigned char byte;
-        if (i >= actual_size) goto end_png2file_loop;
-        byte = src[channel_map[pos]] ^ 0x55;
-        if (fwrite(&byte, 1, 1, fp) != 1) {
-          fclose(fp);
-          stbi_image_free(image_data);
-          return luaL_error(L, "写入文件失败");
-        }
-        src += 3;
-        i++;
-        if (++pos == 9) pos = 0;
-      }
-    }
-    end_png2file_loop:;
-  }
-  
-  fclose(fp);
-  stbi_image_free(image_data);
-  
-  lua_pushboolean(L, 1);
-  return 1;
-}
-
 /**
  * 读取文件内容
  * @param L Lua状态机
@@ -2891,190 +2598,6 @@ static int str_file (lua_State *L) {
   return 1;
 }
 
-/**
- * 将数据转换为PNG图像数据
- * @param L Lua状态机
- * @return 返回PNG图像数据（字符串）
- * 参数:
- *   arg1: 原始数据 (string)
- *   arg2: 图像宽度 (integer, optional, default: 256)
- */
-static int str_data2png (lua_State *L) {
-  stbi_write_png_compression_level = 0;
-  size_t data_size;
-  const char *data = luaL_checklstring(L, 1, &data_size);
-  lua_Integer width = luaL_optinteger(L, 2, 256);
-  
-  if (width <= 0) {
-    return luaL_error(L, "图像宽度必须大于0");
-  }
-  
-  int img_width = (int)width;
-  // 正确计算图像高度：每个字节对应一个像素，每个像素3字节RGB
-  long img_height_long = (data_size + (long)img_width - 1) / (long)img_width;
-  // 确保高度不超过int范围
-  int img_height = (int)img_height_long;
-  if (img_height != img_height_long) {
-    return luaL_error(L, "图像高度超出范围");
-  }
-  
-  unsigned char *image_data = (unsigned char *)malloc((size_t)img_width * img_height * 3);
-  if (!image_data) {
-    return luaL_error(L, "内存分配失败");
-  }
-  
-  memset(image_data, 0x75, img_width * img_height * 3); /* 0x20 ^ 0x55 = 0x75, so restored padding is space */
-  
-  {
-    unsigned char *dst = image_data;
-    size_t i = 0;
-    int pos = 0;
-    static const int channel_map[] = {0, 1, 2, 2, 1, 0, 2, 1, 0};
-    for (int y = 0; y < img_height; y++) {
-      for (int x = 0; x < img_width; x++) {
-        if (i >= data_size) goto end_data_loop;
-        dst[channel_map[pos]] = ((const unsigned char *)data)[i] ^ 0x55;
-        dst += 3;
-        i++;
-        if (++pos == 9) pos = 0;
-      }
-    }
-    end_data_loop:;
-  }
-  
-  PngWriteContext ctx = {0};
-  ctx.max_len = img_width * img_height * 4;
-  ctx.data = (unsigned char *)malloc(ctx.max_len);
-  if (!ctx.data) {
-    free(image_data);
-    return luaL_error(L, "内存分配失败");
-  }
-  
-  int result = stbi_write_png_to_func(png_write_callback, &ctx, img_width, img_height, 3, image_data, img_width * 3);
-  free(image_data);
-  
-  if (!result || ctx.len <= 0) {
-    free(ctx.data);
-    return luaL_error(L, "生成PNG数据失败");
-  }
-  
-  lua_pushlstring(L, (const char *)ctx.data, ctx.len);
-  free(ctx.data);
-  return 1;
-}
-
-/**
- * 将PNG图像数据转换回原始数据
- * @param L Lua状态机
- * @return 返回原始数据（字符串）
- * 参数:
- *   arg1: PNG数据 (string)
- *   arg2: 原始数据大小 (integer, optional) - 如果提供则只返回指定字节数
- */
-static int str_png2data (lua_State *L) {
-  size_t png_len;
-  const char *png_data = luaL_checklstring(L, 1, &png_len);
-  lua_Integer original_size = luaL_optinteger(L, 2, 0);
-  
-  int img_width, img_height, img_comp;
-  unsigned char *image_data = stbi_load_from_memory((const unsigned char *)png_data, (int)png_len, &img_width, &img_height, &img_comp, STBI_rgb);
-  
-  if (!image_data) {
-    return luaL_error(L, "无法加载PNG图像数据");
-  }
-  
-  long expected_size = (long)img_width * img_height;
-  long actual_size = original_size > 0 ? original_size : expected_size;
-  
-  if (actual_size > expected_size) {
-    stbi_image_free(image_data);
-    return luaL_error(L, "原始数据大小超过PNG容量");
-  }
-  
-  unsigned char *result_data = (unsigned char *)malloc(actual_size);
-  if (!result_data) {
-    stbi_image_free(image_data);
-    return luaL_error(L, "内存分配失败");
-  }
-  
-  {
-    long i = 0;
-    int pos = 0;
-    static const int channel_map[] = {0, 1, 2, 2, 1, 0, 2, 1, 0};
-    unsigned char *src = image_data;
-    for (int y = 0; y < img_height; y++) {
-      for (int x = 0; x < img_width; x++) {
-        if (i >= actual_size) goto end_png2data_loop;
-        result_data[i] = src[channel_map[pos]] ^ 0x55;
-        src += 3;
-        i++;
-        if (++pos == 9) pos = 0;
-      }
-    }
-    end_png2data_loop:;
-  }
-  
-  stbi_image_free(image_data);
-  lua_pushlstring(L, (const char *)result_data, actual_size);
-  free(result_data);
-  return 1;
-}
-
-/**
- * 将PNG图像数据还原并作为Lua代码执行
- * @param L Lua状态机
- * @return 返回执行结果
- * 参数:
- *   arg1: PNG数据 (string)
- */
-static int str_data (lua_State *L) {
-  size_t png_len;
-  const char *png_data = luaL_checklstring(L, 1, &png_len);
-  
-  int img_width, img_height, img_comp;
-  unsigned char *image_data = stbi_load_from_memory((const unsigned char *)png_data, (int)png_len, &img_width, &img_height, &img_comp, STBI_rgb);
-  
-  if (!image_data) {
-    return luaL_error(L, "无法加载PNG图像数据");
-  }
-  
-  long expected_size = (long)img_width * img_height;
-  
-  unsigned char *result_data = (unsigned char *)malloc(expected_size);
-  if (!result_data) {
-    stbi_image_free(image_data);
-    return luaL_error(L, "内存分配失败");
-  }
-  
-  {
-    long i = 0;
-    int pos = 0;
-    static const int channel_map[] = {0, 1, 2, 2, 1, 0, 2, 1, 0};
-    unsigned char *src = image_data;
-    for (int y = 0; y < img_height; y++) {
-      for (int x = 0; x < img_width; x++) {
-        if (i >= expected_size) goto end_data_loop;
-        result_data[i] = src[channel_map[pos]] ^ 0x55;
-        src += 3;
-        i++;
-        if (++pos == 9) pos = 0;
-      }
-    }
-    end_data_loop:;
-  }
-  
-  stbi_image_free(image_data);
-  
-  int status = luaL_loadbuffer(L, (const char *)result_data, expected_size, "=(PNG data)");
-  free(result_data);
-  
-  if (status != LUA_OK) {
-    return lua_error(L);
-  }
-  
-  return lua_pcall(L, 0, LUA_MULTRET, 0);
-}
-
 
 static const luaL_Reg strlib[] = {
   {"aes_decrypt", str_aes_decrypt},
@@ -3083,14 +2606,11 @@ static const luaL_Reg strlib[] = {
   {"char", str_char},
   {"contains", str_contains},
   {"crc32", str_crc32},
-  {"data", str_data},
-  {"data2png", str_data2png},
   {"dump", str_dump},
   {"endswith", str_endswith},
   {"envelop", str_envelop},
   {"escape", str_escape},
   {"file", str_file},
-  {"file2png", str_file2png},
   {"find", str_find},
   {"format", str_format},
   {"fromhex", str_fromhex},
@@ -3098,15 +2618,12 @@ static const luaL_Reg strlib[] = {
   {"gmatch", gmatch},
   {"gsub", str_gsub},
   {"hex", str_hex},
-  {"imageresize", str_resize_image},
   {"len", str_len},
   {"lower", str_lower},
   {"ltrim", str_ltrim},
   {"match", str_match},
   {"pack", str_pack},
   {"packsize", str_packsize},
-  {"png2data", str_png2data},
-  {"png2file", str_png2file},
   {"rep", str_rep},
   {"reverse", str_reverse},
   {"rtrim", str_rtrim},

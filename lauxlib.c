@@ -28,9 +28,6 @@
 #include "llimits.h"
 #include "json_parser.h"
 
-#define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
-
 #include "aes.h"
 #include "sha256.h"
 
@@ -1062,86 +1059,6 @@ LUALIB_API int luaL_loadfilex (lua_State *L, const char *filename,
     lf.buff[lf.n++] = '\n';  /* Add newline to correct line numbers */
   if (c != EOF)
     lf.buff[lf.n++] = c;  /* 'c' is the first character */
-  
-  /* Check if it is a PNG file */
-  if (c == 0x89) {
-    unsigned char png_sig[7] = {0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
-    unsigned char check_sig[7] = {0};
-    int num=fread(check_sig, 1, 7, lf.f); printf("fread=%d, memcmp=%d\n", num, memcmp(check_sig, png_sig, 7)); if(num==7 && memcmp(check_sig, png_sig, 7) == 0) {
-      /* It is a PNG file, re-read the entire file */
-      if (filename) {
-        fseek(lf.f, 0, SEEK_END);
-        long png_size_long = ftell(lf.f);
-        fseek(lf.f, 0, SEEK_SET);
-        
-        if (png_size_long > 0 && png_size_long < 100 * 1024 * 1024) {  /* Limit 100MB */
-          size_t png_size = (size_t)png_size_long;
-          unsigned char *png_data = (unsigned char *)malloc(png_size);
-          if (!png_data) {
-            if (filename) fclose(lf.f);
-            return errfile(L, "allocate", fnameindex);
-          }
-          
-          size_t read_len = fread(png_data, 1, png_size, lf.f);
-          if (filename) fclose(lf.f);
-          
-          if (read_len != png_size) {
-            free(png_data);
-            return errfile(L, "read", fnameindex);
-          }
-          
-          /* Decode PNG */
-          int img_width, img_height, img_comp;
-          unsigned char *image_data = stbi_load_from_memory(png_data, (int)png_size, &img_width, &img_height, &img_comp, STBI_rgb);
-          free(png_data);
-          
-          if (!image_data) {
-            return errfile(L, "decode png", fnameindex);
-          }
-          
-          /* Check if size is safe */
-          long expected_size_long = (long)img_width * img_height;
-          if (expected_size_long < 0 || expected_size_long > 50 * 1024 * 1024) {  /* Limit 50MB */
-            stbi_image_free(image_data);
-            return errfile(L, "file too large", fnameindex);
-          }
-          size_t expected_size = (size_t)expected_size_long;
-          
-          unsigned char *restored_data = (unsigned char *)malloc(expected_size);
-          if (!restored_data) {
-            stbi_image_free(image_data);
-            return errfile(L, "allocate", fnameindex);
-          }
-          
-          for (size_t i = 0; i < expected_size; i++) {
-            int x = i % img_width;
-            int y = i / img_width;
-            int img_idx = (y * img_width + x) * 3;
-            // 3-channel storage pattern as requested
-            int channel_index;
-            int pos = i % 9;
-            if (pos == 0) channel_index = 0;    // Byte 1 -> Channel 1
-            else if (pos == 1) channel_index = 1;   // Byte 2 -> Channel 2
-            else if (pos == 2) channel_index = 2;   // Byte 3 -> Channel 3
-            else if (pos == 3) channel_index = 2;   // Byte 4 -> Channel 3
-            else if (pos == 4) channel_index = 1;   // Byte 5 -> Channel 2
-            else if (pos == 5) channel_index = 0;   // Byte 6 -> Channel 1
-            else if (pos == 6) channel_index = 2;   // Byte 7 -> Channel 3
-            else if (pos == 7) channel_index = 1;   // Byte 8 -> Channel 2
-            else channel_index = 0;   // Byte 9 -> Channel 1
-            restored_data[i] = image_data[img_idx + channel_index] ^ 0x55;
-          }
-          
-          stbi_image_free(image_data);
-          
-          printf("RESTORED DATA FIRST 4 BYTES: %02X %02X %02X %02X\n", restored_data[0], restored_data[1], restored_data[2], restored_data[3]); status = luaL_loadbuffer(L, (const char *)restored_data, expected_size, lua_tostring(L, -1)); printf("status=%d, err=%s\n", status, lua_tostring(L, -1));
-          free(restored_data);
-          lua_remove(L, fnameindex);
-          return status;
-        }
-      }
-    }
-  }
   
   /* Load file normally */
   status = lua_load(L, getF, &lf, lua_tostring(L, -1), mode);

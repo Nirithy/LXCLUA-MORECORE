@@ -213,8 +213,175 @@ wasm-minimal:
 	"LBCDUMP_T=lbcdump.js" \
 	"LDFLAGS=-sWASM=1 -sEXPORTED_RUNTIME_METHODS=ccall,cwrap -sMODULARIZE=1 -sEXPORT_NAME=LuaModule -sALLOW_MEMORY_GROWTH=1 -sFILESYSTEM=0 --closure 1 -sINVOKE_RUN=0"
 
+# 将 C 文件编译为 WASM 模块（供 wasm3 使用）
+# 用法: 
+#   make wasm-c SRC=xxx.c [OUT=xxx.wasm] [EXPORTS="_func1,_func2"]
+#   make wasm-c-all SRC=xxx.c [OUT=xxx.wasm]   (导出所有函数)
+# 示例: 
+#   make wasm-c SRC=test.c
+#   make wasm-c SRC=test.c OUT=mylib.wasm EXPORTS="_add,_mul"
+#   make wasm-c-all SRC=test.c
+WASM_CFLAGS= -O3 -DNDEBUG
+WASM_LDFLAGS= -sWASM=1 -sSTANDALONE_WASM=1 -sALLOW_MEMORY_GROWTH=1 --no-entry
+WASM_EXPORTS= 
+
+wasm-c:
+ifndef SRC
+	$(error "用法: make wasm-c SRC=xxx.c [OUT=xxx.wasm] [EXPORTS=\"_func1,_func2\"]")
+endif
+	@echo "编译 $(SRC) -> $(if $(OUT),$(OUT),$(basename $(SRC)).wasm)"
+	$(EMCC) $(WASM_CFLAGS) $(SRC) -o $(if $(OUT),$(OUT),$(basename $(SRC)).wasm) \
+		$(WASM_LDFLAGS) \
+		-sEXPORTED_FUNCTIONS=_malloc,_free$(if $(WASM_EXPORTS),$(comma)$(WASM_EXPORTS))
+	@echo "完成! 输出文件: $(if $(OUT),$(OUT),$(basename $(SRC)).wasm)"
+
+wasm-c-all:
+ifndef SRC
+	$(error "用法: make wasm-c-all SRC=xxx.c [OUT=xxx.wasm]")
+endif
+	@echo "编译 $(SRC) -> $(if $(OUT),$(OUT),$(basename $(SRC)).wasm) (导出所有函数)"
+	$(EMCC) $(WASM_CFLAGS) $(SRC) -o $(if $(OUT),$(OUT),$(basename $(SRC)).wasm) \
+		$(WASM_LDFLAGS) -sEXPORT_ALL=1
+	@echo "完成! 输出文件: $(if $(OUT),$(OUT),$(basename $(SRC)).wasm)"
+	@echo ""
+	@echo "Lua 使用示例:"
+	@echo "  local wasm3 = require('wasm3')"
+	@echo "  local env = wasm3.newEnvironment()"
+	@echo "  local runtime = env:newRuntime()"
+	@echo "  local f = io.open('$(if $(OUT),$(OUT),$(basename $(SRC)).wasm)', 'rb')"
+	@echo "  local wasm = f:read('*a'); f:close()"
+	@echo "  local module = env:parseModule(wasm)"
+	@echo "  runtime:loadModule(module)"
+	@echo "  local func = runtime:findFunction('your_function')"
+	@echo "  local result = func:call(args...)"
+
+# 快捷方式：编译带 WASI 支持的 WASM（需要 main 函数）
+# 用法: make wasm-c-wasi SRC=xxx.c
+wasm-c-wasi: WASM_LDFLAGS= -sWASM=1 -sSTANDALONE_WASM=1 -sALLOW_MEMORY_GROWTH=1
+wasm-c-wasi: wasm-c
+
+# 将 lxclua 编译为 WASM 模块（供 wasm3 加载，导出 Lua API）
+# 用法: make lxclua-wasm
+lxclua-wasm: lxclua_wasm.o
+	@echo "编译 lxclua -> lxclua.wasm (导出 Lua API)"
+	$(EMCC) -std=c23 -O3 -DNDEBUG -fno-exceptions -DLUA_32BITS=0 \
+		-DLUA_USE_LONGJMP -DLUA_COMPAT_MATHLIB -DLUA_COMPAT_MAXN \
+		-o lxclua.wasm \
+		$(CORE_O) $(LIB_O) $(LIB_O_WASM) lxclua_wasm.o \
+		-sWASM=1 -sSTANDALONE_WASM=1 -sALLOW_MEMORY_GROWTH=1 \
+		-sEXPORTED_FUNCTIONS='$(LUA_WASM_EXPORTS)' \
+		--no-entry
+	@echo "完成! 输出文件: lxclua.wasm"
+	@echo ""
+	@echo "Lua 使用示例:"
+	@echo "  local wasm3 = require('wasm3')"
+	@echo "  local env = wasm3.newEnvironment()"
+	@echo "  local runtime = env:newRuntime()"
+	@echo "  local f = io.open('lxclua.wasm', 'rb')"
+	@echo "  local wasm = f:read('*a'); f:close()"
+	@echo "  local module = env:parseModule(wasm)"
+	@echo "  runtime:loadModule(module)"
+
+# 编译 WASM 包装器
+lxclua_wasm.o: lxclua_wasm.c lua.h lauxlib.h lualib.h
+	$(EMCC) -std=c23 -O3 -DNDEBUG -fno-exceptions -DLUA_32BITS=0 \
+		-DLUA_USE_LONGJMP -DLUA_COMPAT_MATHLIB -DLUA_COMPAT_MAXN \
+		-c lxclua_wasm.c -o lxclua_wasm.o
+
+# Lua WASM 导出的 API 函数列表
+LUA_WASM_EXPORTS=\
+	["_lua_wasm_newstate",\
+	 "_lua_wasm_close",\
+	 "_lua_wasm_openlibs",\
+	 "_lua_wasm_dostring",\
+	 "_lua_wasm_loadstring",\
+	 "_lua_wasm_dofile",\
+	 "_lua_wasm_loadfile",\
+	 "_lua_wasm_gettop",\
+	 "_lua_wasm_settop",\
+	 "_lua_wasm_pop",\
+	 "_lua_wasm_pushvalue",\
+	 "_lua_wasm_remove",\
+	 "_lua_wasm_insert",\
+	 "_lua_wasm_replace",\
+	 "_lua_wasm_checkstack",\
+	 "_lua_wasm_type",\
+	 "_lua_wasm_typename",\
+	 "_lua_wasm_isnil",\
+	 "_lua_wasm_isboolean",\
+	 "_lua_wasm_isnumber",\
+	 "_lua_wasm_isstring",\
+	 "_lua_wasm_istable",\
+	 "_lua_wasm_isfunction",\
+	 "_lua_wasm_isuserdata",\
+	 "_lua_wasm_isthread",\
+	 "_lua_wasm_islightuserdata",\
+	 "_lua_wasm_tonumber",\
+	 "_lua_wasm_tointeger",\
+	 "_lua_wasm_toboolean",\
+	 "_lua_wasm_tostring",\
+	 "_lua_wasm_tolstring",\
+	 "_lua_wasm_rawlen",\
+	 "_lua_wasm_touserdata",\
+	 "_lua_wasm_tothread",\
+	 "_lua_wasm_topointer",\
+	 "_lua_wasm_pushnil",\
+	 "_lua_wasm_pushnumber",\
+	 "_lua_wasm_pushinteger",\
+	 "_lua_wasm_pushboolean",\
+	 "_lua_wasm_pushstring",\
+	 "_lua_wasm_pushlstring",\
+	 "_lua_wasm_pushlightuserdata",\
+	 "_lua_wasm_createtable",\
+	 "_lua_wasm_newtable",\
+	 "_lua_wasm_getglobal",\
+	 "_lua_wasm_setglobal",\
+	 "_lua_wasm_getfield",\
+	 "_lua_wasm_setfield",\
+	 "_lua_wasm_gettable",\
+	 "_lua_wasm_settable",\
+	 "_lua_wasm_rawget",\
+	 "_lua_wasm_rawgeti",\
+	 "_lua_wasm_rawset",\
+	 "_lua_wasm_rawseti",\
+	 "_lua_wasm_setmetatable",\
+	 "_lua_wasm_getmetatable",\
+	 "_lua_wasm_next",\
+	 "_lua_wasm_len",\
+	 "_lua_wasm_pcall",\
+	 "_lua_wasm_call",\
+	 "_lua_wasm_error",\
+	 "_lua_wasm_errorstring",\
+	 "_lua_wasm_gc",\
+	 "_lua_wasm_collectgarbage",\
+	 "_lua_wasm_memusage",\
+	 "_lua_wasm_ref",\
+	 "_lua_wasm_unref",\
+	 "_lua_wasm_getregistry",\
+	 "_lua_wasm_version",\
+	 "_lua_wasm_compare",\
+	 "_lua_wasm_equal",\
+	 "_lua_wasm_lessthan",\
+	 "_lua_wasm_rawequal",\
+	 "_lua_wasm_eval",\
+	 "_lua_wasm_eval_number",\
+	 "_lua_wasm_eval_integer",\
+	 "_lua_wasm_call_global_number",\
+	 "_lua_wasm_call_global_string",\
+	 "_lua_wasm_setglobal_number",\
+	 "_lua_wasm_setglobal_integer",\
+	 "_lua_wasm_setglobal_string",\
+	 "_lua_wasm_getglobal_number",\
+	 "_lua_wasm_getglobal_integer",\
+	 "_lua_wasm_getglobal_string",\
+	 "_lua_wasm_malloc",\
+	 "_lua_wasm_free",\
+	 "_lua_wasm_realloc",\
+	 "_malloc",\
+	 "_free"]
+
 # Targets that do not create files (not all makes understand .PHONY).
-.PHONY: all $(PLATS) help test clean default o a depend echo wasm wasm-minimal release mingw-release linux-release macos-release wasm-release termux-release
+.PHONY: all $(PLATS) help test clean default o a depend echo wasm wasm-minimal wasm-c wasm-c-all wasm-c-wasi lxclua-wasm release mingw-release linux-release macos-release wasm-release termux-release
 
 # 发行版打包配置
 RELEASE_NAME= lxclua

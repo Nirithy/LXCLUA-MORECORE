@@ -31,8 +31,6 @@
 #include "sha256.h"
 #include "lobfuscate.h"
 
-#include "stb_image.h"
-
 
 #if !defined(luai_verifycode)
 #define luai_verifycode(L,f)  /* empty */
@@ -232,53 +230,32 @@ static TString *loadStringN (LoadState *S, Proto *p) {
     }
     
     if (size >= 0xFF) {
-      /* 长字符串：使用图片加密 */
+      /* 长字符串：直接解密 */
       // 读取字符串内容的SHA-256哈希值（完整性验证）
       uint8_t expected_content_hash[SHA256_DIGEST_SIZE];
       loadVector(S, expected_content_hash, SHA256_DIGEST_SIZE);
       
-      // 读取图像尺寸
-      int width = loadInt(S);
-      int height = loadInt(S);
+      // 读取加密数据长度
+      size_t encrypted_len = loadSize(S);
       
-      // 读取PNG数据长度
-      size_t png_len = loadSize(S);
-      
-      // 分配内存 for PNG数据
-      unsigned char *png_data = (unsigned char *)luaM_malloc_(S->L, png_len, 0);
-      if (png_data == NULL) {
-        error(S, "memory allocation failed for PNG data");
+      // 分配内存
+      unsigned char *encrypted_data = (unsigned char *)luaM_malloc_(S->L, encrypted_len, 0);
+      if (encrypted_data == NULL) {
+        error(S, "memory allocation failed for encrypted data");
         return NULL;
       }
       
-      // 读取PNG数据
-      loadBlock(S, png_data, png_len);
-      
-      // 解码PNG to get encrypted data
-      int img_width, img_height, img_channels;
-      unsigned char *image_data = stbi_load_from_memory(png_data, (int)png_len, &img_width, &img_height, &img_channels, 1);
-      if (image_data == NULL) {
-        luaM_free_(S->L, png_data, png_len);
-        error(S, "failed to decode PNG image");
-        return NULL;
-      }
-      
-      // 检查尺寸 match
-      if (img_width != width || img_height != height) {
-        stbi_image_free(image_data);
-        luaM_free_(S->L, png_data, png_len);
-        error(S, "PNG image dimensions mismatch");
-        return NULL;
-      }
+      // 读取加密数据
+      loadBlock(S, encrypted_data, encrypted_len);
       
       // 创建长字符串对象
       ts = luaS_createlngstrobj(L, size);  /* create string */
       setsvalue2s(L, L->top.p, ts);  /* anchor it */
       luaD_inctop(L);
       
-      // 复制解密后的数据到字符串对象
+      // 复制加密数据到字符串
       char *str = ts->contents;
-      memcpy(str, image_data, size);
+      memcpy(str, encrypted_data, size);
       
       // 对字符串进行解密，先使用时间戳XOR解密，再使用映射表解密
       for (size_t i = 0; i < size; i++) {
@@ -296,8 +273,7 @@ static TString *loadStringN (LoadState *S, Proto *p) {
       }
       
       // 释放内存
-      stbi_image_free(image_data);
-      luaM_free_(S->L, png_data, png_len);
+      luaM_free_(S->L, encrypted_data, encrypted_len);
       
       L->top.p--;  /* pop string */
     } else {
@@ -373,62 +349,38 @@ static void loadCode (LoadState *S, Proto *f) {
     return;
   }
   
-  // Read image dimensions
-  int width = loadInt(S);
-  int height = loadInt(S);
+  // 读取加密数据长度
+  size_t encrypted_len = loadSize(S);
   
-  // Read PNG data length
-  size_t png_len = loadSize(S);
-  
-  // Allocate memory for PNG data
-  unsigned char *png_data = (unsigned char *)luaM_malloc_(S->L, png_len, 0);
-  if (png_data == NULL) {
-    error(S, "memory allocation failed for PNG data");
+  // 分配内存
+  unsigned char *encrypted_data = (unsigned char *)luaM_malloc_(S->L, encrypted_len, 0);
+  if (encrypted_data == NULL) {
+    error(S, "memory allocation failed for encrypted data");
     return;
   }
   
-  // Read PNG data
-  loadBlock(S, png_data, png_len);
-  
-  // Decode PNG to get encrypted data
-  int img_width, img_height, img_channels;
-  unsigned char *image_data = stbi_load_from_memory(png_data, (int)png_len, &img_width, &img_height, &img_channels, 1);
-  if (image_data == NULL) {
-    luaM_free_(S->L, png_data, png_len);
-    error(S, "failed to decode PNG image");
-    return;
-  }
-  
-  // Check dimensions match
-  if (img_width != width || img_height != height) {
-    stbi_image_free(image_data);
-    luaM_free_(S->L, png_data, png_len);
-    error(S, "PNG image dimensions mismatch");
-    return;
-  }
+  // 读取加密数据
+  loadBlock(S, encrypted_data, encrypted_len);
   
   // Allocate memory for original code
   f->code = luaM_newvectorchecked(S->L, orig_size, Instruction);
   f->sizecode = orig_size;
   
-  // Decrypt data using XOR with timestamp as password (no decompression)
-  /* Decrypt in-place in image_data buffer first */
+  // 从加密数据中恢复指令，并使用时间戳解密
   for (i = 0; i < (int)data_size; i++) {
-    image_data[i] ^= ((char *)&S->timestamp)[i % sizeof(S->timestamp)];
-  }
-
-  /* Reconstruct Instructions from LE bytes (64-bit) */
-  for (i = 0; i < orig_size; i++) {
-    uint64_t inst = 0;
-    for (int j = 0; j < 8; j++) {
-      inst |= ((uint64_t)image_data[i*8 + j]) << (j * 8);
+    unsigned char decrypted_byte = encrypted_data[i] ^ ((char *)&S->timestamp)[i % sizeof(S->timestamp)];
+    
+    /* Reconstruct Instructions from LE bytes (64-bit) */
+    int inst_idx = i / 8;
+    int byte_idx = i % 8;
+    if (byte_idx == 0) {
+      f->code[inst_idx] = 0;
     }
-    f->code[i] = (Instruction)inst;
+    f->code[inst_idx] |= ((Instruction)decrypted_byte) << (byte_idx * 8);
   }
   
-  // Free image and PNG data
-  stbi_image_free(image_data);
-  luaM_free_(S->L, png_data, png_len);
+  // 释放内存
+  luaM_free_(S->L, encrypted_data, encrypted_len);
   
   // 应用反向OPcode映射，恢复原始OPcode
   // 首先创建第三个OPcode映射表的反向映射

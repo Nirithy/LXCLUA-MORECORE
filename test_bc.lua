@@ -1,0 +1,1 @@
+print("Bytecode test OK")

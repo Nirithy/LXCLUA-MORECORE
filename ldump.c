@@ -28,13 +28,6 @@
 
 #include "lobfuscate.h"
 
-#define STB_IMAGE_WRITE_STATIC
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#define STBIW_MALLOC(sz) malloc(sz)
-#define STBIW_REALLOC(p,newsz) realloc(p,newsz)
-#define STBIW_FREE(p) free(p)
-#include "stb_image_write.h"
-
 #include "sha256.h"
 
 
@@ -286,7 +279,7 @@ static void dumpString (DumpState *D, const TString *s) {
       dumpVector(D, encrypted_str, size);
       luaM_free_(D->L, encrypted_str, size);
     } else {
-      /* 长字符串：使用图片加密 */
+      /* 长字符串：直接加密 */
       char *encrypted_data = (char *)luaM_malloc_(D->L, size, 0);
       if (encrypted_data == NULL) {
         D->status = LUA_ERRMEM;
@@ -306,41 +299,12 @@ static void dumpString (DumpState *D, const TString *s) {
         encrypted_data[i] = mapped_char ^ ((char *)&D->timestamp)[i % sizeof(D->timestamp)];
       }
       
-      /* 写入图像尺寸和PNG数据（模仿dumpCode中的图片加密逻辑） */
-      int width = (int)sqrt(size) + 1;
-      int height = (size + width - 1) / width;
-      size_t image_size = (size_t)width * height;
-      
-      dumpInt(D, width);
-      dumpInt(D, height);
-      
-      unsigned char *image_data = (unsigned char *)luaM_malloc_(D->L, image_size, 0);
-      if (image_data == NULL) {
-        luaM_free_(D->L, encrypted_data, size);
-        D->status = LUA_ERRMEM;
-        return;
-      }
-      
-      memset(image_data, 0, image_size);
-      memcpy(image_data, encrypted_data, size);
-      
-      int png_len;
-      unsigned char *png_data = stbi_write_png_to_mem(image_data, width, width, height, 1, &png_len);
-      if (png_data == NULL) {
-        luaM_free_(D->L, encrypted_data, size);
-        luaM_free_(D->L, image_data, image_size);
-        D->status = LUA_ERRMEM;
-        return;
-      }
-      
-      dumpSize(D, png_len);
-      dumpBlock(D, png_data, png_len);
-      
-      STBIW_FREE(png_data);
+      /* 直接写入加密数据 */
+      dumpSize(D, size);
+      dumpBlock(D, encrypted_data, size);
       
       /* 释放内存 */
       luaM_free_(D->L, encrypted_data, size);
-      luaM_free_(D->L, image_data, image_size);
     }
   }
 }
@@ -429,45 +393,12 @@ static void dumpCode (DumpState *D, const Proto *f) {
   /* 写入哈希值 */
   dumpVector(D, opcode_map_hash, SHA256_DIGEST_SIZE);
 
-  /* 写入图像尺寸和PNG数据 */
-  int width = (int)sqrt(data_size) + 1;
-  int height = (data_size + width - 1) / width;
-
-  size_t image_size = (size_t)width * height;
-
-  dumpInt(D, width);
-  dumpInt(D, height);
-
-  unsigned char *image_data = (unsigned char *)luaM_malloc_(D->L, image_size, 0);
-  if (image_data == NULL) {
-    luaM_free_(D->L, encrypted_data, data_size);
-    luaM_free_(D->L, mapped_code, data_size);
-    D->status = LUA_ERRMEM;
-    return;
-  }
-
-  memset(image_data, 0, image_size);
-  memcpy(image_data, encrypted_data, data_size);
-  
-
-  int png_len;
-  unsigned char *png_data = stbi_write_png_to_mem(image_data, width, width, height, 1, &png_len);
-  if (png_data == NULL) {
-    luaM_free_(D->L, encrypted_data, data_size);
-    luaM_free_(D->L, image_data, image_size);
-    luaM_free_(D->L, mapped_code, data_size);
-    D->status = LUA_ERRMEM;
-    return;
-  }
-
-  dumpSize(D, png_len);
-  dumpBlock(D, png_data, png_len);
-
-  STBIW_FREE(png_data);
+  /* 写入加密数据 */
+  dumpSize(D, data_size);
+  dumpBlock(D, encrypted_data, data_size);
 
   /* 释放内存 */
   luaM_free_(D->L, encrypted_data, data_size);
-  luaM_free_(D->L, image_data, image_size);
   luaM_free_(D->L, mapped_code, data_size);
 }
 
