@@ -706,7 +706,32 @@ static int lexer_flatten_tree(lua_State *L) {
     return 1;
 }
 
+
+#include "llexer_compiler.h"
+
+static int lexer_obfuscate(lua_State *L) {
+    const char *code = luaL_checkstring(L, 1);
+    int cff = 0, bogus = 0, str_enc = 0;
+
+    if (lua_istable(L, 2)) {
+        lua_getfield(L, 2, "cff");
+        cff = lua_toboolean(L, -1);
+        lua_pop(L, 1);
+
+        lua_getfield(L, 2, "bogus_branches");
+        bogus = lua_toboolean(L, -1);
+        lua_pop(L, 1);
+
+        lua_getfield(L, 2, "string_encryption");
+        str_enc = lua_toboolean(L, -1);
+        lua_pop(L, 1);
+    }
+
+    return lua_lexer_obfuscate(L, code, cff, bogus, str_enc);
+}
+
 static const luaL_Reg lexer_lib[] = {
+    {"obfuscate", lexer_obfuscate},
     {"find_match", lexer_find_match},
     {"build_tree", lexer_build_tree},
     {"flatten_tree", lexer_flatten_tree},
