@@ -577,15 +577,7 @@ static void generate_code(IRNode *node, luaL_Buffer *B, int indent) {
         generate_code(node->children[1], B, indent + 2);
         luaL_addstring(B, spaces);
         luaL_addstring(B, "end\n");
-    } else if (node->type == IR_STMT_BREAK) {
-        luaL_addstring(B, spaces);
-        luaL_addstring(B, "break\n");
-        } else if (node->type == IR_STMT_FUNCTION) {
-    } else if (node->type == IR_EXPR_UNOP) {
-        char buf[8];
-        snprintf(buf, sizeof(buf), "%c", (char)node->token);
-        luaL_addstring(B, buf);
-        generate_code(node->children[0], B, 0);
+    } else if (node->type == IR_STMT_FUNCTION) {
         luaL_addstring(B, spaces);
         luaL_addstring(B, "local function ");
         luaL_addstring(B, node->str_val);
@@ -595,6 +587,11 @@ static void generate_code(IRNode *node, luaL_Buffer *B, int indent) {
         generate_code(node->children[1], B, indent + 2);
         luaL_addstring(B, spaces);
         luaL_addstring(B, "end\n");
+    } else if (node->type == IR_EXPR_UNOP) {
+        char buf[8];
+        snprintf(buf, sizeof(buf), "%c", (char)node->token);
+        luaL_addstring(B, buf);
+        generate_code(node->children[0], B, 0);
     } else if (node->type == IR_STMT_BREAK) {
         luaL_addstring(B, spaces);
         luaL_addstring(B, "break\n");
