@@ -234,6 +234,19 @@ LUAMOD_API int (luaopen_fs) (lua_State *L);
 LUAMOD_API int (luaopen_translator) (lua_State *L);
 
 /**
+ * @brief Name of the lexer library.
+ */
+#define LUA_LEXERLIBNAME	"lexer"
+
+/**
+ * @brief Opens the lexer library.
+ *
+ * @param L The Lua state.
+ * @return 1 (the library table).
+ */
+LUAMOD_API int (luaopen_lexer) (lua_State *L);
+
+/**
  * @brief Name of the service manager library.
  */
 #define LUA_SMGRNAME	"smgr"
