@@ -10,6 +10,7 @@
 #include "lprefix.h"
 
 #include <string.h>
+#include <ctype.h>
 
 #include "lua.h"
 #include "lauxlib.h"
@@ -197,9 +198,235 @@ static int lexer_token2str(lua_State *L) {
     return 1;
 }
 
+/*
+** Iterator state for gmatch
+*/
+typedef struct {
+  ZIO z;
+  Mbuffer buff;
+  TString *source;
+  LexState lexstate;
+  LoadS ls;
+  int firstchar_read;
+  int done;
+} GMatchLexState;
+
+static int gmatch_gc(lua_State *L) {
+    GMatchLexState *gstate = (GMatchLexState *)lua_touserdata(L, 1);
+    if (gstate) {
+        luaZ_freebuffer(L, &gstate->buff);
+    }
+    return 0;
+}
+
+static int protected_gmatch_iter(lua_State *L) {
+    GMatchLexState *gstate = (GMatchLexState *)lua_touserdata(L, 1);
+
+    if (gstate->done) {
+        return 0;
+    }
+
+    if (!gstate->firstchar_read) {
+        int firstchar = zgetc(&gstate->z);
+        luaX_setinput(L, &gstate->lexstate, &gstate->z, gstate->source, firstchar);
+        gstate->firstchar_read = 1;
+    }
+
+    luaX_next(&gstate->lexstate);
+    int token = gstate->lexstate.t.token;
+
+    if (token == TK_EOS) {
+        gstate->done = 1;
+        return 0;
+    }
+
+    /* return line, token, type, value */
+    lua_pushinteger(L, gstate->lexstate.linenumber);
+    lua_pushinteger(L, token);
+
+    const char *tok_str = luaX_token2str(&gstate->lexstate, token);
+    if (tok_str) {
+        lua_pushstring(L, tok_str);
+    } else {
+        lua_pushnil(L);
+    }
+
+    if (token == TK_NAME || token == TK_STRING || token == TK_INTERPSTRING || token == TK_RAWSTRING) {
+        if (gstate->lexstate.t.seminfo.ts) {
+            lua_pushstring(L, getstr(gstate->lexstate.t.seminfo.ts));
+        } else {
+            lua_pushnil(L);
+        }
+    } else if (token == TK_INT) {
+        lua_pushinteger(L, gstate->lexstate.t.seminfo.i);
+    } else if (token == TK_FLT) {
+        lua_pushnumber(L, gstate->lexstate.t.seminfo.r);
+    } else {
+        lua_pushnil(L);
+    }
+
+    return 4;
+}
+
+static int gmatch_iter(lua_State *L) {
+    GMatchLexState *gstate = (GMatchLexState *)lua_touserdata(L, lua_upvalueindex(1));
+    if (gstate->done) return 0;
+
+    int top_before = lua_gettop(L);
+    lua_pushcfunction(L, protected_gmatch_iter);
+    lua_pushlightuserdata(L, gstate);
+
+    int status = lua_pcall(L, 1, LUA_MULTRET, 0);
+    if (status != LUA_OK) {
+        gstate->done = 1;
+        return lua_error(L);
+    }
+
+    return lua_gettop(L) - top_before;
+}
+
+static int lexer_gmatch(lua_State *L) {
+    size_t l;
+    const char *s = luaL_checklstring(L, 1, &l);
+
+        /* Create userdata for the iterator state */
+    GMatchLexState *gstate = (GMatchLexState *)lua_newuserdatauv(L, sizeof(GMatchLexState), 0);
+    memset(gstate, 0, sizeof(GMatchLexState));
+
+    /* Setup __gc metatable for the userdata */
+    if (luaL_newmetatable(L, "lexer_gmatch_state")) {
+        lua_pushcfunction(L, gmatch_gc);
+        lua_setfield(L, -2, "__gc");
+    }
+    lua_setmetatable(L, -2);
+
+
+    gstate->ls.s = s;
+    gstate->ls.size = l;
+
+    luaZ_init(L, &gstate->z, getS, &gstate->ls);
+    luaZ_initbuffer(L, &gstate->buff);
+    gstate->lexstate.buff = &gstate->buff;
+
+    /* create table for scanner to avoid collecting/reusing strings */
+    lua_newtable(L);
+    gstate->lexstate.h = hvalue(s2v(L->top.p - 1));
+
+    lua_pushstring(L, "=(lexer)");
+    gstate->source = tsvalue(s2v(L->top.p - 1));
+
+    /* push the input string to avoid gc */
+    lua_pushvalue(L, 1);
+
+    /* We push the C closure with 4 upvalues: gstate userdata, table for strings, source string, input code */
+    lua_pushcclosure(L, gmatch_iter, 4);
+
+    return 1;
+}
+
+static void addquoted (luaL_Buffer *b, const char *s, size_t len) {
+  luaL_addchar(b, '"');
+  while (len--) {
+    if (*s == '"' || *s == '\\' || *s == '\n') {
+      luaL_addchar(b, '\\');
+      luaL_addchar(b, *s);
+    }
+    else if (iscntrl((unsigned char)*s)) {
+      char buff[10];
+      if (!isdigit((unsigned char)*(s+1)))
+        snprintf(buff, sizeof(buff), "\\%d", (int)(unsigned char)*s);
+      else
+        snprintf(buff, sizeof(buff), "\\%03d", (int)(unsigned char)*s);
+      luaL_addstring(b, buff);
+    }
+    else
+      luaL_addchar(b, *s);
+    s++;
+  }
+  luaL_addchar(b, '"');
+}
+
+static int lexer_reconstruct(lua_State *L) {
+    luaL_checktype(L, 1, LUA_TTABLE);
+    luaL_Buffer b;
+    luaL_buffinit(L, &b);
+
+    int len = luaL_len(L, 1);
+    int last_token = 0;
+
+    for (int i = 1; i <= len; i++) {
+        lua_rawgeti(L, 1, i);
+        if (!lua_istable(L, -1)) {
+            lua_pop(L, 1);
+            continue;
+        }
+
+        lua_getfield(L, -1, "token");
+        int token = lua_tointeger(L, -1);
+        lua_pop(L, 1);
+
+        /* Add space between identifiers/keywords/numbers to prevent syntax errors */
+        if (i > 1) {
+            if ((last_token >= FIRST_RESERVED && last_token <= TK_WITH) || last_token == TK_NAME || last_token == TK_INT || last_token == TK_FLT) {
+                if ((token >= FIRST_RESERVED && token <= TK_WITH) || token == TK_NAME || token == TK_INT || token == TK_FLT) {
+                    luaL_addchar(&b, ' ');
+                }
+            }
+        }
+
+        if (token == TK_NAME || token == TK_STRING || token == TK_INTERPSTRING || token == TK_RAWSTRING || token == TK_INT || token == TK_FLT) {
+            lua_getfield(L, -1, "value");
+            if (lua_isstring(L, -1) || lua_isnumber(L, -1)) {
+                if (token == TK_STRING || token == TK_RAWSTRING || token == TK_INTERPSTRING) {
+                    /* Use luaO_pushfstring with %q to properly escape */
+                                                            size_t slen;
+                    const char *sval = lua_tolstring(L, -1, &slen);
+                    addquoted(&b, sval, slen);
+                } else {
+                    luaL_addstring(&b, lua_tostring(L, -1));
+                }
+            }
+            lua_pop(L, 1);
+        } else {
+            /* use token2str */
+            if (token < FIRST_RESERVED) {
+                char s[2] = {(char)token, '\0'};
+                luaL_addstring(&b, s);
+            } else {
+                LexState dummy_ls;
+                memset(&dummy_ls, 0, sizeof(LexState));
+                dummy_ls.L = L;
+                int top = lua_gettop(L);
+                const char *str = luaX_token2str(&dummy_ls, token);
+                if (str) {
+                                        size_t len = strlen(str);
+                    if (len >= 2 && str[0] == '\'' && str[len-1] == '\'') {
+                        luaL_addlstring(&b, str + 1, len - 2);
+                    } else {
+                        luaL_addstring(&b, str);
+                    }
+                    if (lua_gettop(L) > top) {
+                        lua_settop(L, top);
+                    }
+                }
+            }
+        }
+
+        last_token = token;
+        lua_pop(L, 1); /* pop token table */
+    }
+
+    luaL_pushresult(&b);
+    return 1;
+}
+
+
+
 static const luaL_Reg lexer_lib[] = {
     {"lex", lexer_lex},
     {"token2str", lexer_token2str},
+    {"gmatch", lexer_gmatch},
+    {"reconstruct", lexer_reconstruct},
     {NULL, NULL}
 };
 
