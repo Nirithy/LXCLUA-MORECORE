@@ -522,48 +522,50 @@ static int lexer_build_tree(lua_State *L) {
     luaL_checktype(L, 1, LUA_TTABLE);
     int num_tokens = luaL_len(L, 1);
 
-    lua_newtable(L); /* root node */
+    lua_newtable(L); /* root node -> stack 2 */
     lua_pushstring(L, "root");
-    lua_setfield(L, -2, "type");
-    lua_newtable(L);
-    lua_setfield(L, -2, "elements");
+    lua_setfield(L, 2, "type");
+    lua_newtable(L); /* elements table -> stack 3 */
+    lua_pushvalue(L, 3);
+    lua_setfield(L, 2, "elements");
 
-    lua_newtable(L); /* stack */
-    lua_pushvalue(L, -2); /* push root */
-    lua_rawseti(L, -2, 1);
+    lua_newtable(L); /* stack -> stack 4 */
+    lua_pushvalue(L, 2); /* push root */
+    lua_rawseti(L, 4, 1);
     int stack_len = 1;
 
     for (int i = 1; i <= num_tokens; i++) {
-        lua_rawgeti(L, 1, i); /* t */
-        if (!lua_istable(L, -1)) {
+        lua_rawgeti(L, 1, i); /* t -> stack 5 */
+        if (!lua_istable(L, 5)) {
             lua_pop(L, 1);
             continue;
         }
 
-        lua_getfield(L, -1, "token");
+        lua_getfield(L, 5, "token");
         int tk = lua_tointeger(L, -1);
         lua_pop(L, 1);
 
-        /* current = stack[#stack] */
-        lua_rawgeti(L, -2, stack_len);
-        lua_getfield(L, -1, "elements");
-        int elements_idx = lua_gettop(L);
+        /* current = stack[#stack] -> stack 6 */
+        lua_rawgeti(L, 4, stack_len);
+
+        /* elements_idx = current.elements -> stack 7 */
+        lua_getfield(L, 6, "elements");
 
         int is_closer = (tk == TK_END || tk == TK_UNTIL);
         int is_opener = (tk == TK_FUNCTION || tk == TK_IF || tk == TK_WHILE || tk == TK_FOR || tk == TK_REPEAT || tk == TK_SWITCH || tk == TK_TRY);
 
         if (tk == TK_DO) {
-            /* get current type */
-            lua_getfield(L, -2, "type");
+            /* get current type -> stack 8 */
+            lua_getfield(L, 6, "type");
             const char *ctype = lua_tostring(L, -1);
             lua_pop(L, 1);
 
-            lua_newtable(L); /* new_node */
+            lua_newtable(L); /* new_node -> stack 8 */
 
-            lua_getfield(L, -5, "type"); /* t.type */
-            if (lua_isstring(L, -1)) {
+            lua_getfield(L, 5, "type"); /* t.type -> stack 9 */
+            if (lua_isstring(L, 9)) {
                 size_t len;
-                const char *ttype = lua_tolstring(L, -1, &len);
+                const char *ttype = lua_tolstring(L, 9, &len);
                 if (len >= 2 && ttype[0] == '\'' && ttype[len-1] == '\'') {
                     lua_pushlstring(L, ttype + 1, len - 2);
                 } else {
@@ -572,63 +574,66 @@ static int lexer_build_tree(lua_State *L) {
             } else {
                 lua_pushstring(L, "");
             }
-            lua_setfield(L, -3, "type");
+            lua_setfield(L, 8, "type");
             lua_pop(L, 1); /* pop t.type */
 
-            lua_newtable(L); /* new_node.elements */
-            lua_pushvalue(L, -6); /* push t */
-            lua_rawseti(L, -2, 1);
-            lua_setfield(L, -2, "elements");
+            lua_newtable(L); /* new_node.elements -> stack 9 */
+            lua_pushvalue(L, 5); /* push t */
+            lua_rawseti(L, 9, 1);
+            lua_pushvalue(L, 9);
+            lua_setfield(L, 8, "elements");
+            /* new_node.elements is still at stack 9, we pop it */
+            lua_pop(L, 1);
 
-            /* insert into current.elements */
-            int elen = luaL_len(L, elements_idx);
-            lua_pushvalue(L, -1);
-            lua_rawseti(L, elements_idx, elen + 1);
+            /* insert new_node into current.elements */
+            int elen = luaL_len(L, 7);
+            lua_pushvalue(L, 8); /* push new_node */
+            lua_rawseti(L, 7, elen + 1);
 
-            /* insert into stack */
+            /* insert new_node into stack */
             stack_len++;
-            lua_pushvalue(L, -1);
-            lua_rawseti(L, -6, stack_len);
+            lua_pushvalue(L, 8); /* push new_node */
+            lua_rawseti(L, 4, stack_len);
 
             lua_pop(L, 1); /* pop new_node */
 
         } else if (is_closer) {
             /* table.insert(current.elements, t) */
-            int elen = luaL_len(L, elements_idx);
-            lua_pushvalue(L, -4); /* t */
-            lua_rawseti(L, elements_idx, elen + 1);
+            int elen = luaL_len(L, 7);
+            lua_pushvalue(L, 5); /* push t */
+            lua_rawseti(L, 7, elen + 1);
 
             if (stack_len > 1) {
                 /* table.remove(stack) */
                 lua_pushnil(L);
-                lua_rawseti(L, -4, stack_len);
+                lua_rawseti(L, 4, stack_len);
                 stack_len--;
 
-                lua_getfield(L, -2, "type");
-                const char *ctype = lua_tostring(L, -1);
+                lua_getfield(L, 6, "type"); /* stack 8 */
+                const char *ctype = lua_tostring(L, 8);
                 lua_pop(L, 1);
 
                 if (ctype && strcmp(ctype, "do") == 0 && stack_len > 1) {
-                    lua_rawgeti(L, -3, stack_len);
-                    lua_getfield(L, -1, "type");
-                    const char *ptype = lua_tostring(L, -1);
-                    lua_pop(L, 2);
+                    lua_rawgeti(L, 4, stack_len); /* stack 8 */
+                    lua_getfield(L, 8, "type"); /* stack 9 */
+                    const char *ptype = lua_tostring(L, 9);
+                    lua_pop(L, 2); /* pop ptype and current */
 
                     if (ptype && (strcmp(ptype, "while") == 0 || strcmp(ptype, "for") == 0)) {
                         lua_pushnil(L);
-                        lua_rawseti(L, -4, stack_len);
+                        lua_rawseti(L, 4, stack_len);
                         stack_len--;
                     }
                 }
             }
 
         } else if (is_opener) {
-            lua_newtable(L); /* new_node */
+            lua_newtable(L); /* new_node -> stack 8 */
 
-            lua_getfield(L, -5, "type"); /* t.type */
-            if (lua_isstring(L, -1)) {
+            lua_getfield(L, 5, "type"); /* t.type -> stack 9 */
+            if (lua_isstring(L, 9)) {
                 size_t len;
-                const char *ttype = lua_tolstring(L, -1, &len);
+                const char *ttype = lua_tolstring(L, 9, &len);
                 if (len >= 2 && ttype[0] == '\'' && ttype[len-1] == '\'') {
                     lua_pushlstring(L, ttype + 1, len - 2);
                 } else {
@@ -637,37 +642,38 @@ static int lexer_build_tree(lua_State *L) {
             } else {
                 lua_pushstring(L, "");
             }
-            lua_setfield(L, -3, "type");
-            lua_pop(L, 1);
+            lua_setfield(L, 8, "type");
+            lua_pop(L, 1); /* pop t.type */
 
-            lua_newtable(L); /* new_node.elements */
-            lua_pushvalue(L, -6); /* push t */
-            lua_rawseti(L, -2, 1);
-            lua_setfield(L, -2, "elements");
+            lua_newtable(L); /* new_node.elements -> stack 9 */
+            lua_pushvalue(L, 5); /* push t */
+            lua_rawseti(L, 9, 1);
+            lua_pushvalue(L, 9);
+            lua_setfield(L, 8, "elements");
+            lua_pop(L, 1); /* pop new_node.elements */
 
-            /* insert into current.elements */
-            int elen = luaL_len(L, elements_idx);
-            lua_pushvalue(L, -1);
-            lua_rawseti(L, elements_idx, elen + 1);
+            /* insert new_node into current.elements */
+            int elen = luaL_len(L, 7);
+            lua_pushvalue(L, 8); /* push new_node */
+            lua_rawseti(L, 7, elen + 1);
 
-            /* insert into stack */
+            /* insert new_node into stack */
             stack_len++;
-            lua_pushvalue(L, -1);
-            lua_rawseti(L, -6, stack_len);
+            lua_pushvalue(L, 8); /* push new_node */
+            lua_rawseti(L, 4, stack_len);
 
             lua_pop(L, 1); /* pop new_node */
         } else {
             /* table.insert(current.elements, t) */
-            int elen = luaL_len(L, elements_idx);
-            lua_pushvalue(L, -4); /* t */
-            lua_rawseti(L, elements_idx, elen + 1);
+            int elen = luaL_len(L, 7);
+            lua_pushvalue(L, 5); /* t */
+            lua_rawseti(L, 7, elen + 1);
         }
 
-        lua_pop(L, 2); /* pop elements and current */
-        lua_pop(L, 1); /* pop t */
+        lua_pop(L, 3); /* pop current.elements, current, and t */
     }
 
-    lua_pop(L, 1); /* pop stack */
+    lua_pop(L, 2); /* pop stack and root.elements */
     return 1; /* root is on top */
 }
 
