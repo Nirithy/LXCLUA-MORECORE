@@ -848,6 +848,161 @@ static int lexer_remove_tokens(lua_State *L) {
     return 0;
 }
 
+static int lexer_split_statements(lua_State *L) {
+    luaL_checktype(L, 1, LUA_TTABLE);
+    int num_tokens = luaL_len(L, 1);
+
+    lua_newtable(L); /* result array of arrays */
+    int result_idx = lua_gettop(L);
+    int stmt_count = 1;
+
+    lua_newtable(L); /* current statement */
+    int current_stmt_idx = lua_gettop(L);
+    int current_len = 0;
+
+    int braces = 0;
+    int last_line = -1;
+    int expects_continuation = 0;
+
+    for (int i = 1; i <= num_tokens; i++) {
+        lua_rawgeti(L, 1, i);
+        int tok_idx = lua_gettop(L);
+        if (!lua_istable(L, tok_idx)) {
+            return luaL_error(L, "expected a table at index %d of the token list", i);
+        }
+
+        lua_getfield(L, tok_idx, "token");
+        int tk = lua_tointeger(L, -1);
+        lua_pop(L, 1);
+
+        lua_getfield(L, tok_idx, "line");
+        int line = lua_tointeger(L, -1);
+        lua_pop(L, 1);
+
+        if (tk == '(' || tk == '[' || tk == '{' || tk == TK_DO || tk == TK_THEN || tk == TK_REPEAT || tk == TK_FUNCTION) {
+            braces++;
+        } else if (tk == ')' || tk == ']' || tk == '}' || tk == TK_END || tk == TK_UNTIL) {
+            braces--;
+        }
+
+        /* if the previous token expected a continuation and we are on a new line, it suppresses splitting */
+        if (braces == 0 && current_len > 0 && last_line != -1 && line > last_line && !expects_continuation) {
+            /* do not split if the new line token is `else`, `elseif`, `end`, etc. because they belong to previous block structures */
+            if (tk != TK_ELSE && tk != TK_ELSEIF && tk != TK_END && tk != TK_UNTIL && tk != TK_CATCH && tk != TK_FINALLY) {
+                lua_pushvalue(L, current_stmt_idx);
+                lua_rawseti(L, result_idx, stmt_count++);
+                lua_newtable(L);
+                lua_replace(L, current_stmt_idx);
+                current_len = 0;
+            }
+        }
+
+        if (tk == ';') {
+            if (current_len > 0) {
+                lua_pushvalue(L, current_stmt_idx);
+                lua_rawseti(L, result_idx, stmt_count++);
+
+                lua_newtable(L);
+                lua_replace(L, current_stmt_idx);
+                current_len = 0;
+            }
+            lua_pop(L, 1); /* pop token */
+            continue;
+        }
+
+        current_len++;
+        lua_pushvalue(L, tok_idx);
+        lua_rawseti(L, current_stmt_idx, current_len);
+
+        if (tk == ',' || tk == '+' || tk == '-' || tk == '*' || tk == '/' || tk == TK_CONCAT || tk == '=' || tk == TK_AND || tk == TK_OR || tk == TK_NOT || tk == TK_LOCAL || tk == TK_RETURN) {
+            expects_continuation = 1;
+        } else {
+            expects_continuation = 0;
+        }
+
+        last_line = line;
+        lua_pop(L, 1); /* pop token */
+    }
+
+    if (current_len > 0) {
+        lua_pushvalue(L, current_stmt_idx);
+        lua_rawseti(L, result_idx, stmt_count++);
+    }
+
+    lua_pushvalue(L, result_idx);
+    return 1;
+}
+
+static int lexer_parse_local(lua_State *L) {
+    luaL_checktype(L, 1, LUA_TTABLE);
+    int num_tokens = luaL_len(L, 1);
+
+    if (num_tokens < 2) {
+        lua_pushnil(L);
+        return 1;
+    }
+
+    lua_rawgeti(L, 1, 1);
+    lua_getfield(L, -1, "token");
+    int first_tk = lua_tointeger(L, -1);
+    lua_pop(L, 2);
+
+    if (first_tk != TK_LOCAL) {
+        lua_pushnil(L);
+        return 1;
+    }
+
+    /* check if it's local function */
+    lua_rawgeti(L, 1, 2);
+    lua_getfield(L, -1, "token");
+    int second_tk = lua_tointeger(L, -1);
+    lua_pop(L, 2);
+
+    if (second_tk == TK_FUNCTION) {
+        lua_pushnil(L);
+        return 1;
+    }
+
+    lua_newtable(L); /* return table of names */
+    int names_idx = lua_gettop(L);
+    int name_count = 1;
+
+    lua_newtable(L); /* return table of remaining statement (the assignments) */
+    int stmt_idx = lua_gettop(L);
+    int stmt_len = 0;
+
+    int in_names = 1;
+
+    for (int i = 2; i <= num_tokens; i++) {
+        lua_rawgeti(L, 1, i);
+        int tok_idx = lua_gettop(L);
+
+        lua_getfield(L, tok_idx, "token");
+        int tk = lua_tointeger(L, -1);
+        lua_pop(L, 1);
+
+        if (in_names) {
+            if (tk == TK_NAME) {
+                lua_getfield(L, tok_idx, "value");
+                lua_rawseti(L, names_idx, name_count++);
+            } else if (tk == '=') {
+                in_names = 0;
+                /* include '=' in remainder */
+                stmt_len++;
+                lua_pushvalue(L, tok_idx);
+                lua_rawseti(L, stmt_idx, stmt_len);
+            }
+        } else {
+            stmt_len++;
+            lua_pushvalue(L, tok_idx);
+            lua_rawseti(L, stmt_idx, stmt_len);
+        }
+
+        lua_pop(L, 1); /* pop token */
+    }
+
+    return 2;
+}
 
 #include "llexer_compiler.h"
 
@@ -884,6 +1039,8 @@ static const luaL_Reg lexer_lib[] = {
     {"find_tokens", lexer_find_tokens},
     {"insert_tokens", lexer_insert_tokens},
     {"remove_tokens", lexer_remove_tokens},
+    {"split_statements", lexer_split_statements},
+    {"parse_local", lexer_parse_local},
     {NULL, NULL}
 };
 
