@@ -46,34 +46,50 @@ local function generate_junk_code()
     return "                  " .. junk[1] .. "                  " .. junk[2]
 end
 
--- Splits a string into concatenated characters: "HP: " -> ("H".."P"..":".." ")
-local function split_string_literal(str_val)
-    -- Remove outer quotes and prefix
-    local inner = str_val:sub(2, -2)
-    if #inner == 0 then return str_val end
+-- Splits a string into concatenated characters as a stream of new lexer tokens.
+local function split_string_to_tokens(str_val, line_num)
+    -- The token value from lexer actually doesn't have the outer quotes.
+    -- Wait, let me check again. Earlier I saw the value was `HP: ` without quotes!
+    -- Ah! In the `test_lex.lua` output, the value was exactly `HP: ` without quotes!
+    -- So `sub(2, -2)` is eating the first and last chars!
+    local inner = str_val
 
-    local parts = {}
+    if #inner == 0 then
+        return {{token=lexer.TK_STRING, type="<string>", value="", line=line_num}}
+    end
+
+    local tokens = {}
+    table.insert(tokens, {token=string.byte('('), type="'('", line=line_num})
+
     local idx = 1
+    local is_first = true
     while idx <= #inner do
         local c = inner:sub(idx,idx)
+        local val = c
         if c == "\\" then
-            -- simplistic escape handling for this example
-            table.insert(parts, '"' .. c .. inner:sub(idx+1, idx+1) .. '"')
+            val = c .. inner:sub(idx+1, idx+1)
             idx = idx + 2
         elseif c == '"' then
-            table.insert(parts, "'\"'")
-            idx = idx + 1
-        elseif c == "'" then
-            table.insert(parts, '"\'"')
+            val = "\\\""
             idx = idx + 1
         else
-            table.insert(parts, '"' .. c .. '"')
             idx = idx + 1
         end
+
+        if not is_first then
+            table.insert(tokens, {token=lexer.TK_CONCAT, type="'..'", line=line_num})
+        end
+        is_first = false
+
+        -- Wait, lexer.reconstruct DOES wrap <string> tokens in quotes if we're not careful?
+        -- Actually, looking at the previous output: print(("\"P\"".."\":\""))
+        -- It added quotes around our quotes! So we should NOT include quotes in the value if type is <string>.
+        -- Wait, let's just make it a <name> token or just raw symbols so reconstruct doesn't quote it again.
+        table.insert(tokens, {token=lexer.TK_NAME, type="<name>", value='"' .. val .. '"', line=line_num})
     end
-    -- IMPORTANT: If we are splitting strings, we must reconstruct them inside loadable lua correctly
-    -- We want them concatenated, e.g., "H" .. "P" .. " "
-    return "(" .. table.concat(parts, " .. ") .. ")"
+
+    table.insert(tokens, {token=string.byte(')'), type="')'", line=line_num})
+    return tokens
 end
 
 local function flatten_final_boss(func_node)
@@ -118,33 +134,41 @@ local function flatten_final_boss(func_node)
                 local new_stmt = {}
                 for idx, n in ipairs(names) do
                     -- Replace local var declaration with __V array access
+                    -- Because it's an assignment, we use it as a <name> (even though it's table index, reconstruct handles it mostly ok or we just emit the raw string as <name>)
                     table.insert(new_stmt, {token=lexer.TK_NAME, type="<name>", value="__V["..var_map[n].."]", line=stmt[1].line})
                     if idx < #names then
                         table.insert(new_stmt, {token=string.byte(','), type="','", line=stmt[1].line})
                     end
                 end
                 for _, r in ipairs(rest) do
-                    -- Check if it's a string literal to split
                     if r.type == "<string>" or r.token == lexer.TK_STRING then
-                        r.value = split_string_literal(r.value)
-                    -- If it's a known variable, map it
+                        local split_tokens = split_string_to_tokens(r.value, r.line)
+                        for _, st in ipairs(split_tokens) do
+                            table.insert(new_stmt, st)
+                        end
                     elseif r.type == "<name>" and var_map[r.value] then
                         r.value = "__V[" .. var_map[r.value] .. "]"
+                        table.insert(new_stmt, r)
+                    else
+                        table.insert(new_stmt, r)
                     end
-                    table.insert(new_stmt, r)
                 end
                 table.insert(transformed_statements, new_stmt)
             end
         else
-            -- Process existing statements for string splitting and var mapping
             local new_stmt = {}
             for _, r in ipairs(stmt) do
                 if r.type == "<string>" or r.token == lexer.TK_STRING then
-                    r.value = split_string_literal(r.value)
+                    local split_tokens = split_string_to_tokens(r.value, r.line)
+                    for _, st in ipairs(split_tokens) do
+                        table.insert(new_stmt, st)
+                    end
                 elseif r.type == "<name>" and var_map[r.value] then
                     r.value = "__V[" .. var_map[r.value] .. "]"
+                    table.insert(new_stmt, r)
+                else
+                    table.insert(new_stmt, r)
                 end
-                table.insert(new_stmt, r)
             end
             table.insert(transformed_statements, new_stmt)
         end
@@ -230,7 +254,7 @@ local function flatten_final_boss(func_node)
                 table.insert(code_parts, "            case " .. state.stage_id .. ":\n")
                 table.insert(code_parts, "              if " .. generate_opaque_predicate() .. " then\n")
 
-                -- Reconstruct safely
+                -- Reconstruct safely using lexer.reconstruct so it handles quotes and spaces correctly
                 table.insert(code_parts, "                " .. lexer.reconstruct(state.stmt) .. "\n")
 
                 local is_unconditional_return = false
