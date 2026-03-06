@@ -102,15 +102,18 @@ local function flatten_with_goto(func_node)
         block_code = block_code .. lexer.reconstruct(stmt) .. "\n"
 
         local is_return = false
-        local is_break = false
+        local is_unconditional_return = false
 
         for _, t in ipairs(stmt) do
             if t.type == "'return'" then is_return = true end
-            if t.type == "'break'" then is_break = true end
         end
 
-        -- Append goto to the next block, except if it's a return or break
-        if not is_return and not is_break then
+        if stmt[1] and stmt[1].type == "'return'" then
+            is_unconditional_return = true
+        end
+
+        -- Append goto to the next block, except if it's an unconditional return
+        if not is_unconditional_return then
             block_code = block_code .. "  goto " .. labels[i + 1] .. "\n"
         end
         table.insert(blocks, block_code)
