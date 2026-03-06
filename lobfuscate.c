@@ -644,21 +644,18 @@ void luaO_shuffleBlocks (CFFContext *ctx) {
 */
 int luaO_encodeState (int state, unsigned int seed) {
   /* 使用固定范围和与之互质的乘数 */
-  const int range = 30000;  /* 安全范围 */
-  const int prime = 7919;   /* 质数，与 range 互质 */
+  const int range = 32768;  /* 2的幂，适合XOR双射 */
+  const int prime = 7919;   /* 质数 */
   
   /* 使用种子生成偏移量 */
   int offset = (int)(seed % range);
   
   /* 线性变换：(state * prime + offset) mod range */
-  /* 由于 prime 与 range 互质，这是一个置换（双射） */
   int encoded = ((state * prime) % range + offset) % range;
   if (encoded < 0) encoded += range;
   
-  /* CFF Enhancement: Add XOR encoding, then mod range to keep it strictly bounded */
+  /* XOR 混淆，由于 range 是 32768，0x5A5A 不会超出范围，形成完美双射 */
   encoded ^= 0x5A5A;
-  encoded %= range;
-  if (encoded < 0) encoded += range;
 
   return encoded;
 }
@@ -881,16 +878,29 @@ static Instruction generateBogusInstruction (CFFContext *ctx, unsigned int *seed
 
 /* Emit a sequence of junk instructions (花指令) guarded by an OP_JMP */
 static int emitJunkSequence(CFFContext *ctx) {
-    int num_nops = 1 + (ctx->seed % 3);
+    int num_nops = 2 + (ctx->seed % 5);
     Instruction jmp_over_junk = CREATE_sJ(OP_JMP, num_nops + OFFSET_sJ, 0);
     if (emitInstruction(ctx, jmp_over_junk) < 0) return -1;
     for (int i = 0; i < num_nops; i++) {
         NEXT_RAND(ctx->seed);
-        /* Use bogus instructions or random NOPs to confuse disassemblers */
-        if (ctx->seed % 2 == 0) {
+        /* Use bogus instructions, random NOPs, or short forward jumps to confuse disassemblers */
+        int r = ctx->seed % 3;
+        if (r == 0) {
             emitInstruction(ctx, generateBogusInstruction(ctx, &ctx->seed));
-        } else {
+        } else if (r == 1) {
             emitInstruction(ctx, luaO_createNOP(ctx->seed));
+        } else {
+            int skip = (num_nops - i - 1);
+            if (skip > 0) {
+                emitInstruction(ctx, CREATE_sJ(OP_JMP, skip + OFFSET_sJ, 0));
+                i += skip; /* Advance i since we skipped those */
+                for(int j=0; j<skip; j++) {
+                    NEXT_RAND(ctx->seed);
+                    emitInstruction(ctx, luaO_createNOP(ctx->seed));
+                }
+            } else {
+                emitInstruction(ctx, luaO_createNOP(ctx->seed));
+            }
         }
     }
     return 0;
@@ -947,6 +957,20 @@ static int emitStateTransition (CFFContext *ctx, int reg, int next_state) {
   }
 }
 
+
+static int emitDeadJunk(CFFContext *ctx) {
+    if (!(ctx->obfuscate_flags & OBFUSCATE_RANDOM_NOP)) return 0;
+    int num_nops = 1 + (ctx->seed % 4);
+    for (int i = 0; i < num_nops; i++) {
+        NEXT_RAND(ctx->seed);
+        if (ctx->seed % 2 == 0) {
+            emitInstruction(ctx, generateBogusInstruction(ctx, &ctx->seed));
+        } else {
+            emitInstruction(ctx, luaO_createNOP(ctx->seed));
+        }
+    }
+    return 0;
+}
 
 /* 生成一个虚假基本块的代码 */
 static int emitBogusBlock (CFFContext *ctx, int bogus_state, unsigned int *seed) {
@@ -1008,6 +1032,8 @@ static int luaO_emitBlocksAndStubs (CFFContext *ctx, int *all_block_jmp_pcs, int
       loop_stub_pc = ctx->new_code_size;
       emitStateTransition(ctx, state_reg, state_body);
       emitInstruction(ctx, CREATE_sJ(OP_JMP, (ctx->dispatcher_pc - ctx->new_code_size - 1) + OFFSET_sJ, 0));
+      emitDeadJunk(ctx);
+      emitDeadJunk(ctx);
       SETARG_sJ(ctx->new_code[skip_stub_pc], ctx->new_code_size - skip_stub_pc - 1);
     }
     
@@ -1050,10 +1076,14 @@ static int luaO_emitBlocksAndStubs (CFFContext *ctx, int *all_block_jmp_pcs, int
       int skip_then_pc = emitInstruction(ctx, CREATE_sJ(OP_JMP, 0, 0)); /* 跳过 then 分支 */
       emitStateTransition(ctx, state_reg, state_then);
       emitInstruction(ctx, CREATE_sJ(OP_JMP, (ctx->dispatcher_pc - ctx->new_code_size - 1) + OFFSET_sJ, 0));
+      emitDeadJunk(ctx);
+      emitDeadJunk(ctx);
       SETARG_sJ(ctx->new_code[skip_then_pc], ctx->new_code_size - skip_then_pc - 1);
       
       emitStateTransition(ctx, state_reg, state_else);
       emitInstruction(ctx, CREATE_sJ(OP_JMP, (ctx->dispatcher_pc - ctx->new_code_size - 1) + OFFSET_sJ, 0));
+      emitDeadJunk(ctx);
+      emitDeadJunk(ctx);
       
     } else if (last_op == OP_FORLOOP || last_op == OP_TFORLOOP) {
       Instruction loop_inst = f->code[last_pc];
@@ -1068,6 +1098,8 @@ static int luaO_emitBlocksAndStubs (CFFContext *ctx, int *all_block_jmp_pcs, int
       
       emitStateTransition(ctx, state_reg, state_next);
       emitInstruction(ctx, CREATE_sJ(OP_JMP, (ctx->dispatcher_pc - ctx->new_code_size - 1) + OFFSET_sJ, 0));
+      emitDeadJunk(ctx);
+      emitDeadJunk(ctx);
       
     } else if (last_op == OP_TFORPREP) {
       int a = GETARG_A(f->code[last_pc]);
@@ -1076,6 +1108,8 @@ static int luaO_emitBlocksAndStubs (CFFContext *ctx, int *all_block_jmp_pcs, int
       emitInstruction(ctx, CREATE_ABCk(OP_TBC, a + 3, 0, 0, 0));
       emitStateTransition(ctx, state_reg, state_call);
       emitInstruction(ctx, CREATE_sJ(OP_JMP, (ctx->dispatcher_pc - ctx->new_code_size - 1) + OFFSET_sJ, 0));
+      emitDeadJunk(ctx);
+      emitDeadJunk(ctx);
 
     } else if (last_op == OP_FORPREP) {
       Instruction prep_inst = f->code[last_pc];
@@ -1089,11 +1123,15 @@ static int luaO_emitBlocksAndStubs (CFFContext *ctx, int *all_block_jmp_pcs, int
       emitInstruction(ctx, prep_inst);
       emitStateTransition(ctx, state_reg, state_enter);
       emitInstruction(ctx, CREATE_sJ(OP_JMP, (ctx->dispatcher_pc - ctx->new_code_size - 1) + OFFSET_sJ, 0));
+      emitDeadJunk(ctx);
+      emitDeadJunk(ctx);
       
       int skip_jump_pc = emitInstruction(ctx, CREATE_sJ(OP_JMP, 0, 0));
       int skip_stub_start = ctx->new_code_size;
       emitStateTransition(ctx, state_reg, state_skip);
       emitInstruction(ctx, CREATE_sJ(OP_JMP, (ctx->dispatcher_pc - ctx->new_code_size - 1) + OFFSET_sJ, 0));
+      emitDeadJunk(ctx);
+      emitDeadJunk(ctx);
       
       SETARG_sJ(ctx->new_code[skip_jump_pc], ctx->new_code_size - skip_jump_pc - 1);
       SETARG_Bx(ctx->new_code[prep_pc], skip_stub_start - prep_pc - 1);
@@ -1105,6 +1143,8 @@ static int luaO_emitBlocksAndStubs (CFFContext *ctx, int *all_block_jmp_pcs, int
         if (ctx->obfuscate_flags & OBFUSCATE_STATE_ENCODE) next_state = luaO_encodeState(next_state, ctx->seed);
         emitStateTransition(ctx, state_reg, next_state);
         emitInstruction(ctx, CREATE_sJ(OP_JMP, (ctx->dispatcher_pc - ctx->new_code_size - 1) + OFFSET_sJ, 0));
+      emitDeadJunk(ctx);
+      emitDeadJunk(ctx);
       }
     }
   }
@@ -3203,17 +3243,8 @@ static int convertLuaInstToVM (VMProtectContext *ctx, Instruction inst, int pc) 
   switch (mode) {
     case iABx:
     case iAsBx:
-      if (lua_op == OP_LOADI) {
-        /* Encrypt the literal integer with a constant */
-        int64_t val = (int64_t)GETARG_Bx(inst);
-        /* Note: OP_LOADI uses sBx = Bx - OFFSET_sBx. But the raw field is Bx. */
-        /* This is just a conceptual note; we encode Bx directly and handle it in decrypt if needed,
-           but here we're just shifting the representation if possible. Wait, VM execution maps 1:1 to Lua VM,
-           so modifying Bx here requires inverse modification during execution, which breaks vanilla Lua VM execution
-           unless we intercept it in `luaO_executeVM`. */
-
-        /* We'll use a safer approach: modify the argument inside `convertLuaInstToVM`
-           and un-modify it inside `luaO_executeVM` OP_LOADI case. */
+      if (lua_op == OP_LOADI || lua_op == OP_LOADF) {
+        /* Encrypt the literal integer/float with a constant */
         int64_t original_bx = (int64_t)GETARG_Bx(inst);
         int64_t obf_bx = original_bx ^ ((ctx->encrypt_key ^ pc) & 0xFFFFFFFF);
         vm_inst = VM_MAKE_INST_BX(vm_op, a, (uint64_t)obf_bx);
@@ -3554,12 +3585,30 @@ int luaO_executeVM (lua_State *L, Proto *f) {
     if (lua_op < 0 || lua_op >= NUM_OPCODES) {
        if (vm_op == VM_OP_HALT) return 0;
        if (vm_op == VM_OP_EXT1) {
+           TValue *rb = s2v(base + b); TValue *rc = s2v(base + c);
+           if (ttisinteger(rb) && ttisinteger(rc)) {
+               /* Obfuscated ADD: x + y == x - (~y) - 1 */
+               setivalue(s2v(base + a), intop(-, intop(-, ivalue(rb), ~ivalue(rc)), 1));
+               pc++; continue;
+           }
            lua_op = OP_ADD;
        } else if (vm_op == VM_OP_EXT2) {
+           TValue *rb = s2v(base + b); TValue *rc = s2v(base + c);
+           if (ttisinteger(rb) && ttisinteger(rc)) {
+               /* Obfuscated SUB: x - y == x + (~y) + 1 */
+               setivalue(s2v(base + a), intop(+, intop(+, ivalue(rb), ~ivalue(rc)), 1));
+               pc++; continue;
+           }
            lua_op = OP_SUB;
        } else if (vm_op == VM_OP_EXT3) {
            lua_op = OP_MUL;
        } else if (vm_op == VM_OP_EXT4) {
+           TValue *rb = s2v(base + b); TValue *rc = s2v(base + c);
+           if (ttisinteger(rb) && ttisinteger(rc)) {
+               /* Obfuscated BXOR: x ^ y == (x | y) - (x & y) */
+               setivalue(s2v(base + a), intop(-, intop(|, ivalue(rb), ivalue(rc)), intop(&, ivalue(rb), ivalue(rc))));
+               pc++; continue;
+           }
            lua_op = OP_BXOR;
        } else {
            ci->u.l.savedpc = (const Instruction *)(f->code + pc);
@@ -3597,7 +3646,11 @@ int luaO_executeVM (lua_State *L, Proto *f) {
         }
         break;
       }
-      case OP_LOADF: { setfltvalue(s2v(base + a), cast_num((lua_Integer)(bx - OFFSET_sBx))); break; }
+      case OP_LOADF: {
+        int64_t real_bx = bx ^ ((vm->encrypt_key ^ pc) & 0xFFFFFFFF);
+        setfltvalue(s2v(base + a), cast_num((lua_Integer)(real_bx - OFFSET_sBx)));
+        break;
+      }
       case OP_LOADKX: {
         pc++;
         if (pc < vm->size) {
