@@ -100,33 +100,33 @@ local function inject_vm_engine(code_parts)
       while true do
           local op = _bc[pc]
           if not op then break end
-          if op == %d then break
-          elseif op == %d then __M[_bc[pc+1]] = _k[_bc[pc+2]]; pc = pc + 3
-          elseif op == %d then __M[_bc[pc+1]] = __M[_bc[pc+2]]; pc = pc + 3
-          elseif op == %d then __M[_bc[pc+1]] = __M[_bc[pc+2]] + __M[_bc[pc+3]]; pc = pc + 4
-          elseif op == %d then __M[_bc[pc+1]] = __M[_bc[pc+2]] - __M[_bc[pc+3]]; pc = pc + 4
-          elseif op == %d then __M[_bc[pc+1]] = __M[_bc[pc+2]] * __M[_bc[pc+3]]; pc = pc + 4
-          elseif op == %d then __M[_bc[pc+1]] = __M[_bc[pc+2]] / __M[_bc[pc+3]]; pc = pc + 4
-          elseif op == %d then __M[_bc[pc+1]] = __M[_bc[pc+2]] %% __M[_bc[pc+3]]; pc = pc + 4
-          elseif op == %d then pc = pc + _bc[pc+1]
-          elseif op == %d then if __M[_bc[pc+1]] then pc = pc + _bc[pc+2] else pc = pc + 3 end
-          elseif op == %d then __M[_bc[pc+1]] = __M[_bc[pc+2]] ~ __M[_bc[pc+3]]; pc = pc + 4
-          elseif op == %d then __M[_bc[pc+1]] = __M[_bc[pc+2]] & __M[_bc[pc+3]]; pc = pc + 4
-          elseif op == %d then __M[_bc[pc+1]] = __M[_bc[pc+2]] | __M[_bc[pc+3]]; pc = pc + 4
-          elseif op == %d then __M[_bc[pc+1]] = __M[_bc[pc+2]] << __M[_bc[pc+3]]; pc = pc + 4
-          elseif op == %d then __M[_bc[pc+1]] = __M[_bc[pc+2]] >> __M[_bc[pc+3]]; pc = pc + 4
-          elseif op == %d then __M[_bc[pc+1]] = (__M[_bc[pc+2]] == __M[_bc[pc+3]]); pc = pc + 4
-          elseif op == %d then __M[_bc[pc+1]] = (__M[_bc[pc+2]] < __M[_bc[pc+3]]); pc = pc + 4
-          elseif op == %d then __M[_bc[pc+1]] = {}; pc = pc + 2
-          elseif op == %d then __M[_bc[pc+1]] = __M[_bc[pc+2]][__M[_bc[pc+3]]]; pc = pc + 4
-          elseif op == %d then __M[_bc[pc+1]][__M[_bc[pc+2]]] = __M[_bc[pc+3]]; pc = pc + 4
-          elseif op == %d then __M[_bc[pc+1]] = __M[_bc[pc+2]](); pc = pc + 3
-          elseif op == %d then __M[_bc[pc+1]] = __M[_bc[pc+2]](__M[_bc[pc+3]]); pc = pc + 4
-          elseif op == %d then __M[_bc[pc+1]] = __M[_bc[pc+2]](__M[_bc[pc+3]], __M[_bc[pc+4]]); pc = pc + 5
+          if op == %s then break
+          elseif op == %s then __M[_bc[pc+1]] = _k[_bc[pc+2]]; pc = pc + 3
+          elseif op == %s then __M[_bc[pc+1]] = __M[_bc[pc+2]]; pc = pc + 3
+          elseif op == %s then __M[_bc[pc+1]] = __M[_bc[pc+2]] + __M[_bc[pc+3]]; pc = pc + 4
+          elseif op == %s then __M[_bc[pc+1]] = __M[_bc[pc+2]] - __M[_bc[pc+3]]; pc = pc + 4
+          elseif op == %s then __M[_bc[pc+1]] = __M[_bc[pc+2]] * __M[_bc[pc+3]]; pc = pc + 4
+          elseif op == %s then __M[_bc[pc+1]] = __M[_bc[pc+2]] / __M[_bc[pc+3]]; pc = pc + 4
+          elseif op == %s then __M[_bc[pc+1]] = __M[_bc[pc+2]] %% __M[_bc[pc+3]]; pc = pc + 4
+          elseif op == %s then pc = pc + _bc[pc+1]
+          elseif op == %s then if __M[_bc[pc+1]] then pc = pc + _bc[pc+2] else pc = pc + 3 end
+          elseif op == %s then __M[_bc[pc+1]] = __M[_bc[pc+2]] ~ __M[_bc[pc+3]]; pc = pc + 4
+          elseif op == %s then __M[_bc[pc+1]] = __M[_bc[pc+2]] & __M[_bc[pc+3]]; pc = pc + 4
+          elseif op == %s then __M[_bc[pc+1]] = __M[_bc[pc+2]] | __M[_bc[pc+3]]; pc = pc + 4
+          elseif op == %s then __M[_bc[pc+1]] = __M[_bc[pc+2]] << __M[_bc[pc+3]]; pc = pc + 4
+          elseif op == %s then __M[_bc[pc+1]] = __M[_bc[pc+2]] >> __M[_bc[pc+3]]; pc = pc + 4
+          elseif op == %s then __M[_bc[pc+1]] = (__M[_bc[pc+2]] == __M[_bc[pc+3]]); pc = pc + 4
+          elseif op == %s then __M[_bc[pc+1]] = (__M[_bc[pc+2]] < __M[_bc[pc+3]]); pc = pc + 4
+          elseif op == %s then __M[_bc[pc+1]] = {}; pc = pc + 2
+          elseif op == %s then __M[_bc[pc+1]] = __M[_bc[pc+2]][__M[_bc[pc+3]]]; pc = pc + 4
+          elseif op == %s then __M[_bc[pc+1]][__M[_bc[pc+2]]] = __M[_bc[pc+3]]; pc = pc + 4
+          elseif op == %s then __M[_bc[pc+1]] = __M[_bc[pc+2]](); pc = pc + 3
+          elseif op == %s then __M[_bc[pc+1]] = __M[_bc[pc+2]](__M[_bc[pc+3]]); pc = pc + 4
+          elseif op == %s then __M[_bc[pc+1]] = __M[_bc[pc+2]](__M[_bc[pc+3]], __M[_bc[pc+4]]); pc = pc + 5
           else break end
       end
   end
-]=], OP_HALT, OP_LOADK, OP_MOVE, OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_MOD, OP_JMP, OP_JMP_T, OP_XOR, OP_AND, OP_OR, OP_SHL, OP_SHR, OP_EQ, OP_LT, OP_NEWTABLE, OP_GETTABLE, OP_SETTABLE, OP_CALL0, OP_CALL1, OP_CALL2)
+]=], obfuscate_number(OP_HALT), obfuscate_number(OP_LOADK), obfuscate_number(OP_MOVE), obfuscate_number(OP_ADD), obfuscate_number(OP_SUB), obfuscate_number(OP_MUL), obfuscate_number(OP_DIV), obfuscate_number(OP_MOD), obfuscate_number(OP_JMP), obfuscate_number(OP_JMP_T), obfuscate_number(OP_XOR), obfuscate_number(OP_AND), obfuscate_number(OP_OR), obfuscate_number(OP_SHL), obfuscate_number(OP_SHR), obfuscate_number(OP_EQ), obfuscate_number(OP_LT), obfuscate_number(OP_NEWTABLE), obfuscate_number(OP_GETTABLE), obfuscate_number(OP_SETTABLE), obfuscate_number(OP_CALL0), obfuscate_number(OP_CALL1), obfuscate_number(OP_CALL2))
     table.insert(code_parts, vm_code)
 end
 
@@ -342,8 +342,7 @@ local function split_string_anti_hook(str_val, line_num)
     local inner = str_val
     if inner:sub(1,1) == '"' or inner:sub(1,1) == "'" then inner = str_val:sub(2, -2) end
     if #inner == 0 then return {{token=0, type="<raw>", value='""', line=line_num}} end
-    local tokens = {{token=0, type="<raw>", value="(", line=line_num}}
-    local is_first = true
+    local tokens = {{token=0, type="<raw>", value="( \"\"", line=line_num}}
     local idx = 1
     while idx <= #inner do
         local c = inner:sub(idx,idx)
@@ -363,9 +362,8 @@ local function split_string_anti_hook(str_val, line_num)
         end
         local key = math.random(10, 250)
         local encrypted_byte = byte_val ~ key
-        if not is_first then table.insert(tokens, {token=0, type="<raw>", value="..", line=line_num}) end
-        is_first = false
-        table.insert(tokens, {token=0, type="<raw>", value="(string.char(" .. encrypted_byte .. ") ~ " .. key .. ")", line=line_num})
+
+        table.insert(tokens, {token=0, type="<raw>", value=" - (" .. obfuscate_number(encrypted_byte) .. " ~ " .. obfuscate_number(key) .. ")", line=line_num})
     end
     table.insert(tokens, {token=0, type="<raw>", value=")", line=line_num})
     return tokens
@@ -397,7 +395,7 @@ end
 
 local function generate_fractal_coordinates(num_states)
     local coords = {}
-    local bounds = {3, 3, 3, 3, 3, 3, 3}
+    local bounds = {4, 4, 4, 4, 4, 4, 4}
     local curr = {1,1,1,1,1,1,1}
     for i = 1, num_states do
         table.insert(coords, {table.unpack(curr)})
@@ -527,7 +525,7 @@ local function flatten_v11(func_node)
     table.insert(code_parts, fs_reconstruct)
 
     local DIMENSIONS = 7
-    local TOTAL_STATES = 350
+    local TOTAL_STATES = 700
 
     local M_Z = {}
     for i=1, DIMENSIONS do M_Z[i] = 100 + i end
@@ -535,14 +533,21 @@ local function flatten_v11(func_node)
     local mt_hook = [[
   local _s = ""
   local _mt = getmetatable(_s) or {}
-  _mt.__bxor = function(a, b)
-      if type(a) == "string" and type(b) == "number" then return string.char(string.byte(a) ~ b) end
+  _mt.__sub = function(a, b)
+      if type(a) == "string" and type(b) == "number" then
+          local _g = _G
+          local _sl = _g["\115\116\114\105\110\103"]
+          local _cf = _sl["\99\104\97\114"]
+          return a .. _cf(b)
+      end
       return a
   end
-  if debug and debug.setmetatable then debug.setmetatable(_s, _mt) end
+  local _g = _G
+  local _db = _g["\100\101\98\117\103"]
+  if _db and _db["\115\101\116\109\101\116\97\116\97\98\108\101"] then _db["\115\101\116\109\101\116\97\116\97\98\108\101"](_s, _mt) end
 ]]
     table.insert(code_parts, "\n" .. mt_hook)
-    table.insert(code_parts, "  local __M = {[0]=0}\n  for _i=1, 300 do __M[_i] = 0 end\n")
+    table.insert(code_parts, "  local __M = {[0]=_G}\n  for _i=1, 300 do __M[_i] = 0 end\n")
 
     local map_args = ""
     for arg_name, arg_idx in pairs(var_map) do
@@ -622,27 +627,32 @@ local function flatten_v11(func_node)
 
     local first_z1 = true
     for _, z1 in ipairs(get_keys(map)) do
-        table.insert(code_parts, first_z1 and "      if __M["..encrypt_index(M_Z[1]).."] == " .. z1 .. " then\n" or "      elseif __M["..encrypt_index(M_Z[1]).."] == " .. z1 .. " then\n")
+        table.insert(code_parts, first_z1 and "      if __M["..encrypt_index(M_Z[1]).."] == " .. obfuscate_number(z1) .. " then\n" or "      elseif __M["..encrypt_index(M_Z[1]).."] == " .. obfuscate_number(z1) .. " then\n")
         first_z1 = false
-        table.insert(code_parts, "        switch (__M["..encrypt_index(M_Z[2]).."]) do\n")
+        local first_z2 = true
         for _, z2 in ipairs(get_keys(map[z1])) do
-            table.insert(code_parts, "          case " .. z2 .. ":\n")
-            table.insert(code_parts, "            switch (__M["..encrypt_index(M_Z[3]).."]) do\n")
+            table.insert(code_parts, first_z2 and "        if __M["..encrypt_index(M_Z[2]).."] == " .. obfuscate_number(z2) .. " then\n" or "        elseif __M["..encrypt_index(M_Z[2]).."] == " .. obfuscate_number(z2) .. " then\n")
+            first_z2 = false
+            local first_z3 = true
             for _, z3 in ipairs(get_keys(map[z1][z2])) do
-                table.insert(code_parts, "              case " .. z3 .. ":\n")
-                table.insert(code_parts, "                switch (__M["..encrypt_index(M_Z[4]).."]) do\n")
+                table.insert(code_parts, first_z3 and "          if __M["..encrypt_index(M_Z[3]).."] == " .. obfuscate_number(z3) .. " then\n" or "          elseif __M["..encrypt_index(M_Z[3]).."] == " .. obfuscate_number(z3) .. " then\n")
+                first_z3 = false
+                local first_z4 = true
                 for _, z4 in ipairs(get_keys(map[z1][z2][z3])) do
-                    table.insert(code_parts, "                  case " .. z4 .. ":\n")
-                    table.insert(code_parts, "                    switch (__M["..encrypt_index(M_Z[5]).."]) do\n")
+                    table.insert(code_parts, first_z4 and "            if __M["..encrypt_index(M_Z[4]).."] == " .. obfuscate_number(z4) .. " then\n" or "            elseif __M["..encrypt_index(M_Z[4]).."] == " .. obfuscate_number(z4) .. " then\n")
+                    first_z4 = false
+                    local first_z5 = true
                     for _, z5 in ipairs(get_keys(map[z1][z2][z3][z4])) do
-                        table.insert(code_parts, "                      case " .. z5 .. ":\n")
-                        table.insert(code_parts, "                        switch (__M["..encrypt_index(M_Z[6]).."]) do\n")
+                        table.insert(code_parts, first_z5 and "              if __M["..encrypt_index(M_Z[5]).."] == " .. obfuscate_number(z5) .. " then\n" or "              elseif __M["..encrypt_index(M_Z[5]).."] == " .. obfuscate_number(z5) .. " then\n")
+                        first_z5 = false
+                        local first_z6 = true
                         for _, z6 in ipairs(get_keys(map[z1][z2][z3][z4][z5])) do
-                            table.insert(code_parts, "                          case " .. z6 .. ":\n")
+                            table.insert(code_parts, first_z6 and "                if __M["..encrypt_index(M_Z[6]).."] == " .. obfuscate_number(z6) .. " then\n" or "                elseif __M["..encrypt_index(M_Z[6]).."] == " .. obfuscate_number(z6) .. " then\n")
+                            first_z6 = false
                             local stage_list = map[z1][z2][z3][z4][z5][z6]
                             shuffle_inplace(stage_list)
                             for _, state in ipairs(stage_list) do
-                                table.insert(code_parts, "                            if __M["..encrypt_index(M_Z[7]).."] == " .. state.c[7] .. " then\n")
+                                table.insert(code_parts, "                  if __M["..encrypt_index(M_Z[7]).."] == " .. obfuscate_number(state.c[7]) .. " then\n")
 
                                 local is_true_pred = not state.is_bogus
                                 table.insert(code_parts, "                              if " .. generate_opaque_predicate(is_true_pred) .. " then\n")
@@ -726,21 +736,16 @@ local function flatten_v11(func_node)
                                 end
                                 table.insert(code_parts, "                              end\n")
 
-                                table.insert(code_parts, "                            end\n")
+                                table.insert(code_parts, "                  end\n")
                             end
-                            table.insert(code_parts, "                            break\n")
                         end
-                        table.insert(code_parts, "                        end\n")
-                        table.insert(code_parts, "                        break\n")
+                        table.insert(code_parts, "                end\n")
                     end
-                    table.insert(code_parts, "                    end\n")
-                    table.insert(code_parts, "                    break\n")
+                    table.insert(code_parts, "              end\n")
                 end
-                table.insert(code_parts, "                end\n")
-                table.insert(code_parts, "                break\n")
+                table.insert(code_parts, "            end\n")
             end
-            table.insert(code_parts, "            end\n")
-            table.insert(code_parts, "            break\n")
+            table.insert(code_parts, "          end\n")
         end
         table.insert(code_parts, "        end\n")
     end
