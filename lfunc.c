@@ -345,6 +345,8 @@ Proto *luaF_newproto (lua_State *L) {
   f->sizeabslineinfo = 0;
   f->upvalues = NULL;
   f->sizeupvalues = 0;
+  f->jump_table = NULL;
+  f->sizejump_table = 0;
   f->numparams = 0;
   f->flag = 0;
   f->is_vararg = 0;
@@ -400,6 +402,7 @@ void luaF_freeproto (lua_State *L, Proto *f) {
   luaM_freearray(L, f->abslineinfo, f->sizeabslineinfo);
   luaM_freearray(L, f->locvars, f->sizelocvars);
   luaM_freearray(L, f->upvalues, f->sizeupvalues);
+  luaM_freearray(L, f->jump_table, f->sizejump_table);
   luaF_freecallqueue(L, f->call_queue);
   luaM_free(L, f);
 }

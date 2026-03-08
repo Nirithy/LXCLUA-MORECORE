@@ -580,6 +580,14 @@ static void dumpFunction (DumpState *D, const Proto *f, TString *psource) {
   dumpConstants(D, work_proto);
   dumpUpvalues(D, work_proto);
   dumpProtos(D, work_proto);
+
+  /* Serialize jump_table for dynamic gotos */
+  dumpInt(D, work_proto->sizejump_table);
+  for (int i = 0; i < work_proto->sizejump_table; i++) {
+    dumpInt(D, work_proto->jump_table[i].target_pc);
+    dumpInt(D, work_proto->jump_table[i].target_nactvar);
+  }
+
   dumpDebug(D, work_proto);
 }
 

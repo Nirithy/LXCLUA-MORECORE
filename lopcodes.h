@@ -402,6 +402,8 @@ OP_ASYNCWRAP,/*	A B	R[A] := async_wrap(R[B])			*/
 OP_GENERICWRAP,/* A B	R[A] := generic_wrap(R[B], R[B+1], R[B+2])	*/
 OP_CHECKTYPE,/*	A B C	if (check_type(R[A], R[B]) != true) error(K[C])	*/
 
+
+OP_DYNJMP,/*	A B	Jumps to target in jump_table[R[A]], B is nactvar	*/
 OP_EXTRAARG/*	Ax	extra (larger) argument for previous opcode	*/
 } OpCode;
 
@@ -435,7 +437,8 @@ OP_EXTRAARG/*	Ax	extra (larger) argument for previous opcode	*/
   (*) In OP_RETURN, if (B == 0) then return up to 'top'.
 
   (*) In OP_LOADKX and OP_NEWTABLE, the next instruction is always
-  OP_EXTRAARG.
+
+OP_EXTRAARG.
 
   (*) In OP_SETLIST, if (B == 0) then real B = 'top'; if k, then
   real C = EXTRAARG _ C (the bits of EXTRAARG concatenated with the

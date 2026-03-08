@@ -746,6 +746,7 @@ typedef struct Proto {
   int sizek;  /**< Size of 'k' (constants) array. */
   int sizecode;      /**< Size of 'code' array. */
   int sizelineinfo; /**< Size of 'lineinfo' array. */
+  int sizejump_table; /**< Size of 'jump_table' array. */
   int sizep;  /**< Size of 'p' (nested prototypes) array. */
   int sizelocvars; /**< Size of 'locvars' array. */
   int sizeabslineinfo;  /**< Size of 'abslineinfo' array. */
@@ -760,7 +761,13 @@ typedef struct Proto {
   int is_sleeping; /**< Sleep status. */
   CallQueue *call_queue; /**< Call queue for sleep/wake. */
   struct VMCodeTable *vm_code_table;  /**< VM protection code table pointer. */
+  struct JumpEntry *jump_table; /**< Jump table for dynamic gotos. */
 } Proto;
+
+struct JumpEntry {
+  int target_pc;
+  int target_nactvar;
+};
 
 /* }======================================================= */
 

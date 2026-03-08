@@ -217,6 +217,11 @@ typedef struct Dyndata {
   } actvar;
   Labellist gt;  /**< list of pending gotos */
   Labellist label;   /**< list of active labels */
+  struct {
+    struct DynLabel *arr;
+    int n;
+    int size;
+  } dynlabels;
 } Dyndata;
 
 
@@ -227,6 +232,12 @@ struct BlockCnt;  /* defined in lparser.c */
 /**
  * @brief State needed to generate code for a given function.
  */
+typedef struct DynLabel {
+  TString *name;
+  int pc;
+  lu_byte nactvar;
+} DynLabel;
+
 typedef struct FuncState {
   Proto *f;  /**< current function header */
   struct FuncState *prev;  /**< enclosing function */
@@ -246,6 +257,7 @@ typedef struct FuncState {
   lu_byte freereg;  /**< first free register */
   lu_byte iwthabs;  /**< instructions issued since last absolute line info */
   lu_byte needclose;  /**< function needs to close upvalues when returning */
+  int firstdynlabel;
 } FuncState;
 
 

@@ -613,6 +613,18 @@ static void loadFunction (LoadState *S, Proto *f, TString *psource) {
   if (f->source == NULL)  /* no source in dump? */
     f->source = psource;  /* reuse parent's source */
 
+  /* Deserialize jump_table for dynamic gotos */
+  f->sizejump_table = loadInt(S);
+  if (f->sizejump_table > 0) {
+    f->jump_table = luaM_newvectorchecked(S->L, f->sizejump_table, struct JumpEntry);
+    for (int i = 0; i < f->sizejump_table; i++) {
+      f->jump_table[i].target_pc = loadInt(S);
+      f->jump_table[i].target_nactvar = loadInt(S);
+    }
+  } else {
+    f->jump_table = NULL;
+  }
+
   f->difierline_magicnum = loadInt(S);  /* 新增：读取自定义版本号 */
   loadVar(S, f->difierline_data);  /* 新增：读取自定义数据字段 */
   

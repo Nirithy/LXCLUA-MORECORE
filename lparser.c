@@ -1133,6 +1133,14 @@ static int createlabel (LexState *ls, TString *name, int line,
     /* assume that locals are already out of scope */
     ll->arr[l].nactvar = fs->bl->nactvar;
   }
+  /* Update dynlabels if this label was used in a dynamic goto or expression */
+  for (int i = fs->firstdynlabel; i < ls->dyd->dynlabels.n; i++) {
+    if (eqstr(ls->dyd->dynlabels.arr[i].name, name)) {
+      ls->dyd->dynlabels.arr[i].pc = ll->arr[l].pc;
+      ls->dyd->dynlabels.arr[i].nactvar = ll->arr[l].nactvar;
+    }
+  }
+
   if (solvegotos(ls, &ll->arr[l])) {  /* need close? */
     luaK_codeABC(fs, OP_CLOSE, luaY_nvarstack(fs), 0, 0);
     return 1;
@@ -1313,6 +1321,7 @@ static void open_func (LexState *ls, FuncState *fs, BlockCnt *bl) {
   fs->needclose = 0;
   fs->firstlocal = ls->dyd->actvar.n;
   fs->firstlabel = ls->dyd->label.n;
+  fs->firstdynlabel = ls->dyd->dynlabels.n;
   fs->bl = NULL;
   f->source = ls->source;
   luaC_objbarrier(ls->L, f, f->source);
@@ -1337,7 +1346,23 @@ static void close_func (LexState *ls) {
   luaM_shrinkvector(L, f->p, f->sizep, fs->np, Proto *);
   luaM_shrinkvector(L, f->locvars, f->sizelocvars, fs->ndebugvars, LocVar);
   luaM_shrinkvector(L, f->upvalues, f->sizeupvalues, fs->nups, Upvaldesc);
+
+  /* Copy dynamic labels collected during compilation to the final jump_table in Proto */
+  int num_dynlabels = ls->dyd->dynlabels.n - fs->firstdynlabel;
+  if (num_dynlabels > 0) {
+    f->sizejump_table = num_dynlabels;
+    f->jump_table = luaM_newvectorchecked(L, num_dynlabels, struct JumpEntry);
+    for (int i = 0; i < num_dynlabels; i++) {
+      f->jump_table[i].target_pc = ls->dyd->dynlabels.arr[fs->firstdynlabel + i].pc;
+      f->jump_table[i].target_nactvar = ls->dyd->dynlabels.arr[fs->firstdynlabel + i].nactvar;
+    }
+  } else {
+    f->sizejump_table = 0;
+    f->jump_table = NULL;
+  }
+
   ls->fs = fs->prev;
+  ls->dyd->dynlabels.n = fs->firstdynlabel;
   luaC_checkGC(L);
 }
 
@@ -3064,8 +3089,15 @@ static void pipe_funcexp (LexState *ls, expdesc *v) {
   /* 只处理字段访问，不处理管道 */
   for (;;) {
     switch (ls->t.token) {
-      case '.':
-      case TK_DBCOLON: {  /* fieldsel */
+      case '.': {  /* fieldsel */
+        fieldsel(ls, v);
+        break;
+      }
+      case TK_DBCOLON: {
+        /* check if it's a label definition instead of a field selector */
+        if (luaX_lookahead(ls) == TK_NAME && luaX_lookahead2(ls) == TK_DBCOLON) {
+            return;
+        }
         fieldsel(ls, v);
         break;
       }
@@ -3189,8 +3221,14 @@ static void suffixedexp (LexState *ls, expdesc *v) {
         v->f = NO_JUMP;
         break;
       }
-      case '.':
+      case '.': {  /* fieldsel */
+        fieldsel(ls, v);
+        break;
+      }
       case TK_DBCOLON: {  /* fieldsel */
+        if (luaX_lookahead(ls) == TK_NAME && luaX_lookahead2(ls) == TK_DBCOLON) {
+            return;
+        }
         fieldsel(ls, v);
         break;
       }
@@ -3470,6 +3508,34 @@ static void simpleexp (LexState *ls, expdesc *v) {
     case TK_FALSE: {
       init_exp(v, VFALSE, 0);
       luaX_next(ls);
+      break;
+    }
+    case TK_DBCOLON: {
+      /* `::` could mean a label expression `::name::`, but we should make sure it is not
+         a statement `::label::` accidentally parsed as expression!
+         Actually, `::` at the start of simpleexp is exactly our syntax `::label::`
+         However, let's process it carefully. */
+      luaX_next(ls);
+      TString *name = str_checkname(ls);
+      checknext(ls, TK_DBCOLON);
+      FuncState *fs = ls->fs;
+      int label_id = -1;
+      for (int i = fs->firstdynlabel; i < ls->dyd->dynlabels.n; i++) {
+        if (eqstr(ls->dyd->dynlabels.arr[i].name, name)) {
+          label_id = i;
+          break;
+        }
+      }
+      if (label_id == -1) {
+        label_id = ls->dyd->dynlabels.n - fs->firstdynlabel;
+        luaM_growvector(ls->L, ls->dyd->dynlabels.arr, ls->dyd->dynlabels.n, ls->dyd->dynlabels.size, struct DynLabel, SHRT_MAX, "dynamic labels");
+        ls->dyd->dynlabels.arr[ls->dyd->dynlabels.n].name = name;
+        ls->dyd->dynlabels.arr[ls->dyd->dynlabels.n].pc = -1;
+        ls->dyd->dynlabels.arr[ls->dyd->dynlabels.n].nactvar = 0;
+        ls->dyd->dynlabels.n++;
+      }
+      init_exp(v, VKINT, 0);
+      v->u.ival = label_id;
       break;
     }
     case TK_DOTS: {  /* vararg */
@@ -4671,6 +4737,30 @@ static void cond_simpleexp (LexState *ls, expdesc *v) {
       luaX_next(ls);
       break;
     }
+    case TK_DBCOLON: {
+      luaX_next(ls);
+      TString *name = str_checkname(ls);
+      checknext(ls, TK_DBCOLON);
+      FuncState *fs = ls->fs;
+      int label_id = -1;
+      for (int i = fs->firstdynlabel; i < ls->dyd->dynlabels.n; i++) {
+        if (eqstr(ls->dyd->dynlabels.arr[i].name, name)) {
+          label_id = i;
+          break;
+        }
+      }
+      if (label_id == -1) {
+        label_id = ls->dyd->dynlabels.n - fs->firstdynlabel;
+        luaM_growvector(ls->L, ls->dyd->dynlabels.arr, ls->dyd->dynlabels.n, ls->dyd->dynlabels.size, struct DynLabel, SHRT_MAX, "dynamic labels");
+        ls->dyd->dynlabels.arr[ls->dyd->dynlabels.n].name = name;
+        ls->dyd->dynlabels.arr[ls->dyd->dynlabels.n].pc = -1;
+        ls->dyd->dynlabels.arr[ls->dyd->dynlabels.n].nactvar = 0;
+        ls->dyd->dynlabels.n++;
+      }
+      init_exp(v, VKINT, 0);
+      v->u.ival = label_id;
+      break;
+    }
     case TK_DOTS: {  /* vararg */
       FuncState *fs = ls->fs;
       check_condition(ls, fs->f->is_vararg,
@@ -4871,6 +4961,58 @@ static int cond (LexState *ls) {
 static void gotostat (LexState *ls) {
   FuncState *fs = ls->fs;
   int line = ls->linenumber;
+
+  /* Check if it is a classic goto label or dynamic goto */
+  int is_dynamic = 0;
+  if (ls->t.token != TK_NAME && ls->t.token != TK_CONTINUE) {
+      is_dynamic = 1;
+  } else if (ls->t.token == TK_NAME) {
+      expdesc dummy;
+      int varkind = searchvar(fs, ls->t.seminfo.ts, &dummy);
+      int lookahead = luaX_lookahead(ls);
+      /* We only treat `goto NAME` as dynamic if NAME is followed by expression continuations like `.`, `[`, etc.
+         If NAME is a local variable holding a label ID, treating it as dynamic would break standard `goto NAME`
+         if there's a label with the same name.
+         To support `local x = ::label1::; goto x` cleanly, users should use `goto (x)` or we can check if `x`
+         is defined and no label `x` exists. However, `expr()` parsing of `goto a` fails to see `a` as a local
+         because `searchvar` relies on the exact AST context which might be mismatched when re-entering `expr`.
+         Therefore, `goto a` remains a static jump, and `goto dispatch[pcc]` or `goto t.b` remains dynamic.
+      */
+      if (lookahead == '.' || lookahead == '[' || lookahead == '(' || lookahead == '{' || lookahead == ':') {
+          is_dynamic = 1;
+      }
+  }
+
+  if (is_dynamic) {
+      expdesc v;
+      /* We must parse an expression to support `goto (expr)` */
+      expr(ls, &v);
+      /*
+       * IF this dynamic jump is nested inside an `if` statement block, we must resolve it
+       * to a physical register. If the expression itself resolved to a conditional jump (VJMP),
+       * luaK_exp2anyreg will convert that conditional jump into a boolean register.
+       * But wait, `expr` itself could generate jumps in `v.t` or `v.f`. We MUST flush them.
+       */
+      luaK_exp2nextreg(fs, &v);
+      int reg = v.u.info;
+      luaK_codeABC(fs, OP_DYNJMP, reg, fs->nactvar, 0);
+
+      /* A dynamic goto is a control flow exit!
+         Unlike a static goto which compiles into an OP_JMP, OP_DYNJMP *is* the jump.
+         But wait! If this is part of a single-statement `if` like `if pcc == 0 then goto (L) end`
+         The `test_then_block` function expects `gotostat` to either leave a jump to be patched, or
+         it creates a JMP around it.
+         BUT `test_then_block` explicitly checks for `TK_GOTO`. If it is `TK_GOTO`, it calls `gotostat` and *does not* create a jump over it!
+         Wait, earlier we fixed `test_then_block` to create a `jf = luaK_jump(fs)` if it's a regular statement,
+         BUT for `TK_GOTO`, it just calls `gotostat` and patches the false branch to HERE!
+         Since `goto NAME` produces an `OP_JMP`, standard Lua has no issue.
+         Since our `OP_DYNJMP` also unconditionally jumps in the VM, it ALSO has no issue.
+         The issue was `test_then_block` wasn't skipping over the `DYNJMP` correctly when the condition was FALSE.
+         Wait, we fixed that by making `test_then_block` correctly skip over.
+      */
+      return;
+  }
+
   if (ls->t.token == TK_CONTINUE) {
     luaX_next(ls);
     newgotoentry(ls, luaS_newliteral(ls->L, "continue"), line, luaK_jump(fs));
@@ -5134,25 +5276,33 @@ static int test_then_block (LexState *ls, int *escapelist) {
     luaX_next(ls);  /* skip 'do' (Universal Block Opener) */
   }
   
-  if (ls->t.token == TK_BREAK||ls->t.token==TK_CONTINUE) {  /* 'if x then break' ? */
+  if (ls->t.token == TK_BREAK||ls->t.token==TK_CONTINUE||ls->t.token==TK_GOTO) {  /* 'if x then break' ? */
     int line = ls->linenumber;
     luaK_goiffalse(ls->fs, &v);  /* will jump if condition is true */
     if(ls->t.token==TK_BREAK) {
       luaX_next(ls);  /* skip 'break' */
       enterblock(fs, &bl, 0);  /* must enter block before 'goto' */
       newgotoentry(ls, luaS_newliteral(ls->L, "break"), line, v.t);
-    }else{
+      }else if(ls->t.token==TK_CONTINUE){
+        luaX_next(ls);
       enterblock(fs, &bl, 0);  /* must enter block before 'goto' */
       newgotoentry(ls, luaS_newliteral(ls->L, "continue"), line, v.t);
+      }else if(ls->t.token==TK_GOTO){
+        luaX_next(ls);
+        enterblock(fs, &bl, 0);
+        gotostat(ls);
     }
     while (testnext(ls, ';')) {}  /* skip semicolons */
     if (block_follow(ls, 0) || (use_brace && ls->t.token == '}')) {  /* jump is the entire block? */
       leaveblock(fs);
       if (use_brace) checknext(ls, '}');
+      luaK_patchtohere(ls->fs, v.f); /* patch false branch to skip over goto */
       return use_brace;  /* and that is it */
     }
-    else  /* must skip over 'then' part if condition is false */
+    else { /* must skip over 'then' part if condition is false */
       jf = luaK_jump(fs);
+    }
+    luaK_patchtohere(ls->fs, v.f); /* patch false branch to skip over goto */
   }
   else {  /* regular case (not a break) */
     luaK_goiftrue(ls->fs, &v);  /* skip over block if condition is false */
@@ -5241,6 +5391,8 @@ static void single_test_then_block (LexState *ls, int *escapelist) {
         enterblock(fs, &bl, 0);  /* must enter block before 'goto' */
         gotostat(ls);  /* handle goto/break */
         leaveblock(fs);
+        /* If it was a dynamic goto, it doesn't automatically close the false list. */
+        luaK_patchtohere(ls->fs, v.f); /* patch false branch to skip over goto */
         return;
     }
     else {  /* regular case (not a jump) */
@@ -10250,7 +10402,7 @@ static void superstructstat (LexState *ls, int line) {
   /* Create SuperStruct in a register */
   int name_k = luaK_stringK(fs, name);
   init_exp(&v, VRELOC, luaK_codeABx(fs, OP_NEWSUPER, 0, name_k));
-  luaK_exp2nextreg(fs, &v);
+  luaK_exp2anyreg(fs, &v);
   int ss_reg = v.u.info;
 
   checknext(ls, '[');
@@ -11159,7 +11311,7 @@ static int try_command_call (LexState *ls) {
   int lookahead = luaX_lookahead(ls);
   
   /* 如果是普通函数调用/方法调用/字段访问/赋值，不处理 */
-  if (lookahead == '(' || lookahead == ':' || lookahead == '.' ||
+  if (lookahead == '(' || lookahead == ':' || lookahead == TK_DBCOLON || lookahead == '.' ||
       lookahead == '=' || lookahead == ',' || lookahead == '[' ||
       lookahead == TK_PLUSPLUS || getcompoundop(lookahead) != OPR_NOBINOPR) {
     return 0;
@@ -11178,7 +11330,7 @@ static int try_command_call (LexState *ls) {
   ** 判断逻辑：如果第一个参数是字符串或表，且后面紧跟 '.' 或 ':'
   ** 或者后面没有更多参数，就让 suffixedexp 处理
   */
-  if (lookahead == TK_STRING || lookahead == TK_INTERPSTRING || lookahead == TK_RAWSTRING || lookahead == '{') {
+  if (lookahead == TK_STRING || lookahead == TK_INTERPSTRING || lookahead == TK_RAWSTRING || lookahead == '{' || lookahead == ':' || lookahead == TK_DBCOLON) {
     /* 这是 Lua 原生支持的单参数调用语法，让 suffixedexp 处理 */
     /* 它会正确处理后续的链式调用 */
     return 0;
@@ -12354,12 +12506,12 @@ LClosure *luaY_parser (lua_State *L, ZIO *z, Mbuffer *buff,
   lexstate.dyd = dyd;
   lexstate.curpos=0;
   lexstate.tokpos=0;
-  dyd->actvar.n = dyd->gt.n = dyd->label.n = 0;
+  dyd->actvar.n = dyd->gt.n = dyd->label.n = dyd->dynlabels.n = 0;
   luaX_setinput(L, &lexstate, z, funcstate.f->source, firstchar);
   mainfunc(&lexstate, &funcstate);
   lua_assert(!funcstate.prev && funcstate.nups == 1 && !lexstate.fs);
   /* all scopes should be correctly finished */
-  lua_assert(dyd->actvar.n == 0 && dyd->gt.n == 0 && dyd->label.n == 0);
+  lua_assert(dyd->actvar.n == 0 && dyd->gt.n == 0 && dyd->label.n == 0 && dyd->dynlabels.n == 0);
   typehint_free(&lexstate);
   if (lexstate.defines) {
      L->top.p--; /* remove defines table */

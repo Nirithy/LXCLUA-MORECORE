@@ -7,7 +7,7 @@
 PLAT= guess
 
 CC= gcc -std=c11 -pipe
-CFLAGS= -O3 -funroll-loops -fomit-frame-pointer -ffunction-sections -fdata-sections -fstrict-aliasing -g0 -DNDEBUG -fno-exceptions -fno-unwind-tables -fno-asynchronous-unwind-tables -Wimplicit-function-declaration -D_GNU_SOURCE
+CFLAGS= -g -O0 -DNDEBUG -Wimplicit-function-declaration -D_GNU_SOURCE
 
 AR= ar rcu
 RANLIB= ranlib

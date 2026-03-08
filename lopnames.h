@@ -127,6 +127,7 @@ static const char *const opnames[] = {
   "ASYNCWRAP",
   "GENERICWRAP",
   "CHECKTYPE",
+  "DYNJMP",
   "EXTRAARG",
   NULL
 };

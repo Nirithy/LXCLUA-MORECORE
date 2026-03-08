@@ -3968,6 +3968,42 @@ void luaV_execute (lua_State *L, CallInfo *ci) {
         }
         vmbreak;
       }
+      vmcase(OP_DYNJMP) {
+        StkId ra = RA(i);
+        lua_Integer label_id;
+        if (ttisinteger(s2v(ra))) {
+          label_id = ivalue(s2v(ra));
+        } else if (ttisfloat(s2v(ra))) {
+          lua_Number n = fltvalue(s2v(ra));
+          if (!luaV_flttointeger(n, &label_id, F2Ieq))
+            luaG_runerror(L, "label ID must be an integer");
+        } else {
+          luaG_runerror(L, "label ID must be a number");
+        }
+
+        if (label_id < 0 || label_id >= cl->p->sizejump_table) {
+          luaG_runerror(L, "invalid label ID: %d", (int)label_id);
+        }
+
+        const struct JumpEntry *entry = &cl->p->jump_table[label_id];
+        if (entry->target_pc < 0) {
+          luaG_runerror(L, "attempt to jump to an unresolved label");
+        }
+
+        /* Ensure we don't bypass local variable scopes illegally */
+        int current_nactvar = GETARG_B(i);
+        if (entry->target_nactvar > current_nactvar) {
+          luaG_runerror(L, "cannot jump to a label inside a local scope");
+        }
+
+        /* Close upvalues if jumping out of scope */
+        if (entry->target_nactvar < current_nactvar) {
+          luaF_close(L, base + entry->target_nactvar, CLOSEKTOP, 1);
+        }
+
+        pc = cl->p->code + entry->target_pc;
+        vmbreak;
+      }
       vmcase(OP_EXTRAARG) {
         lua_assert(0);
         vmbreak;

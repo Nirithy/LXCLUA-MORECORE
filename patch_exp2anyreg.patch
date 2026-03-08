@@ -1,0 +1,11 @@
+--- lparser.c
++++ lparser.c
+@@ -4946,7 +4946,7 @@
+   if (is_dynamic) {
+       expdesc v;
+       expr(ls, &v);
+-      luaK_exp2anyreg(fs, &v);
++      luaK_exp2nextreg(fs, &v);
+       luaK_codeABC(fs, OP_DYNJMP, v.u.info, fs->nactvar, 0);
+       return;
+   }
