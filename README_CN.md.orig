@@ -221,18 +221,6 @@ enum Color {
 -- 解构赋值
 local data = { x = 1, y = 2 }
 local take { x, y } = data
-
--- 数组解构
-local arr = {10, 20, 30}
-local take [first, , third] = arr
-
--- 展开运算符 (Spread Operator)
-local arr1 = {1, 2}
-local arr2 = {3, 4}
-local combined = { 0, ...arr1, ...arr2 }
-
-local function sum(a, b, c) return a + b + c end
-print(sum(1, ...arr2))
 ```
 
 ### 6. 控制流
@@ -281,17 +269,6 @@ namespace MyLib {
 }
 using namespace MyLib; -- 导入所有
 -- using MyLib::test;  -- 导入特定成员
--- 三元条件表达式
-local is_debug = true
-local level = is_debug ? 10 : 0
-
--- 列表推导式 (List Comprehension)
-local src = {1, 2, 3, 4, 5}
-local evens = [for _, v in ipairs(src) do v * 2 if v % 2 == 0]
-
--- 字典推导式 (Dict Comprehension)
-local dict = {a = 1, b = 2}
-local inverted = {for k, v in pairs(dict) do v, k}
 ```
 
 ### 7. Shell 风格测试

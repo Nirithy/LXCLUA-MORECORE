@@ -77,6 +77,9 @@ typedef struct BlockCnt {
 */
 static void statement (LexState *ls);
 static void expr (LexState *ls, expdesc *v);
+static int explist (LexState *ls, expdesc *v);
+static void fixforjump (FuncState *fs, int pc, int dest, int back);
+
 static void retstat (LexState *ls);
 static TypeHint *gettypehint (LexState *ls);
 static void check_type_compatibility(LexState *ls, TypeHint *target, expdesc *e);
@@ -1855,24 +1858,191 @@ static void field (LexState *ls, ConsControl *cc) {
 
 
 static void constructor (LexState *ls, expdesc *t) {
-  /* constructor -> '{' [ field { sep field } [sep] ] '}'
-     sep -> ',' | ';' */
   FuncState *fs = ls->fs;
   int line = ls->linenumber;
-  int pc = luaK_codeABC(fs, OP_NEWTABLE, 0, 0, 0);
+  int pc;
   ConsControl cc;
+
+  checknext(ls, '{');
+
+  if (ls->t.token == '}') {
+      pc = luaK_codeABC(fs, OP_NEWTABLE, 0, 0, 0);
+      luaK_code(fs, 0);
+      init_exp(t, VNONRELOC, fs->freereg);
+      luaK_reserveregs(fs, 1);
+      check_match(ls, '}', '{', line);
+      luaK_settablesize(fs, pc, t->u.info, 0, 0);
+      return;
+  }
+
+  if (ls->t.token == TK_FOR) {
+      FuncState new_fs;
+      BlockCnt bl;
+      new_fs.f = addprototype(ls);
+      new_fs.f->linedefined = line;
+      open_func(ls, &new_fs, &bl);
+
+      int t_vidx = new_localvarliteral(ls, "_t");
+      adjustlocalvars(ls, 1);
+      int t_reg = getlocalvardesc(&new_fs, t_vidx)->vd.ridx;
+      new_fs.freereg = t_reg + 1;
+
+      luaK_codeABC(&new_fs, OP_NEWTABLE, t_reg, 0, 0);
+      luaK_code(&new_fs, 0);
+
+      checknext(ls, TK_FOR);
+
+      int base = new_fs.freereg;
+      new_localvarliteral(ls, "(for state)");
+      new_localvarliteral(ls, "(for state)");
+      new_localvarliteral(ls, "(for state)");
+      new_localvarliteral(ls, "(for state)");
+
+      TString *loop_vars[20];
+      int nvars = 0;
+      do {
+        loop_vars[nvars++] = str_checkname(ls);
+      } while (testnext(ls, ',') && nvars < 20);
+
+      checknext(ls, TK_IN);
+
+      expdesc e;
+      int nexps = explist(ls, &e);
+      adjust_assign(ls, 4, nexps, &e);
+      luaK_checkstack(&new_fs, 4);
+
+      adjustlocalvars(ls, 4);
+
+      int prep_jmp = luaK_codeABx(&new_fs, OP_TFORPREP, base, 0);
+      int loop_start = luaK_getlabel(&new_fs);
+
+      for (int i = 0; i < nvars; i++) {
+          new_localvar(ls, loop_vars[i]);
+      }
+      adjustlocalvars(ls, nvars);
+      luaK_reserveregs(&new_fs, nvars);
+
+      if (ls->t.token == TK_DO) {
+          luaX_next(ls);
+      } else if (ls->t.token == TK_NAME && strcmp(getstr(ls->t.seminfo.ts), "yield") == 0) {
+          luaX_next(ls);
+      } else {
+          luaX_syntaxerror(ls, "expected 'do' or 'yield' in dict comprehension");
+      }
+
+      expdesc key_v, val_v;
+      expr(ls, &key_v);
+      luaK_exp2nextreg(&new_fs, &key_v);
+      checknext(ls, ',');
+      expr(ls, &val_v);
+      luaK_exp2nextreg(&new_fs, &val_v);
+
+      int if_jmp = NO_JUMP;
+      if (testnext(ls, TK_IF)) {
+        expdesc cond_v;
+        expr(ls, &cond_v);
+        luaK_goiftrue(&new_fs, &cond_v);
+        if_jmp = cond_v.f;
+      }
+
+      expdesc tab;
+      init_exp(&tab, VNONRELOC, t_reg);
+      luaK_indexed(&new_fs, &tab, &key_v);
+      luaK_storevar(&new_fs, &tab, &val_v);
+
+      if (if_jmp != NO_JUMP) {
+        luaK_patchtohere(&new_fs, if_jmp);
+      }
+
+      new_fs.freereg = base + 4 + nvars;
+
+      fixforjump(&new_fs, prep_jmp, luaK_getlabel(&new_fs), 0);
+      luaK_codeABC(&new_fs, OP_TFORCALL, base, 0, nvars);
+      int loop_jmp = luaK_codeABx(&new_fs, OP_TFORLOOP, base, 0);
+      fixforjump(&new_fs, loop_jmp, prep_jmp + 1, 1);
+
+      luaK_ret(&new_fs, t_reg, 1);
+
+      check_match(ls, '}', '{', line);
+
+      new_fs.f->lastlinedefined = ls->linenumber;
+      close_func(ls);
+
+      init_exp(t, VRELOC, luaK_codeABx(fs, OP_CLOSURE, 0, fs->np - 1));
+      luaK_exp2nextreg(fs, t);
+
+      int func_reg = t->u.info;
+      init_exp(t, VCALL, luaK_codeABC(fs, OP_CALL, func_reg, 1, 2));
+      luaK_fixline(fs, line);
+      fs->freereg = func_reg + 1;
+
+      return;
+  }
+
+  pc = luaK_codeABC(fs, OP_NEWTABLE, 0, 0, 0);
   luaK_code(fs, 0);  /* space for extra arg. */
   cc.na = cc.nh = cc.tostore = 0;
   cc.t = t;
   init_exp(t, VNONRELOC, fs->freereg);  /* table will be at stack top */
   luaK_reserveregs(fs, 1);
   init_exp(&cc.v, VVOID, 0);  /* no value (yet) */
-  checknext(ls, '{');
+
   do {
     lua_assert(cc.v.k == VVOID || cc.tostore > 0);
     if (ls->t.token == '}') break;
-    closelistfield(fs, &cc);
-    field(ls, &cc);
+
+    if (ls->t.token == TK_DOTS) {
+        luaX_next(ls);
+        expdesc expr_v;
+        expr(ls, &expr_v);
+        closelistfield(fs, &cc); /* Flush pending elements */
+
+        int t_reg = t->u.info;
+        int base = fs->freereg;
+
+        expdesc ipairs_var;
+        singlevaraux(fs, luaS_newliteral(ls->L, "ipairs"), &ipairs_var, 1);
+        if (ipairs_var.k == VVOID) {
+          expdesc key;
+          singlevaraux(fs, ls->envn, &ipairs_var, 1);
+          codestring(&key, luaS_newliteral(ls->L, "ipairs"));
+          luaK_indexed(fs, &ipairs_var, &key);
+        }
+        luaK_exp2nextreg(fs, &ipairs_var);
+        luaK_exp2nextreg(fs, &expr_v);
+
+        luaK_codeABC(fs, OP_CALL, base, 2, 4);
+        fs->freereg = base + 3;
+
+        int prep_jmp = luaK_codeABx(fs, OP_TFORPREP, base, 0);
+        int loop_start = luaK_getlabel(fs);
+
+        fs->freereg = base + 5;
+
+        int len_reg = fs->freereg;
+        luaK_reserveregs(fs, 1);
+        luaK_codeABC(fs, OP_LEN, len_reg, t_reg, 0);
+        luaK_codeABCk(fs, OP_ADDI, len_reg, len_reg, int2sC(1), 0);
+
+        expdesc tab, key, val;
+        init_exp(&tab, VNONRELOC, t_reg);
+        init_exp(&key, VNONRELOC, len_reg);
+        init_exp(&val, VNONRELOC, base + 4);
+        luaK_indexed(fs, &tab, &key);
+        luaK_storevar(fs, &tab, &val);
+
+        fs->freereg = base + 3;
+
+        fixforjump(fs, prep_jmp, luaK_getlabel(fs), 0);
+        luaK_codeABC(fs, OP_TFORCALL, base, 0, 2);
+        int loop_jmp = luaK_codeABx(fs, OP_TFORLOOP, base, 0);
+        fixforjump(fs, loop_jmp, prep_jmp + 1, 1);
+
+        cc.v.k = VVOID;
+    } else {
+        closelistfield(fs, &cc);
+        field(ls, &cc);
+    }
   } while (testnext(ls, ',') || testnext(ls, ';'));
   check_match(ls, '}', '{', line);
   lastlistfield(fs, &cc);
@@ -3472,12 +3642,41 @@ static void simpleexp (LexState *ls, expdesc *v) {
       luaX_next(ls);
       break;
     }
-    case TK_DOTS: {  /* vararg */
+    case TK_DOTS: {  /* vararg or spread operator */
       FuncState *fs = ls->fs;
-      check_condition(ls, fs->f->is_vararg,
-                      "cannot use '...' outside a vararg function");
-      init_exp(v, VVARARG, luaK_codeABC(fs, OP_VARARG, 0, 0, 1));
-      luaX_next(ls);
+      int la = luaX_lookahead(ls);
+      if (la == TK_NAME || la == '(' || la == '{' || la == TK_STRING || la == TK_RAWSTRING || la == TK_INTERPSTRING || la == TK_INT || la == TK_FLT || la == TK_TRUE || la == TK_FALSE || la == TK_NIL || la == '-' || la == TK_NOT || la == '#' || la == '~' || la == TK_FUNCTION || la == TK_LAMBDA) {
+        luaX_next(ls); /* skip '...' */
+
+        /* Generate: table.unpack(expr) */
+        expdesc table_var;
+        singlevaraux(fs, luaS_newliteral(ls->L, "table"), &table_var, 1);
+        if (table_var.k == VVOID) {
+          expdesc key;
+          singlevaraux(fs, ls->envn, &table_var, 1);
+          codestring(&key, luaS_newliteral(ls->L, "table"));
+          luaK_indexed(fs, &table_var, &key);
+        }
+        luaK_exp2anyregup(fs, &table_var);
+
+        expdesc unpack_key;
+        codestring(&unpack_key, luaS_newliteral(ls->L, "unpack"));
+        luaK_indexed(fs, &table_var, &unpack_key);
+
+        luaK_exp2nextreg(fs, &table_var);
+        int func_reg = table_var.u.info;
+
+        expdesc arg;
+        expr(ls, &arg); /* Parse the expression to spread */
+        luaK_exp2nextreg(fs, &arg);
+
+        init_exp(v, VCALL, luaK_codeABC(fs, OP_CALL, func_reg, 2, 0)); /* 1 arg, multiple returns */
+        fs->freereg = func_reg + 1;
+      } else {
+        check_condition(ls, fs->f->is_vararg, "cannot use '...' outside a vararg function");
+        init_exp(v, VVARARG, luaK_codeABC(fs, OP_VARARG, 0, 0, 1));
+        luaX_next(ls);
+      }
       break;
     }
     case TK_FUNCTION: {
@@ -4080,6 +4279,119 @@ static void simpleexp (LexState *ls, expdesc *v) {
       return;
     }
     case '[': {
+      if (luaX_lookahead(ls) == TK_FOR) {
+          int line = ls->linenumber;
+          luaX_next(ls); /* skip '[' */
+
+          FuncState new_fs;
+          BlockCnt bl;
+          new_fs.f = addprototype(ls);
+          new_fs.f->linedefined = line;
+          open_func(ls, &new_fs, &bl);
+
+          int t_vidx = new_localvarliteral(ls, "_t");
+          adjustlocalvars(ls, 1);
+          int t_reg = getlocalvardesc(&new_fs, t_vidx)->vd.ridx;
+          new_fs.freereg = t_reg + 1;
+
+          luaK_codeABC(&new_fs, OP_NEWTABLE, t_reg, 0, 0);
+          luaK_code(&new_fs, 0);
+
+          checknext(ls, TK_FOR);
+
+          int base = new_fs.freereg;
+          new_localvarliteral(ls, "(for state)");
+          new_localvarliteral(ls, "(for state)");
+          new_localvarliteral(ls, "(for state)");
+          new_localvarliteral(ls, "(for state)");
+
+          TString *loop_vars[20];
+          int nvars = 0;
+          do {
+            loop_vars[nvars++] = str_checkname(ls);
+          } while (testnext(ls, ',') && nvars < 20);
+
+          checknext(ls, TK_IN);
+
+          expdesc e;
+          int nexps = explist(ls, &e);
+          adjust_assign(ls, 4, nexps, &e);
+          luaK_checkstack(&new_fs, 4);
+
+          adjustlocalvars(ls, 4);
+
+          int prep_jmp = luaK_codeABx(&new_fs, OP_TFORPREP, base, 0);
+          int loop_start = luaK_getlabel(&new_fs);
+
+          for (int i = 0; i < nvars; i++) {
+              new_localvar(ls, loop_vars[i]);
+          }
+          adjustlocalvars(ls, nvars);
+          luaK_reserveregs(&new_fs, nvars);
+
+          if (ls->t.token == TK_DO) {
+              luaX_next(ls);
+          } else if (ls->t.token == TK_NAME && strcmp(getstr(ls->t.seminfo.ts), "yield") == 0) {
+              luaX_next(ls);
+          } else {
+              luaX_syntaxerror(ls, "expected 'do' or 'yield' in list comprehension");
+          }
+
+          expdesc expr_v;
+          expr(ls, &expr_v);
+
+          int if_jmp = NO_JUMP;
+          if (testnext(ls, TK_IF)) {
+            expdesc cond_v;
+            expr(ls, &cond_v);
+            luaK_goiftrue(&new_fs, &cond_v);
+            if_jmp = cond_v.f;
+          }
+
+          luaK_exp2nextreg(&new_fs, &expr_v);
+
+          int len_reg = new_fs.freereg;
+          luaK_reserveregs(&new_fs, 1);
+          luaK_codeABC(&new_fs, OP_LEN, len_reg, t_reg, 0);
+          luaK_codeABCk(&new_fs, OP_ADDI, len_reg, len_reg, int2sC(1), 0);
+          luaK_codeABCk(&new_fs, OP_MMBINI, len_reg, int2sC(1), TM_ADD, 0);
+
+          expdesc tab, key, val;
+          init_exp(&tab, VNONRELOC, t_reg);
+          init_exp(&key, VNONRELOC, len_reg);
+          init_exp(&val, VNONRELOC, expr_v.u.info);
+          luaK_indexed(&new_fs, &tab, &key);
+          luaK_storevar(&new_fs, &tab, &val);
+
+          if (if_jmp != NO_JUMP) {
+            luaK_patchtohere(&new_fs, if_jmp);
+          }
+
+          new_fs.freereg = base + 4 + nvars;
+
+          fixforjump(&new_fs, prep_jmp, luaK_getlabel(&new_fs), 0);
+          luaK_codeABC(&new_fs, OP_TFORCALL, base, 0, nvars);
+          int loop_jmp = luaK_codeABx(&new_fs, OP_TFORLOOP, base, 0);
+          fixforjump(&new_fs, loop_jmp, prep_jmp + 1, 1);
+
+          luaK_ret(&new_fs, t_reg, 1);
+
+          checknext(ls, ']');
+
+          new_fs.f->lastlinedefined = ls->linenumber;
+          close_func(ls);
+
+          FuncState *fs = ls->fs;
+          init_exp(v, VRELOC, luaK_codeABx(fs, OP_CLOSURE, 0, fs->np - 1));
+          luaK_exp2nextreg(fs, v);
+
+          int func_reg = v->u.info;
+          init_exp(v, VCALL, luaK_codeABC(fs, OP_CALL, func_reg, 1, 2));
+          luaK_fixline(fs, line);
+          fs->freereg = func_reg + 1;
+
+          return;
+      }
       /**
        * 条件测试表达式语法: [ test_expr ]
        * 类似Shell的条件测试，支持：
@@ -4671,12 +4983,41 @@ static void cond_simpleexp (LexState *ls, expdesc *v) {
       luaX_next(ls);
       break;
     }
-    case TK_DOTS: {  /* vararg */
+    case TK_DOTS: {  /* vararg or spread operator */
       FuncState *fs = ls->fs;
-      check_condition(ls, fs->f->is_vararg,
-                      "cannot use '...' outside a vararg function");
-      init_exp(v, VVARARG, luaK_codeABC(fs, OP_VARARG, 0, 0, 1));
-      luaX_next(ls);
+      int la = luaX_lookahead(ls);
+      if (la == TK_NAME || la == '(' || la == '{' || la == TK_STRING || la == TK_RAWSTRING || la == TK_INTERPSTRING || la == TK_INT || la == TK_FLT || la == TK_TRUE || la == TK_FALSE || la == TK_NIL || la == '-' || la == TK_NOT || la == '#' || la == '~' || la == TK_FUNCTION || la == TK_LAMBDA) {
+        luaX_next(ls); /* skip '...' */
+
+        /* Generate: table.unpack(expr) */
+        expdesc table_var;
+        singlevaraux(fs, luaS_newliteral(ls->L, "table"), &table_var, 1);
+        if (table_var.k == VVOID) {
+          expdesc key;
+          singlevaraux(fs, ls->envn, &table_var, 1);
+          codestring(&key, luaS_newliteral(ls->L, "table"));
+          luaK_indexed(fs, &table_var, &key);
+        }
+        luaK_exp2anyregup(fs, &table_var);
+
+        expdesc unpack_key;
+        codestring(&unpack_key, luaS_newliteral(ls->L, "unpack"));
+        luaK_indexed(fs, &table_var, &unpack_key);
+
+        luaK_exp2nextreg(fs, &table_var);
+        int func_reg = table_var.u.info;
+
+        expdesc arg;
+        expr(ls, &arg); /* Parse the expression to spread */
+        luaK_exp2nextreg(fs, &arg);
+
+        init_exp(v, VCALL, luaK_codeABC(fs, OP_CALL, func_reg, 2, 0)); /* 1 arg, multiple returns */
+        fs->freereg = func_reg + 1;
+      } else {
+        check_condition(ls, fs->f->is_vararg, "cannot use '...' outside a vararg function");
+        init_exp(v, VVARARG, luaK_codeABC(fs, OP_VARARG, 0, 0, 1));
+        luaX_next(ls);
+      }
       break;
     }
     case TK_STRING:
@@ -4735,6 +5076,38 @@ static BinOpr cond_subexpr (LexState *ls, expdesc *v, int limit) {
 */
 static void cond_expr (LexState *ls, expdesc *v) {
   cond_subexpr(ls, v, 0);
+  if (ls->t.token == '?') {
+    FuncState *fs = ls->fs;
+    int escape = NO_JUMP;
+    int reg;
+
+    luaK_goiftrue(fs, v);
+    int cond_jmp = v->f;
+    v->f = NO_JUMP;
+    v->t = NO_JUMP;
+
+    luaX_next(ls); /* skip '?' */
+
+    expdesc v2;
+    cond_expr(ls, &v2); /* parse true branch */
+
+    luaK_exp2nextreg(fs, &v2);
+    reg = v2.u.info;
+
+    luaK_concat(fs, &escape, luaK_jump(fs));
+
+    checknext(ls, ':');
+
+    luaK_patchtohere(fs, cond_jmp);
+
+    expdesc v3;
+    cond_expr(ls, &v3); /* parse false branch */
+    luaK_exp2reg(fs, &v3, reg);
+
+    luaK_patchtohere(fs, escape);
+
+    init_exp(v, VNONRELOC, reg);
+  }
 }
 
 /* }========================================================= */
@@ -6161,8 +6534,15 @@ static void takestat_full(LexState *ls) {
   int array_mode = 0;
   int array_idx = 1;
   int i;
+  int end_token = '}';
   
-  checknext(ls, '{');
+  if (ls->t.token == '[') {
+      array_mode = 1;
+      end_token = ']';
+      luaX_next(ls);
+  } else {
+      checknext(ls, '{');
+  }
   
   /* 第一阶段：收集所有变量信息 */
   while (ls->t.token != '}' && nvars < MAX_DESTRUCT_ITEMS) {
@@ -6259,7 +6639,7 @@ static void takestat_full(LexState *ls) {
     }
   }
   
-  checknext(ls, '}');
+  checknext(ls, end_token);
   checknext(ls, '=');
   
   /* 第二阶段：创建所有局部变量 */

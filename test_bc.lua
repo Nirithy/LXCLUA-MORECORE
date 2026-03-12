@@ -1,1 +1,0 @@
-print("Bytecode test OK")
