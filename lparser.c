@@ -1765,6 +1765,7 @@ typedef struct ConsControl {
   int nh;  /* total number of 'record' elements */
   int na;  /* number of array elements already stored */
   int tostore;  /* number of array elements pending to be stored */
+  int has_spread; /* whether a spread operator was encountered */
 } ConsControl;
 
 
@@ -1797,7 +1798,9 @@ static void closelistfield (FuncState *fs, ConsControl *cc) {
   luaK_exp2nextreg(fs, &cc->v);
   cc->v.k = VVOID;
   if (cc->tostore == LFIELDS_PER_FLUSH) {
-    luaK_setlist(fs, cc->t->u.info, cc->na, cc->tostore);  /* flush */
+    if (!cc->has_spread) {
+        luaK_setlist(fs, cc->t->u.info, cc->na, cc->tostore);  /* flush */
+    }
     cc->na += cc->tostore;
     cc->tostore = 0;  /* no more items pending */
   }
@@ -1806,15 +1809,28 @@ static void closelistfield (FuncState *fs, ConsControl *cc) {
 
 static void lastlistfield (FuncState *fs, ConsControl *cc) {
   if (cc->tostore == 0) return;
+  if (cc->has_spread && !hasmultret(cc->v.k)) return; /* If there was a spread, do not emit SETLIST for remaining! */
   if (hasmultret(cc->v.k)) {
     luaK_setmultret(fs, &cc->v);
+
+    if (cc->has_spread) {
+        /* Note: Using multret after spread operator overwrites dynamically added elements because `cc->na` is static.
+           Proper multret spread will require a new runtime instruction or complex loop block handling L->top,
+           so for now we preserve standard behavior which uses SETLIST and relies on cc->na.
+           We simply allow `hasmultret` to proceed and use `luaK_setlist`.
+         */
+    }
+
     luaK_setlist(fs, cc->t->u.info, cc->na, LUA_MULTRET);
     cc->na--;  /* do not count last expression (unknown number of elements) */
   }
   else {
     if (cc->v.k != VVOID)
       luaK_exp2nextreg(fs, &cc->v);
-    luaK_setlist(fs, cc->t->u.info, cc->na, cc->tostore);
+    /* Only flush statically if we have pending items to store and haven't had a spread */
+    if (cc->tostore > 0 && !cc->has_spread) {
+      luaK_setlist(fs, cc->t->u.info, cc->na, cc->tostore);
+    }
   }
   cc->na += cc->tostore;
 }
@@ -1823,7 +1839,28 @@ static void lastlistfield (FuncState *fs, ConsControl *cc) {
 static void listfield (LexState *ls, ConsControl *cc) {
   /* listfield -> exp */
   expr(ls, &cc->v);
-  cc->tostore++;
+
+  if (cc->has_spread) {
+      /* Dynamic append: table[#table+1] = exp */
+      FuncState *fs = ls->fs;
+      luaK_exp2nextreg(fs, &cc->v);
+
+      int len_reg = fs->freereg;
+      luaK_reserveregs(fs, 1);
+      luaK_codeABC(fs, OP_LEN, len_reg, cc->t->u.info, 0);
+      luaK_codeABCk(fs, OP_ADDI, len_reg, len_reg, int2sC(1), 0);
+
+      expdesc tab, key;
+      tab = *cc->t;
+      init_exp(&key, VNONRELOC, len_reg);
+      luaK_indexed(fs, &tab, &key);
+      luaK_storevar(fs, &tab, &cc->v);
+
+      fs->freereg = len_reg; /* Free the len_reg */
+      cc->v.k = VVOID; /* Clear the value */
+  } else {
+      cc->tostore++;
+  }
 }
 
 
@@ -1983,6 +2020,7 @@ static void constructor (LexState *ls, expdesc *t) {
   luaK_code(fs, 0);  /* space for extra arg. */
   cc.na = cc.nh = cc.tostore = 0;
   cc.t = t;
+  cc.has_spread = 0;
   init_exp(t, VNONRELOC, fs->freereg);  /* table will be at stack top */
   luaK_reserveregs(fs, 1);
   init_exp(&cc.v, VVOID, 0);  /* no value (yet) */
@@ -1992,53 +2030,95 @@ static void constructor (LexState *ls, expdesc *t) {
     if (ls->t.token == '}') break;
 
     if (ls->t.token == TK_DOTS) {
-        luaX_next(ls);
-        expdesc expr_v;
-        expr(ls, &expr_v);
-        closelistfield(fs, &cc); /* Flush pending elements */
+        int next_token = luaX_lookahead(ls);
+        if (next_token == ',' || next_token == ';' || next_token == '}') {
+            closelistfield(fs, &cc);
+            expr(ls, &cc.v);
+            if (cc.has_spread) {
+                luaK_exp2nextreg(fs, &cc.v);
+                int len_reg = fs->freereg;
+                luaK_reserveregs(fs, 1);
+                luaK_codeABC(fs, OP_LEN, len_reg, cc.t->u.info, 0);
+                luaK_codeABCk(fs, OP_ADDI, len_reg, len_reg, int2sC(1), 0);
+                expdesc tab, key;
+                tab = *cc.t;
+                init_exp(&key, VNONRELOC, len_reg);
+                luaK_indexed(fs, &tab, &key);
+                luaK_storevar(fs, &tab, &cc.v);
+                fs->freereg = len_reg;
+                cc.v.k = VVOID;
+            } else {
+                cc.tostore++;
+            }
+        } else {
+            luaX_next(ls);
+            expdesc expr_v;
+            expr(ls, &expr_v);
 
-        int t_reg = t->u.info;
-        int base = fs->freereg;
+            /* FORCE flush pending static elements before the spread operator loop clobbers registers */
+            if (cc.v.k != VVOID) {
+                luaK_exp2nextreg(fs, &cc.v);
+                cc.v.k = VVOID;
+            }
+            if (cc.tostore > 0) {
+                luaK_setlist(fs, cc.t->u.info, cc.na, cc.tostore);
+                cc.na += cc.tostore;
+                cc.tostore = 0;
+                fs->freereg = cc.t->u.info + 1; /* Reset freereg to right after the table! */
+            }
 
-        expdesc ipairs_var;
-        singlevaraux(fs, luaS_newliteral(ls->L, "ipairs"), &ipairs_var, 1);
-        if (ipairs_var.k == VVOID) {
-          expdesc key;
-          singlevaraux(fs, ls->envn, &ipairs_var, 1);
-          codestring(&key, luaS_newliteral(ls->L, "ipairs"));
-          luaK_indexed(fs, &ipairs_var, &key);
+            cc.has_spread = 1;
+
+            int t_reg = t->u.info;
+            int base = fs->freereg;
+
+            expdesc ipairs_var;
+            singlevaraux(fs, luaS_newliteral(ls->L, "ipairs"), &ipairs_var, 1);
+            if (ipairs_var.k == VVOID) {
+              expdesc key;
+              singlevaraux(fs, ls->envn, &ipairs_var, 1);
+              codestring(&key, luaS_newliteral(ls->L, "ipairs"));
+              luaK_indexed(fs, &ipairs_var, &key);
+            }
+            luaK_exp2nextreg(fs, &ipairs_var);
+            luaK_exp2nextreg(fs, &expr_v);
+
+            luaK_codeABC(fs, OP_CALL, base, 2, 4);
+            luaK_codeABC(fs, OP_LOADNIL, base + 3, 0, 0);
+            fs->freereg = base + 4;
+
+            int prep_jmp = luaK_codeABx(fs, OP_TFORPREP, base, 0);
+
+            int loop_start = luaK_getlabel(fs);
+
+            fs->freereg = base + 6;
+
+            int len_reg = fs->freereg;
+            luaK_reserveregs(fs, 1);
+            luaK_codeABC(fs, OP_LEN, len_reg, t_reg, 0);
+            luaK_codeABCk(fs, OP_ADDI, len_reg, len_reg, int2sC(1), 0);
+
+            expdesc tab, key, val;
+            init_exp(&tab, VNONRELOC, t_reg);
+            init_exp(&key, VNONRELOC, len_reg);
+            init_exp(&val, VNONRELOC, base + 5);
+            luaK_indexed(fs, &tab, &key);
+            luaK_storevar(fs, &tab, &val);
+
+            fs->freereg = base + 6;
+
+            fixforjump(fs, prep_jmp, luaK_getlabel(fs), 0);
+
+            luaK_codeABC(fs, OP_TFORCALL, base, 0, 2);
+            luaK_fixline(fs, ls->linenumber);
+
+            int loop_jmp = luaK_codeABx(fs, OP_TFORLOOP, base, 0);
+            fixforjump(fs, loop_jmp, loop_start, 1);
+
+            fs->freereg = base;
+
+            cc.v.k = VVOID;
         }
-        luaK_exp2nextreg(fs, &ipairs_var);
-        luaK_exp2nextreg(fs, &expr_v);
-
-        luaK_codeABC(fs, OP_CALL, base, 2, 4);
-        fs->freereg = base + 3;
-
-        int prep_jmp = luaK_codeABx(fs, OP_TFORPREP, base, 0);
-        int loop_start = luaK_getlabel(fs);
-
-        fs->freereg = base + 5;
-
-        int len_reg = fs->freereg;
-        luaK_reserveregs(fs, 1);
-        luaK_codeABC(fs, OP_LEN, len_reg, t_reg, 0);
-        luaK_codeABCk(fs, OP_ADDI, len_reg, len_reg, int2sC(1), 0);
-
-        expdesc tab, key, val;
-        init_exp(&tab, VNONRELOC, t_reg);
-        init_exp(&key, VNONRELOC, len_reg);
-        init_exp(&val, VNONRELOC, base + 4);
-        luaK_indexed(fs, &tab, &key);
-        luaK_storevar(fs, &tab, &val);
-
-        fs->freereg = base + 3;
-
-        fixforjump(fs, prep_jmp, luaK_getlabel(fs), 0);
-        luaK_codeABC(fs, OP_TFORCALL, base, 0, 2);
-        int loop_jmp = luaK_codeABx(fs, OP_TFORLOOP, base, 0);
-        fixforjump(fs, loop_jmp, prep_jmp + 1, 1);
-
-        cc.v.k = VVOID;
     } else {
         closelistfield(fs, &cc);
         field(ls, &cc);
