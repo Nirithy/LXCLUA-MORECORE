@@ -1141,6 +1141,157 @@ static int lexer_get_block_bounds(lua_State *L) {
     return 2;
 }
 
+static int lexer_extract_tokens(lua_State *L) {
+    luaL_checktype(L, 1, LUA_TTABLE);
+    int start_idx = luaL_checkinteger(L, 2);
+    int end_idx = luaL_checkinteger(L, 3);
+
+    int num_tokens = luaL_len(L, 1);
+    if (start_idx < 1) start_idx = 1;
+    if (end_idx > num_tokens) end_idx = num_tokens;
+
+    lua_newtable(L); /* result array */
+    int res_idx = lua_gettop(L);
+
+    if (start_idx > end_idx || start_idx > num_tokens) {
+        return 1; /* return empty table */
+    }
+
+    int count = 1;
+    for (int i = start_idx; i <= end_idx; i++) {
+        lua_rawgeti(L, 1, i);
+        lua_rawseti(L, res_idx, count++);
+    }
+
+    return 1;
+}
+
+static int lexer_replace_tokens(lua_State *L) {
+    luaL_checktype(L, 1, LUA_TTABLE);
+    int start_idx = luaL_checkinteger(L, 2);
+    int end_idx = luaL_checkinteger(L, 3);
+    luaL_checktype(L, 4, LUA_TTABLE);
+
+    int num_tokens = luaL_len(L, 1);
+    int rep_len = luaL_len(L, 4);
+
+    if (start_idx < 1) start_idx = 1;
+    if (end_idx > num_tokens) end_idx = num_tokens;
+
+    if (start_idx > num_tokens + 1) start_idx = num_tokens + 1;
+    if (end_idx < start_idx - 1) end_idx = start_idx - 1;
+
+    int removed = end_idx - start_idx + 1;
+    int shift = rep_len - removed;
+
+    if (shift > 0) {
+        /* Shift right */
+        for (int i = num_tokens; i >= end_idx + 1; i--) {
+            lua_rawgeti(L, 1, i);
+            lua_rawseti(L, 1, i + shift);
+        }
+    } else if (shift < 0) {
+        /* Shift left */
+        for (int i = end_idx + 1; i <= num_tokens; i++) {
+            lua_rawgeti(L, 1, i);
+            lua_rawseti(L, 1, i + shift);
+        }
+        /* Clear trailing elements */
+        for (int i = num_tokens; i > num_tokens + shift; i--) {
+            lua_pushnil(L);
+            lua_rawseti(L, 1, i);
+        }
+    }
+
+    /* Insert replacement tokens */
+    for (int i = 1; i <= rep_len; i++) {
+        lua_rawgeti(L, 4, i);
+        lua_rawseti(L, 1, start_idx + i - 1);
+    }
+
+    return 0;
+}
+
+static int lexer_split_sequence(lua_State *L) {
+    luaL_checktype(L, 1, LUA_TTABLE);
+    int is_str = lua_type(L, 2) == LUA_TSTRING;
+    int is_int = lua_type(L, 2) == LUA_TNUMBER;
+
+    if (!is_str && !is_int) {
+        return luaL_error(L, "delimiter must be an integer (token ID) or a string (token type)");
+    }
+
+    int target_token = is_int ? lua_tointeger(L, 2) : 0;
+    const char *target_type = is_str ? lua_tostring(L, 2) : NULL;
+
+    int num_tokens = luaL_len(L, 1);
+
+    lua_newtable(L); /* result array of arrays */
+    int res_idx = lua_gettop(L);
+    int count = 1;
+
+    lua_newtable(L); /* current sequence */
+    int curr_idx = lua_gettop(L);
+    int curr_len = 0;
+
+    int braces = 0;
+
+    for (int i = 1; i <= num_tokens; i++) {
+        lua_rawgeti(L, 1, i);
+        int tok_idx = lua_gettop(L);
+
+        if (!lua_istable(L, tok_idx)) {
+            return luaL_error(L, "expected a table at index %d of the token list", i);
+        }
+
+        lua_getfield(L, tok_idx, "token");
+        int tk = lua_tointeger(L, -1);
+        lua_pop(L, 1);
+
+        if (tk == '(' || tk == '[' || tk == '{') {
+            braces++;
+        } else if (tk == ')' || tk == ']' || tk == '}') {
+            braces--;
+        }
+
+        int match = 0;
+        if (braces == 0) {
+            if (is_int && tk == target_token) {
+                match = 1;
+            } else if (is_str) {
+                lua_getfield(L, tok_idx, "type");
+                if (lua_isstring(L, -1) && strcmp(lua_tostring(L, -1), target_type) == 0) {
+                    match = 1;
+                }
+                lua_pop(L, 1);
+            }
+        }
+
+        if (match) {
+            /* end current sequence and push to result */
+            lua_pushvalue(L, curr_idx);
+            lua_rawseti(L, res_idx, count++);
+
+            lua_newtable(L);
+            lua_replace(L, curr_idx);
+            curr_len = 0;
+        } else {
+            curr_len++;
+            lua_pushvalue(L, tok_idx);
+            lua_rawseti(L, curr_idx, curr_len);
+        }
+
+        lua_pop(L, 1); /* pop token */
+    }
+
+    /* push last sequence */
+    lua_pushvalue(L, curr_idx);
+    lua_rawseti(L, res_idx, count++);
+
+    lua_pushvalue(L, res_idx);
+    return 1;
+}
+
 static int lexer_obfuscate_wrap(lua_State *L) {
     size_t l;
     const char *code = luaL_checklstring(L, 1, &l);
@@ -1153,6 +1304,9 @@ static int lexer_obfuscate_wrap(lua_State *L) {
 
 static const luaL_Reg lexer_lib[] = {
     {"find_match", lexer_find_match},
+    {"extract_tokens", lexer_extract_tokens},
+    {"replace_tokens", lexer_replace_tokens},
+    {"split_sequence", lexer_split_sequence},
     {"build_tree", lexer_build_tree},
     {"flatten_tree", lexer_flatten_tree},
     {"lex", lexer_lex},
