@@ -298,7 +298,7 @@ static const char *const luaX_tokens [] = {
     "<let>", "=>", ":=", "->",
     /* 复合赋值运算符 */
     "+=", "-=", "*=", "/=", "//=", "%=", "&=", "|=", "~=", ">>=", "<<=", "..=", "++",
-    "?.", "??", "<=>", "$", "$$",
+    "?.", "??", "??=", "<=>", "$", "$$",
     "<number>", "<integer>", "<name>", "<string>", "<interpstring>", "<rawstring>"
 };
 
@@ -1168,7 +1168,10 @@ static int llex (LexState *ls, SemInfo *seminfo) {
       case '?':{
         next(ls);
         if (check_next1(ls, '.')) return TK_OPTCHAIN;  /* '?.' 可选链运算符 */
-        else if (check_next1(ls, '?')) return TK_NULLCOAL;  /* '??' 空值合并运算符 */
+        else if (check_next1(ls, '?')) {
+          if (check_next1(ls, '=')) return TK_NULLCOALEQ; /* '??=' 空值合并赋值 */
+          return TK_NULLCOAL;  /* '??' 空值合并运算符 */
+        }
         else return '?';
       }
       case '+':{  /* '+' 或 '+=' 或 '++' */
