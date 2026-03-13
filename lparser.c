@@ -3317,6 +3317,7 @@ static void primaryexp (LexState *ls, expdesc *v) {
         case TK_REVPIPE: opstr = "<|"; break;
         case TK_SPACESHIP: opstr = "<=>"; break;
         case TK_NULLCOAL: opstr = "??"; break;
+        case TK_NULLCOALEQ: opstr = "??="; break;
         case TK_ARROW: opstr = "->"; break;
         case TK_MEAN: opstr = "=>"; break;
         case TK_ADDEQ: opstr = "+="; break;
@@ -9957,6 +9958,7 @@ static void operatorstat (LexState *ls, int line) {
     case TK_REVPIPE: opstr = "<|"; break;
     case TK_SPACESHIP: opstr = "<=>"; break;
     case TK_NULLCOAL: opstr = "??"; break;
+    case TK_NULLCOALEQ: opstr = "??="; break;
     case TK_ARROW: opstr = "->"; break;
     case TK_MEAN: opstr = "=>"; break;
     case TK_ADDEQ: opstr = "+="; break;
@@ -11481,6 +11483,7 @@ static BinOpr getcompoundop (int token) {
     case TK_SHREQ:    return OPR_SHR;     /* >>= */
     case TK_SHLEQ:    return OPR_SHL;     /* <<= */
     case TK_CONCATEQ: return OPR_CONCAT;  /* ..= */
+    case TK_NULLCOALEQ: return OPR_NULLCOAL; /* ??= */
     case TK_NE:       return OPR_BXOR;    /* ~= 在赋值上下文中作为位异或赋值 */
     default:          return OPR_NOBINOPR;
   }
