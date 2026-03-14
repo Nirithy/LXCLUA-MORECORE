@@ -10,10 +10,10 @@
 
 本阶段的目标是打破当前 `源代码 -> AST -> 字节码` 的单线编译流程，在 AST 和 Bytecode 之间引入独立于具体指令格式的中间表示层（IR）。
 
-- [ ] **1.1 定义 SSA IR 数据结构 (`lir.h` / `lir.c`)**
-  - [ ] 设计类似于 LLVM IR 的三地址码格式，例如 `IR_ADD v1, v2, v3`。
-  - [ ] 定义基本块（Basic Block）结构，包含入口、出口、前驱（Predecessors）和后继（Successors）指针。
-  - [ ] 实现 IR 节点的内存分配与管理机制。
+- [x] **1.1 定义 SSA IR 数据结构 (`lir.h` / `lir.c`)**
+  - [x] 设计类似于 LLVM IR 的三地址码格式，例如 `IR_ADD v1, v2, v3`。
+  - [x] 定义基本块（Basic Block）结构，包含入口、出口、前驱（Predecessors）和后继（Successors）指针。
+  - [x] 实现 IR 节点的内存分配与管理机制。
 
 - [ ] **1.2 改造前端解析器 (`lparser.c` / `llexer_compiler.c`)**
   - [ ] 修改现有的 AST 生成逻辑，使其不再直接发射（Emit）64位定长字节码。
