@@ -32,6 +32,35 @@
 
 
 typedef struct {
+  char *data;
+  size_t size;
+  size_t capacity;
+  lua_State *L;
+} Buffer;
+
+static void buf_init(lua_State *L, Buffer *b) {
+  b->L = L;
+  b->size = 0;
+  b->capacity = 1024;
+  b->data = (char *)luaM_malloc_(L, b->capacity, 0);
+}
+
+static void buf_add(Buffer *b, const void *data, size_t size) {
+  if (b->size + size > b->capacity) {
+    size_t new_cap = b->capacity * 2;
+    if (new_cap < b->size + size) new_cap = b->size + size;
+    b->data = (char *)luaM_realloc_(b->L, b->data, b->capacity, new_cap);
+    b->capacity = new_cap;
+  }
+  memcpy(b->data + b->size, data, size);
+  b->size += size;
+}
+
+static void buf_free(Buffer *b) {
+  luaM_free_(b->L, b->data, b->capacity);
+}
+
+typedef struct {
   lua_State *L;
   lua_Writer writer;
   void *data;
@@ -45,6 +74,7 @@ typedef struct {
   int obfuscate_flags;  /* 混淆标志位 */
   unsigned int obfuscate_seed;  /* 混淆随机种子 */
   const char *log_path;  /* 调试日志输出路径 */
+  Buffer *cur_buf;
 } DumpState;
 
 
@@ -59,9 +89,13 @@ typedef struct {
 
 static void dumpBlock (DumpState *D, const void *b, size_t size) {
   if (D->status == 0 && size > 0) {
-    lua_unlock(D->L);
-    D->status = (*D->writer)(D->L, b, size, D->data);
-    lua_lock(D->L);
+    if (D->cur_buf) {
+      buf_add(D->cur_buf, b, size);
+    } else {
+      lua_unlock(D->L);
+      D->status = (*D->writer)(D->L, b, size, D->data);
+      lua_lock(D->L);
+    }
   }
 }
 
@@ -403,8 +437,6 @@ static void dumpCode (DumpState *D, const Proto *f) {
 }
 
 
-static void dumpFunction(DumpState *D, const Proto *f, TString *psource);
-
 static void dumpConstants (DumpState *D, const Proto *f) {
   int i;
   int n = f->sizek;
@@ -432,11 +464,12 @@ static void dumpConstants (DumpState *D, const Proto *f) {
 
 
 static void dumpProtos (DumpState *D, const Proto *f) {
+  /* In segmented mode, this doesn't directly dump functions.
+     Instead, it dumps IDs of children. But we handle this via proto list. */
   int i;
   int n = f->sizep;
   dumpInt(D, n);
-  for (i = 0; i < n; i++)
-    dumpFunction(D, f->p[i], f->source);
+  /* The caller (dumpFunction logic) sets up IDs */
 }
 
 
@@ -522,65 +555,175 @@ static void dumpDebug (DumpState *D, const Proto *f) {
 }
 
 
-static void dumpFunction (DumpState *D, const Proto *f, TString *psource) {
-  /* 生成动态时间戳密钥 */
-  D->timestamp = time(NULL);
-  
-  /* 首先写入时间戳，确保字符串解密时能正确使用 */
-  dumpVar(D, D->timestamp);
-  
-  /* 如果启用了控制流扁平化或VM保护，先对函数进行处理 */
-  Proto *work_proto = (Proto *)f;  /* 转换为非const指针以便修改 */
-  if (D->obfuscate_flags & (OBFUSCATE_CFF | OBFUSCATE_VM_PROTECT)) {
-    luaO_flatten(D->L, work_proto, D->obfuscate_flags, D->obfuscate_seed, D->log_path);
-    /* 更新种子，使每个函数使用不同的种子 */
-    D->obfuscate_seed = D->obfuscate_seed * 1664525 + 1013904223;
+typedef struct {
+  const Proto *p;
+  int id;
+} ProtoInfo;
+
+static void collectProtos(lua_State *L, const Proto *p, ProtoInfo **list, int *count, int *capacity) {
+  if (*count == *capacity) {
+    *capacity *= 2;
+    *list = (ProtoInfo *)luaM_realloc_(L, *list, (*count) * sizeof(ProtoInfo), (*capacity) * sizeof(ProtoInfo));
   }
-  
-  dumpByte(D, work_proto->numparams);
-  dumpByte(D, work_proto->is_vararg);
-  dumpByte(D, work_proto->maxstacksize);
-  dumpInt(D, work_proto->difierline_mode);  /* 新增：写入自定义标志 */
-
-  dumpInt(D, 0x1337C0DE); /* Padding */
-
-  dumpInt(D, work_proto->linedefined);
-  dumpInt(D, work_proto->lastlinedefined);
-
-  if (D->strip || work_proto->source == psource)
-    dumpString(D, NULL);  /* no debug info or same source as its parent */
-  else
-    dumpString(D, work_proto->source);
-
-  dumpInt(D, work_proto->difierline_magicnum);  /* 新增：写入自定义版本号 */
-  dumpVar(D, work_proto->difierline_data);  /* 新增：写入自定义数据字段 */
-  
-  /* VM保护数据序列化 */
-  if (work_proto->difierline_mode & OBFUSCATE_VM_PROTECT && work_proto->vm_code_table != NULL) {
-    VMCodeTable *vt = work_proto->vm_code_table;
-    dumpInt(D, 1);  /* VM代码存在标记 */
-    dumpInt(D, vt->size);  /* VM指令数量 */
-    dumpVar(D, vt->encrypt_key);  /* 加密密钥 */
-    dumpVar(D, vt->seed);  /* 随机种子 */
-    /* 写入VM指令数组 */
-    for (int i = 0; i < vt->size; i++) {
-      dumpVar(D, vt->code[i]);
-    }
-    /* 写入反向映射表 */
-    dumpInt(D, VM_MAP_SIZE);
-    for (int i = 0; i < VM_MAP_SIZE; i++) {
-      /* 偏移+1以处理-1值，避免dumpInt将其作为巨大无符号数写入导致读取时溢出 */
-      dumpInt(D, vt->reverse_map[i] + 1);
-    }
-  } else {
-    dumpInt(D, 0);  /* VM代码不存在 */
+  (*list)[*count].p = p;
+  (*list)[*count].id = *count;
+  (*count)++;
+  for (int i = 0; i < p->sizep; i++) {
+    collectProtos(L, p->p[i], list, count, capacity);
   }
+}
+
+static int findProtoId(ProtoInfo *list, int count, const Proto *p) {
+  for (int i = 0; i < count; i++) {
+    if (list[i].p == p) return list[i].id;
+  }
+  return -1;
+}
+
+static void dumpSegmented(DumpState *D, const Proto *f) {
+  /* Collect all protos */
+  int count = 0;
+  int capacity = 16;
+  ProtoInfo *list = (ProtoInfo *)luaM_malloc_(D->L, capacity * sizeof(ProtoInfo), 0);
+  collectProtos(D->L, f, &list, &count, &capacity);
+
+  /* Initialize buffers */
+  Buffer buf_meta, buf_code, buf_const, buf_upval, buf_protoref, buf_debug;
+  buf_init(D->L, &buf_meta);
+  buf_init(D->L, &buf_code);
+  buf_init(D->L, &buf_const);
+  buf_init(D->L, &buf_upval);
+  buf_init(D->L, &buf_protoref);
+  buf_init(D->L, &buf_debug);
+
+  /* Process obfuscation */
+  for (int i = 0; i < count; i++) {
+    Proto *work_proto = (Proto *)list[i].p;
+    if (D->obfuscate_flags & (OBFUSCATE_CFF | OBFUSCATE_VM_PROTECT)) {
+      luaO_flatten(D->L, work_proto, D->obfuscate_flags, D->obfuscate_seed, D->log_path);
+      D->obfuscate_seed = D->obfuscate_seed * 1664525 + 1013904223;
+    }
+  }
+
+  /* Dump Meta */
+  D->cur_buf = &buf_meta;
+  dumpInt(D, count);
+
+  for (int i = 0; i < count; i++) {
+    Proto *work_proto = (Proto *)list[i].p;
+
+    /* Segment Offsets for this Proto */
+    size_t off_code = buf_code.size;
+    size_t off_const = buf_const.size;
+    size_t off_upval = buf_upval.size;
+    size_t off_protoref = buf_protoref.size;
+    size_t off_debug = buf_debug.size;
+
+    dumpSize(D, off_code);
+    dumpSize(D, off_const);
+    dumpSize(D, off_upval);
+    dumpSize(D, off_protoref);
+    dumpSize(D, off_debug);
+
+    /* Original Meta Info */
+    D->timestamp = time(NULL);
+    dumpVar(D, D->timestamp);
+
+    dumpByte(D, work_proto->numparams);
+    dumpByte(D, work_proto->is_vararg);
+    dumpByte(D, work_proto->maxstacksize);
+    dumpInt(D, work_proto->difierline_mode);
+
+    dumpInt(D, 0x1337C0DE); /* Padding */
+
+    dumpInt(D, work_proto->linedefined);
+    dumpInt(D, work_proto->lastlinedefined);
+
+    TString *psource = i == 0 ? NULL : ((Proto*)list[0].p)->source;
+    if (D->strip || work_proto->source == psource)
+      dumpString(D, NULL);
+    else
+      dumpString(D, work_proto->source);
+
+    dumpInt(D, work_proto->difierline_magicnum);
+    dumpVar(D, work_proto->difierline_data);
+
+    if (work_proto->difierline_mode & OBFUSCATE_VM_PROTECT && work_proto->vm_code_table != NULL) {
+      VMCodeTable *vt = work_proto->vm_code_table;
+      dumpInt(D, 1);
+      dumpInt(D, vt->size);
+      dumpVar(D, vt->encrypt_key);
+      dumpVar(D, vt->seed);
+      for (int j = 0; j < vt->size; j++) {
+        dumpVar(D, vt->code[j]);
+      }
+      dumpInt(D, VM_MAP_SIZE);
+      for (int j = 0; j < VM_MAP_SIZE; j++) {
+        dumpInt(D, vt->reverse_map[j] + 1);
+      }
+    } else {
+      dumpInt(D, 0);
+    }
+
+    /* Dump Code */
+    D->cur_buf = &buf_code;
+    dumpCode(D, work_proto);
+
+    /* Dump Constants */
+    D->cur_buf = &buf_const;
+    dumpConstants(D, work_proto);
+
+    /* Dump Upvalues */
+    D->cur_buf = &buf_upval;
+    dumpUpvalues(D, work_proto);
+
+    /* Dump ProtoRef (Child IDs) */
+    D->cur_buf = &buf_protoref;
+    int np = work_proto->sizep;
+    dumpInt(D, np);
+    for (int j = 0; j < np; j++) {
+      int cid = findProtoId(list, count, work_proto->p[j]);
+      dumpInt(D, cid);
+    }
+
+    /* Dump Debug */
+    D->cur_buf = &buf_debug;
+    dumpDebug(D, work_proto);
+
+    /* Restore Meta buf */
+    D->cur_buf = &buf_meta;
+  }
+
+  /* Header Index Table and writing to stream */
+  D->cur_buf = NULL; // write direct to writer
   
-  dumpCode(D, work_proto);
-  dumpConstants(D, work_proto);
-  dumpUpvalues(D, work_proto);
-  dumpProtos(D, work_proto);
-  dumpDebug(D, work_proto);
+  int seg_count = 6;
+  dumpInt(D, seg_count);
+
+  /* Dump segment lengths to build offsets on read */
+  dumpSize(D, buf_meta.size);
+  dumpSize(D, buf_code.size);
+  dumpSize(D, buf_const.size);
+  dumpSize(D, buf_upval.size);
+  dumpSize(D, buf_protoref.size);
+  dumpSize(D, buf_debug.size);
+
+  /* Dump Segments */
+  dumpBlock(D, buf_meta.data, buf_meta.size);
+  dumpBlock(D, buf_code.data, buf_code.size);
+  dumpBlock(D, buf_const.data, buf_const.size);
+  dumpBlock(D, buf_upval.data, buf_upval.size);
+  dumpBlock(D, buf_protoref.data, buf_protoref.size);
+  dumpBlock(D, buf_debug.data, buf_debug.size);
+
+  /* Free buffers */
+  buf_free(&buf_meta);
+  buf_free(&buf_code);
+  buf_free(&buf_const);
+  buf_free(&buf_upval);
+  buf_free(&buf_protoref);
+  buf_free(&buf_debug);
+  luaM_free_(D->L, list, capacity * sizeof(ProtoInfo));
 }
 
 
@@ -619,9 +762,10 @@ int luaU_dump(lua_State *L, const Proto *f, lua_Writer w, void *data,
   D.obfuscate_flags = 0;  /* 默认不启用混淆 */
   D.obfuscate_seed = 0;
   D.log_path = NULL;  /* 不输出日志 */
+  D.cur_buf = NULL;
   dumpHeader(&D);
   dumpByte(&D, f->sizeupvalues);
-  dumpFunction(&D, f, NULL);
+  dumpSegmented(&D, f);
   return D.status;
 }
 
@@ -663,9 +807,10 @@ int luaU_dump_obfuscated(lua_State *L, const Proto *f, lua_Writer w, void *data,
   D.obfuscate_flags = obfuscate_flags;
   D.obfuscate_seed = (seed != 0) ? seed : (unsigned int)time(NULL);
   D.log_path = log_path;
+  D.cur_buf = NULL;
   dumpHeader(&D);
   dumpByte(&D, f->sizeupvalues);
-  dumpFunction(&D, f, NULL);
+  dumpSegmented(&D, f);
   return D.status;
 }
 

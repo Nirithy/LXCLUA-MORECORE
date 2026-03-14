@@ -61,6 +61,11 @@ typedef struct {
   lu_byte fixed;  /* dump is fixed in memory */
   int is_standard; /* flag to indicate standard Lua bytecode */
   int force_standard; /* flag to force standard Lua bytecode */
+
+  /* Segmented Loading fields */
+  const char *mem_base;
+  size_t mem_offset;
+  size_t mem_size;
 } LoadState;
 
 
@@ -77,9 +82,15 @@ static l_noret error (LoadState *S, const char *why) {
 #define loadVector(S,b,n)	loadBlock(S,b,(n)*sizeof((b)[0]))
 
 static void loadBlock (LoadState *S, void *b, size_t size) {
-  if (luaZ_read(S->Z, b, size) != 0)
-    error(S, "truncated chunk");
-
+  if (S->mem_base) {
+    if (S->mem_offset + size > S->mem_size)
+      error(S, "truncated chunk (memory block)");
+    memcpy(b, S->mem_base + S->mem_offset, size);
+    S->mem_offset += size;
+  } else {
+    if (luaZ_read(S->Z, b, size) != 0)
+      error(S, "truncated chunk");
+  }
 }
 
 
@@ -87,10 +98,16 @@ static void loadBlock (LoadState *S, void *b, size_t size) {
 
 
 static lu_byte loadByte (LoadState *S) {
-  int b = zgetc(S->Z);
-  if (b == EOZ)
-    error(S, "truncated chunk");
-  return cast_byte(b);
+  if (S->mem_base) {
+    if (S->mem_offset >= S->mem_size)
+      error(S, "truncated chunk");
+    return cast_byte(S->mem_base[S->mem_offset++]);
+  } else {
+    int b = zgetc(S->Z);
+    if (b == EOZ)
+      error(S, "truncated chunk");
+    return cast_byte(b);
+  }
 }
 
 
@@ -403,7 +420,7 @@ static void loadCode (LoadState *S, Proto *f) {
 }
 
 
-static void loadFunction(LoadState *S, Proto *f, TString *psource);
+static void loadSegmented(LoadState *S, Proto *main_f);
 
 
 static void loadConstants (LoadState *S, Proto *f) {
@@ -443,17 +460,7 @@ static void loadConstants (LoadState *S, Proto *f) {
 
 
 static void loadProtos (LoadState *S, Proto *f) {
-  int i;
-  int n = loadInt(S);
-  f->p = luaM_newvectorchecked(S->L, n, Proto *);
-  f->sizep = n;
-  for (i = 0; i < n; i++)
-    f->p[i] = NULL;
-  for (i = 0; i < n; i++) {
-    f->p[i] = luaF_newproto(S->L);
-    luaC_objbarrier(S->L, f, f->p[i]);
-    loadFunction(S, f->p[i], f->source);
-  }
+  /* In segmented mode, protos are reconstructed via ProtoRef segment */
 }
 
 
@@ -595,62 +602,124 @@ static void loadDebug (LoadState *S, Proto *f) {
 }
 
 
-static void loadFunction (LoadState *S, Proto *f, TString *psource) {
-  /* 首先读取时间戳，确保字符串解密时能正确使用 */
-  loadVar(S, S->timestamp);
+static void loadSegmented(LoadState *S, Proto *main_f) {
+  /* Read Segment Count */
+  int seg_count = loadInt(S);
+  if (seg_count != 6) error(S, "invalid segment count");
+
+  size_t len_meta = loadSize(S);
+  size_t len_code = loadSize(S);
+  size_t len_const = loadSize(S);
+  size_t len_upval = loadSize(S);
+  size_t len_protoref = loadSize(S);
+  size_t len_debug = loadSize(S);
+
+  size_t total_size = len_meta + len_code + len_const + len_upval + len_protoref + len_debug;
+  char *mem_base = (char *)luaM_malloc_(S->L, total_size, 0);
+
+  /* Load all data into memory at once */
+  loadBlock(S, mem_base, total_size);
+
+  /* Enable segmented memory reading */
+  S->mem_base = mem_base;
+  S->mem_size = total_size;
+
+  /* Base offsets for segments */
+  size_t base_meta = 0;
+  size_t base_code = base_meta + len_meta;
+  size_t base_const = base_code + len_code;
+  size_t base_upval = base_const + len_const;
+  size_t base_protoref = base_upval + len_upval;
+  size_t base_debug = base_protoref + len_protoref;
+
+  /* Parse Meta Section */
+  S->mem_offset = base_meta;
+  int count = loadInt(S);
+  Proto **protos = (Proto **)luaM_malloc_(S->L, count * sizeof(Proto*), 0);
   
-  f->numparams = loadByte(S);
-  f->is_vararg = loadByte(S);
-  f->maxstacksize = loadByte(S);
-  f->difierline_mode = loadInt(S);  /* 新增：读取自定义标志 */
-
-  f->difierline_pad = loadInt(S); /* Padding */
-
-  f->linedefined = loadInt(S);
-  f->lastlinedefined = loadInt(S);
-
-  f->source = loadStringN(S, f);
-  if (f->source == NULL)  /* no source in dump? */
-    f->source = psource;  /* reuse parent's source */
-
-  f->difierline_magicnum = loadInt(S);  /* 新增：读取自定义版本号 */
-  loadVar(S, f->difierline_data);  /* 新增：读取自定义数据字段 */
-  
-  /* VM保护数据反序列化 */
-  int has_vm_code = loadInt(S);
-  if (has_vm_code) {
-    int vm_size = loadInt(S);
-    uint64_t encrypt_key;
-    unsigned int seed;
-    loadVar(S, encrypt_key);
-    loadVar(S, seed);
-    
-    /* 分配VM指令数组 */
-    VMInstruction *vm_code = luaM_newvector(S->L, vm_size, VMInstruction);
-    for (int i = 0; i < vm_size; i++) {
-      loadVar(S, vm_code[i]);
-    }
-    
-    /* 读取反向映射表 */
-    int map_size = loadInt(S);
-    int *reverse_map = luaM_newvector(S->L, map_size, int);
-    for (int i = 0; i < map_size; i++) {
-      reverse_map[i] = loadInt(S) - 1;
-    }
-    
-    /* 注册VM代码到全局表 */
-    luaO_registerVMCode(S->L, f, vm_code, vm_size, encrypt_key, reverse_map, seed);
-    
-    /* 释放临时数组（已被registerVMCode复制） */
-    luaM_freearray(S->L, vm_code, vm_size);
-    luaM_freearray(S->L, reverse_map, map_size);
+  /* Pre-create all Protos */
+  for (int i = 0; i < count; i++) {
+    if (i == 0) protos[0] = main_f;
+    else protos[i] = luaF_newproto(S->L);
   }
-  
-  loadCode(S, f);
-  loadConstants(S, f);
-  loadUpvalues(S, f);
-  loadProtos(S, f);
-  loadDebug(S, f);
+
+  for (int i = 0; i < count; i++) {
+    Proto *f = protos[i];
+    
+    size_t off_code = loadSize(S);
+    size_t off_const = loadSize(S);
+    size_t off_upval = loadSize(S);
+    size_t off_protoref = loadSize(S);
+    size_t off_debug = loadSize(S);
+
+    loadVar(S, S->timestamp);
+    f->numparams = loadByte(S);
+    f->is_vararg = loadByte(S);
+    f->maxstacksize = loadByte(S);
+    f->difierline_mode = loadInt(S);
+    f->difierline_pad = loadInt(S);
+    f->linedefined = loadInt(S);
+    f->lastlinedefined = loadInt(S);
+
+    TString *psource = i == 0 ? NULL : protos[0]->source;
+    f->source = loadStringN(S, f);
+    if (f->source == NULL) f->source = psource;
+
+    f->difierline_magicnum = loadInt(S);
+    loadVar(S, f->difierline_data);
+
+    int has_vm_code = loadInt(S);
+    if (has_vm_code) {
+      int vm_size = loadInt(S);
+      uint64_t encrypt_key;
+      unsigned int seed;
+      loadVar(S, encrypt_key);
+      loadVar(S, seed);
+      VMInstruction *vm_code = luaM_newvector(S->L, vm_size, VMInstruction);
+      for (int j = 0; j < vm_size; j++) loadVar(S, vm_code[j]);
+      int map_size = loadInt(S);
+      int *reverse_map = luaM_newvector(S->L, map_size, int);
+      for (int j = 0; j < map_size; j++) reverse_map[j] = loadInt(S) - 1;
+      luaO_registerVMCode(S->L, f, vm_code, vm_size, encrypt_key, reverse_map, seed);
+      luaM_freearray(S->L, vm_code, vm_size);
+      luaM_freearray(S->L, reverse_map, map_size);
+    }
+
+    size_t save_meta = S->mem_offset;
+
+    /* Load Code */
+    S->mem_offset = base_code + off_code;
+    loadCode(S, f);
+
+    /* Load Constants */
+    S->mem_offset = base_const + off_const;
+    loadConstants(S, f);
+
+    /* Load Upvalues */
+    S->mem_offset = base_upval + off_upval;
+    loadUpvalues(S, f);
+
+    /* Load ProtoRefs (reconstruct hierarchy) */
+    S->mem_offset = base_protoref + off_protoref;
+    int np = loadInt(S);
+    f->p = luaM_newvectorchecked(S->L, np, Proto *);
+    f->sizep = np;
+    for (int j = 0; j < np; j++) {
+      int cid = loadInt(S);
+      f->p[j] = protos[cid];
+      luaC_objbarrier(S->L, f, f->p[j]);
+    }
+
+    /* Load Debug */
+    S->mem_offset = base_debug + off_debug;
+    loadDebug(S, f);
+
+    S->mem_offset = save_meta;
+  }
+
+  S->mem_base = NULL;
+  luaM_free_(S->L, mem_base, total_size);
+  luaM_free_(S->L, protos, count * sizeof(Proto*));
 }
 
 
@@ -1180,6 +1249,9 @@ LClosure *luaU_undump(lua_State *L, ZIO *Z, const char *name, int force_standard
   S.Z = Z;
   S.offset = 1;
   S.force_standard = force_standard;
+  S.mem_base = NULL;
+  S.mem_size = 0;
+  S.mem_offset = 0;
   checkHeader(&S);
 
   lu_byte nupvalues;
@@ -1207,7 +1279,7 @@ LClosure *luaU_undump(lua_State *L, ZIO *Z, const char *name, int force_standard
   if (S.is_standard) {
       loadFunction_Standard(&S, cl->p);
   } else {
-      loadFunction(&S, cl->p, NULL);
+      loadSegmented(&S, cl->p);
   }
 
   lua_assert(cl->nupvalues == cl->p->sizeupvalues);
