@@ -34,9 +34,9 @@
 
 
 /**
- * @brief Mark for precompiled code ('<esc>Lua').
+ * @brief Mark for precompiled code ('<esc>XCF').
  */
-#define LUA_SIGNATURE	"\x1bLua"
+#define LUA_SIGNATURE	"\x1bXCF"
 
 /**
  * @brief Option for multiple returns in 'lua_pcall' and 'lua_call'.
