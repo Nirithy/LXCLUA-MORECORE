@@ -25,6 +25,24 @@ typedef enum {
     IR_STMT_BREAK,
     IR_STMT_EXPR,
 
+    /* Modern Control Flow & Declarations */
+    IR_STMT_SWITCH,
+    IR_STMT_CASE,
+    IR_STMT_DEFAULT,
+    IR_STMT_CONTINUE,
+    IR_STMT_GOTO,
+    IR_STMT_LABEL,
+    IR_STMT_TRY,
+    IR_STMT_CATCH,
+    IR_STMT_FINALLY,
+    IR_STMT_DEFER,
+    IR_STMT_CLASS,
+    IR_STMT_STRUCT,
+    IR_STMT_SUPERSTRUCT,
+    IR_STMT_ENUM,
+    IR_STMT_NAMESPACE,
+    IR_STMT_COMPOUND_ASSIGN,
+
     IR_EXPR_BINOP,
     IR_EXPR_UNOP,
     IR_EXPR_NAME,
@@ -36,7 +54,20 @@ typedef enum {
     IR_EXPR_TABLE,
     IR_EXPR_CALL,
     IR_EXPR_INDEX,
-    IR_EXPR_METHOD
+    IR_EXPR_METHOD,
+
+    /* Modern Expressions */
+    IR_EXPR_ARROW_FUNC,
+    IR_EXPR_LAMBDA,
+    IR_EXPR_ASYNC_FUNC,
+    IR_EXPR_AWAIT,
+    IR_EXPR_TERNARY,
+    IR_EXPR_OPTCHAIN,
+    IR_EXPR_NULLCOAL,
+    IR_EXPR_COMPREHENSION,
+    IR_EXPR_SPREAD,
+    IR_EXPR_DESTRUCT_ASSIGN,
+    IR_EXPR_PIPE
 } IRNodeType;
 
 /* AST Node Structure */
