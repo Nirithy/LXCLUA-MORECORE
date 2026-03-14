@@ -37,31 +37,42 @@ enum OpMode {iABC, ivABC, iABx, iAsBx, iAx, isJ};
 
 /*
 ** size and position of opcode arguments.
+** Custom Scrambled 64-bit Layout for complete obfuscation
 */
-#define SIZE_C		16
-#define SIZE_vC		20
-#define SIZE_B		16
+#define SIZE_OP		10
+#define SIZE_A		15
+#define SIZE_C		15
+#define SIZE_B		15
 #define SIZE_vB		14
-#define SIZE_Bx		(SIZE_C + SIZE_B + 1)
-#define SIZE_A		16
-#define SIZE_Ax		(SIZE_Bx + SIZE_A)
-#define SIZE_sJ		(SIZE_Bx + SIZE_A)
+#define SIZE_vC		16
 
-#define SIZE_OP		9
+#define SIZE_Bx		(SIZE_C + SIZE_B + 1)  /* 31 */
+#define SIZE_Ax		(SIZE_Bx + SIZE_A)     /* 46 */
+#define SIZE_sJ		(SIZE_Bx + SIZE_A)     /* 46 */
 
-#define POS_OP		0
+/*
+** New bitfield positions.
+** We place OP at the top to allow huge contiguous spaces for Ax, sJ, Bx.
+** Total used bits for iABC: OP(10) + A(15) + C(15) + B(15) + k(1) = 56 bits.
+** Layout (from LSB to MSB):
+**   0-14:  A   (15 bits)
+**   15-29: B   (15 bits)
+**   30:    k   (1 bit)
+**   31-45: C   (15 bits)
+**   ... (gap)
+**   54-63: OP  (10 bits)
+*/
+#define POS_A		0
+#define POS_B		(POS_A + SIZE_A)
+#define POS_k		(POS_B + SIZE_B)
+#define POS_C		(POS_k + 1)
+#define POS_OP		54
 
-#define POS_A		(POS_OP + SIZE_OP)
-#define POS_k		(POS_A + SIZE_A)
-#define POS_B		(POS_k + 1)
-#define POS_vB		(POS_k + 1)
-#define POS_C		(POS_B + SIZE_B)
-#define POS_vC		(POS_vB + SIZE_vB)
+#define POS_vB		POS_B
+#define POS_vC		POS_C
 
-#define POS_Bx		POS_k
-
+#define POS_Bx		POS_B
 #define POS_Ax		POS_A
-
 #define POS_sJ		POS_A
 
 
@@ -79,7 +90,7 @@ enum OpMode {iABC, ivABC, iABx, iAsBx, iAx, isJ};
 
 
 #if L_INTHASBITS(SIZE_Bx)
-#define MAXARG_Bx	((1<<SIZE_Bx)-1)
+#define MAXARG_Bx	((1LL<<SIZE_Bx)-1)
 #else
 #define MAXARG_Bx	MAX_INT
 #endif
@@ -88,13 +99,13 @@ enum OpMode {iABC, ivABC, iABx, iAsBx, iAx, isJ};
 
 
 #if L_INTHASBITS(SIZE_Ax)
-#define MAXARG_Ax	((1<<SIZE_Ax)-1)
+#define MAXARG_Ax	((1LL<<SIZE_Ax)-1)
 #else
 #define MAXARG_Ax	MAX_INT
 #endif
 
 #if L_INTHASBITS(SIZE_sJ)
-#define MAXARG_sJ	((1 << SIZE_sJ) - 1)
+#define MAXARG_sJ	((1LL << SIZE_sJ) - 1)
 #else
 #define MAXARG_sJ	MAX_INT
 #endif

@@ -13,7 +13,7 @@
 
 
 /* data to catch conversion errors */
-#define LUAC_DATA	"\x19\x93\r\n\x1a\n"
+#define LUAC_DATA	"\x2A\xCF\r\n\x1F\n"
 
 #define LUAC_INT	0x5678
 #define LUAC_NUM	cast_num(370.5)
@@ -23,7 +23,7 @@
 */
 #define LUAC_VERSION  (((LUA_VERSION_NUM / 100) * 16) + LUA_VERSION_NUM % 100)
 
-#define LUAC_FORMAT	0	/* this is the official format */
+#define LUAC_FORMAT	99	/* custom unique format identifier */
 
 /* load one chunk; from lundump.c */
 LUAI_FUNC LClosure* luaU_undump (lua_State* L, ZIO* Z, const char* name, int force_standard);
