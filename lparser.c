@@ -3355,20 +3355,12 @@ static void suffixedexp (LexState *ls, expdesc *v) {
        primaryexp { '.' NAME | '?.' NAME | '[' exp ']' | ':' NAME funcargs | funcargs | '|>' suffixedexp } */
   FuncState *fs = ls->fs;
   int line = ls->linenumber;
+  int opt_jumps = NO_JUMP;
+
   primaryexp(ls, v);
   for (;;) {
     switch (ls->t.token) {
       case TK_OPTCHAIN: {  /* '?.' 可选链字段访问 */
-        /*
-        ** 可选链运算符: a?.b
-        ** 功能描述：如果 a 为 nil，则结果为 nil；否则结果为 a.b
-        ** 实现方式：使用 OP_TESTNIL 指令进行 nil 检测和短路跳转
-        ** 生成代码序列：
-        **   TESTNIL R R 0 k=1 ; 如果 R 不是 nil，跳过下一条 JMP
-        **   JMP end           ; 是 nil，跳过字段访问
-        **   GETFIELD R R "b"  ; 不是 nil，获取字段
-        **   end:
-        */
         expdesc key;
         int reg;
         int jmp_skip;
@@ -3383,9 +3375,23 @@ static void suffixedexp (LexState *ls, expdesc *v) {
         /* 生成跳转指令：是 nil 时执行此JMP跳过后续字段访问 */
         jmp_skip = luaK_jump(fs);
         
+        /* 累积短路跳转，在最后才修复 */
+        luaK_concat(fs, &opt_jumps, jmp_skip);
+
         /* 不是 nil，进行正常字段访问 */
         luaX_next(ls);  /* 跳过 '?.' */
         
+        if (ls->t.token == '(') {
+            /* 可选链调用: obj?.() */
+            v->k = VNONRELOC;
+            v->u.info = reg;
+            v->t = NO_JUMP;
+            v->f = NO_JUMP;
+            luaK_exp2nextreg(fs, v);
+            funcargs(ls, v, line);
+            break;
+        }
+
         /* 允许关键字作为字段名 */
         if (ls->t.token == TK_NAME) {
           codename(ls, &key);
@@ -3449,9 +3455,6 @@ static void suffixedexp (LexState *ls, expdesc *v) {
         
         /* 手动生成 GETFIELD 指令，结果存入 reg（覆盖原表的位置） */
         luaK_codeABC(fs, OP_GETFIELD, reg, reg, idx);
-        
-        /* 修复跳转目标：nil 时跳转到这里 */
-        luaK_patchtohere(fs, jmp_skip);
         
         /* 重置表达式状态为 VNONRELOC，值在 reg 中，清除跳转列表 */
         v->k = VNONRELOC;
@@ -3681,8 +3684,13 @@ static void suffixedexp (LexState *ls, expdesc *v) {
         break;
       }
 
-      default: return;
+      default: goto end_loop;
     }
+  }
+
+end_loop:
+  if (opt_jumps != NO_JUMP) {
+    luaK_patchtohere(fs, opt_jumps);
   }
 }
 
@@ -4058,20 +4066,36 @@ static void simpleexp (LexState *ls, expdesc *v) {
               
               /*
               ** 生成代码字符串:
-              ** return tostring(expr)
-              ** 使用 load() 编译后直接执行，不包装成函数
+              ** function(var1, var2) return tostring(expr) end
+              ** 使用 load() 编译后得到一个函数（它返回闭包），然后再执行，并传递变量。
               */
-              size_t code_prefix_len = 18;  /* "return tostring(" */
-              size_t code_suffix_len = 1;   /* ")" */
+              size_t code_prefix_len = 10;  /* "return function(" */
+
+              /* calculate total length */
+              size_t total_len = 16; /* "return function(" */
+              for (int k = 0; k < nused; k++) {
+                  total_len += tsslen(used_vars[k]);
+                  if (k < nused - 1) total_len += 2; /* ", " */
+              }
+              total_len += 19; /* ") return tostring(" */
+              total_len += expr_len;
+              total_len += 5; /* ") end" */
               
-              size_t total_len = code_prefix_len + expr_len + code_suffix_len;
               char *code_str = luaM_newblock(ls->L, total_len + 1);
               
               /* 构建代码字符串 */
               size_t pos = 0;
-              memcpy(code_str + pos, "return tostring(", 16); pos += 16;
+              memcpy(code_str + pos, "return function(", 16); pos += 16;
+              for (int k = 0; k < nused; k++) {
+                  size_t l = tsslen(used_vars[k]);
+                  memcpy(code_str + pos, getstr(used_vars[k]), l); pos += l;
+                  if (k < nused - 1) {
+                      memcpy(code_str + pos, ", ", 2); pos += 2;
+                  }
+              }
+              memcpy(code_str + pos, ") return tostring(", 18); pos += 18;
               memcpy(code_str + pos, str + expr_start, expr_len); pos += expr_len;
-              memcpy(code_str + pos, ")", 1); pos += 1;
+              memcpy(code_str + pos, ") end", 5); pos += 5;
               code_str[pos] = '\0';
               
               /* 调用 load() 编译代码 */
@@ -4096,17 +4120,31 @@ static void simpleexp (LexState *ls, expdesc *v) {
               codestring(&code_exp, code_ts);
               luaK_exp2nextreg(fs, &code_exp);
               
-              /* 调用 load(code_str) 得到函数，只传一个参数让 load 使用默认环境 */
+              /* 调用 load(code_str) 得到 chunk function */
               luaK_codeABC(fs, OP_CALL, load_reg, 2, 2);
               fs->freereg = load_reg + 1;
               
-              /* 调用返回的函数（无参数）*/
-              luaK_codeABC(fs, OP_CALL, load_reg, 1, 2);
-              fs->freereg = load_reg + 1;
+              /* 调用 chunk function 得到 closure */
+              int chunk_reg = fs->freereg - 1;
+              luaK_codeABC(fs, OP_CALL, chunk_reg, 1, 2);
+              fs->freereg = chunk_reg + 1;
+
+              /* 调用 closure 传递参数 */
+              int closure_reg = fs->freereg - 1;
+              for (int k = 0; k < nused; k++) {
+                  expdesc var_exp;
+                  int vk = searchvar(fs, used_vars[k], &var_exp);
+                  if (vk < 0) {
+                     singlevaraux(fs, used_vars[k], &var_exp, 1);
+                  }
+                  luaK_exp2nextreg(fs, &var_exp);
+              }
+              luaK_codeABC(fs, OP_CALL, closure_reg, nused + 1, 2);
+              fs->freereg = closure_reg + 1;
               
               /* 移动结果到正确位置 */
-              if (load_reg != base_reg + part_count) {
-                luaK_codeABC(fs, OP_MOVE, base_reg + part_count, load_reg, 0);
+              if (closure_reg != base_reg + part_count) {
+                luaK_codeABC(fs, OP_MOVE, base_reg + part_count, closure_reg, 0);
                 fs->freereg = base_reg + part_count + 1;
               }
               
